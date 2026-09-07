@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import type { Db, Prisma } from "@crm/db";
-import type { GranolaNote } from "@crm/validation/granola";
+import type { GranolaNote, GranolaNoteSummary } from "@crm/validation/granola";
 import type { ActivityTarget } from "../src/crm/activity-stamp.service";
-import type { GranolaApiClient } from "../src/granola/granola-api.client";
+import {
+	type GranolaApiClient,
+	GranolaRateLimitedError,
+} from "../src/granola/granola-api.client";
 import { GranolaSyncService } from "../src/granola/granola-sync.service";
 
 const note = (overrides: Partial<GranolaNote> = {}): GranolaNote => ({
@@ -19,6 +22,17 @@ const note = (overrides: Partial<GranolaNote> = {}): GranolaNote => ({
 	...overrides,
 });
 
+const summary = (overrides: Partial<GranolaNote> = {}): GranolaNoteSummary => {
+	const full = note(overrides);
+	return {
+		id: full.id,
+		title: full.title,
+		owner: full.owner,
+		created_at: full.created_at,
+		updated_at: full.updated_at,
+	};
+};
+
 function build(options: {
 	key?: string;
 	syncedAt?: Date | null;
@@ -28,10 +42,12 @@ function build(options: {
 	match?: { companyId: string | null; contactId: string | null };
 	deals?: { id: string }[];
 	pages?: {
-		notes: GranolaNote[];
+		notes: GranolaNoteSummary[];
 		hasMore: boolean;
 		cursor?: string | null;
 	}[];
+	details?: Record<string, GranolaNote | null>;
+	detailRateLimited?: boolean;
 }) {
 	const updates: { id: string; data: Prisma.ActivityUpdateInput }[] = [];
 	const creates: Prisma.ActivityCreateInput[] = [];
@@ -39,7 +55,7 @@ function build(options: {
 	const saved: Date[] = [];
 	const requests: { updatedAfter: string; cursor?: string }[] = [];
 	const pages = options.pages ?? [
-		{ notes: [note()], hasMore: false, cursor: null },
+		{ notes: [summary()], hasMore: false, cursor: null },
 	];
 	let pageIndex = 0;
 
@@ -92,6 +108,14 @@ function build(options: {
 			pageIndex += 1;
 			return { outcome: "ok" as const, data: page };
 		},
+		getNote: async (id: string) => {
+			if (options.detailRateLimited) {
+				throw new GranolaRateLimitedError(60_000);
+			}
+			return options.details?.[id] === undefined
+				? note({ id })
+				: options.details[id];
+		},
 	} as unknown as GranolaApiClient;
 	const match = {
 		internalIdentity: async () => ({
@@ -136,10 +160,22 @@ describe("GranolaSyncService", () => {
 		const { service, updates, creates } = build({
 			key: "grn_test",
 			calendarActivity: { id: "activity-1", meta: { synced: true } },
+			details: {
+				"note-1": note({
+					calendar_event: {
+						event_title: "Customer call",
+						invitees: [],
+						organiser: "rep@example.com",
+						calendar_event_id: "google-event-1",
+						scheduled_start_time: null,
+						scheduled_end_time: null,
+					},
+				}),
+			},
 			pages: [
 				{
 					notes: [
-						note({
+						summary({
 							calendar_event: {
 								event_title: "Customer call",
 								invitees: [],
@@ -169,10 +205,22 @@ describe("GranolaSyncService", () => {
 	it("creates a matched meeting and stamps its deal", async () => {
 		const { service, creates, stamps } = build({
 			key: "grn_test",
+			details: {
+				"note-1": note({
+					calendar_event: {
+						event_title: "Calendar title",
+						invitees: [{ email: "buyer@example.com" }],
+						organiser: "rep@example.com",
+						calendar_event_id: null,
+						scheduled_start_time: "2026-09-01T11:00:00.000Z",
+						scheduled_end_time: "2026-09-01T12:00:00.000Z",
+					},
+				}),
+			},
 			pages: [
 				{
 					notes: [
-						note({
+						summary({
 							calendar_event: {
 								event_title: "Calendar title",
 								invitees: [{ email: "buyer@example.com" }],
@@ -228,13 +276,13 @@ describe("GranolaSyncService", () => {
 			importedActivity: { id: "activity-3", meta: {} },
 			pages: [
 				{
-					notes: [note({ id: "note-1" })],
+					notes: [summary({ id: "note-1" })],
 					hasMore: true,
 					cursor: "cursor-2",
 				},
 				{
 					notes: [
-						note({
+						summary({
 							id: "note-2",
 							updated_at: "2026-09-02T10:05:00.000Z",
 						}),
@@ -258,7 +306,7 @@ describe("GranolaSyncService", () => {
 			key: "grn_test",
 			importedActivity: { id: "activity-4", meta: {} },
 			pages: Array.from({ length: 50 }, (_, index) => ({
-				notes: [note({ id: `note-${index}` })],
+				notes: [summary({ id: `note-${index}` })],
 				hasMore: true,
 				cursor: `cursor-${index + 1}`,
 			})),
@@ -268,6 +316,38 @@ describe("GranolaSyncService", () => {
 		expect(result.complete).toBe(false);
 		expect(result.rateLimited).toBe(false);
 		expect(result.attempted).toBe(50);
+		expect(saved).toHaveLength(0);
+	});
+
+	it("ignores a note whose detail is not available", async () => {
+		const { service, updates, creates, saved } = build({
+			key: "grn_test",
+			details: { "missing-note": null },
+			pages: [
+				{
+					notes: [summary({ id: "missing-note" })],
+					hasMore: false,
+					cursor: null,
+				},
+			],
+		});
+		const result = await service.run();
+
+		expect(result.ignored).toBe(1);
+		expect(updates).toHaveLength(0);
+		expect(creates).toHaveLength(0);
+		expect(saved).toHaveLength(1);
+	});
+
+	it("does not save the watermark when a detail request is rate-limited", async () => {
+		const { service, saved } = build({
+			key: "grn_test",
+			detailRateLimited: true,
+		});
+		const result = await service.run();
+
+		expect(result.rateLimited).toBe(true);
+		expect(result.complete).toBe(false);
 		expect(saved).toHaveLength(0);
 	});
 });

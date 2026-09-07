@@ -29,8 +29,16 @@ export const granolaNote = z.object({
 	summary_markdown: z.string().nullable().optional(),
 });
 
+export const granolaNoteSummary = z.object({
+	id: z.string(),
+	title: z.string().nullable(),
+	owner: granolaUser.nullable().optional(),
+	created_at: z.string().datetime({ offset: true }),
+	updated_at: z.string().datetime({ offset: true }),
+});
+
 export const granolaNotesPage = z.object({
-	notes: z.array(granolaNote),
+	notes: z.array(granolaNoteSummary),
 	hasMore: z.boolean(),
 	cursor: z.string().nullable().optional(),
 });
@@ -38,8 +46,13 @@ export const granolaNotesPage = z.object({
 export type GranolaUser = z.infer<typeof granolaUser>;
 export type GranolaCalendarEvent = z.infer<typeof granolaCalendarEvent>;
 export type GranolaNote = z.infer<typeof granolaNote>;
+export type GranolaNoteSummary = z.infer<typeof granolaNoteSummary>;
 export type GranolaNotesPage = z.infer<typeof granolaNotesPage>;
 
 export function parseGranolaNotesPage(value: unknown): GranolaNotesPage {
 	return granolaNotesPage.parse(value);
+}
+
+export function parseGranolaNote(value: unknown): GranolaNote {
+	return granolaNote.parse(value);
 }
