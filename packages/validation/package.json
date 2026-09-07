@@ -16,6 +16,7 @@
 		"./field-backfill": "./src/field-backfill.ts",
 		"./field-templates": "./src/field-templates.ts",
 		"./granola": "./src/granola.ts",
+		"./granola-sync-resume": "./src/granola-sync-resume.ts",
 		"./saved-view": "./src/saved-view.ts"
 	},
 	"scripts": {
