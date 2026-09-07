@@ -2,8 +2,9 @@ import {
 	type Db,
 	GoogleSyncStatus,
 	type MailboxSyncModel as MailboxSync,
-	type Prisma,
+	Prisma,
 } from "@crm/db";
+import type { CalendarSyncResume } from "@crm/validation/calendar-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import type { SyncSource } from "./mailbox.constants";
@@ -91,16 +92,23 @@ export class SyncStateService {
 		update: {
 			cursor?: string | null;
 			status: GoogleSyncStatus;
+			resume?: CalendarSyncResume | null;
 		},
 	): Promise<void> {
+		const data: Prisma.MailboxSyncUpdateInput = {
+			cursor: update.cursor,
+			status: update.status,
+			lastSyncedAt: new Date(),
+			lastError: null,
+			retryAfter: null,
+		};
+		if (update.resume !== undefined) {
+			data.resume = update.resume ?? Prisma.JsonNull;
+		}
+
 		await this.db.mailboxSync.update({
 			where: { id },
-			data: {
-				...update,
-				lastSyncedAt: new Date(),
-				lastError: null,
-				retryAfter: null,
-			},
+			data,
 		});
 	}
 
@@ -115,6 +123,7 @@ export class SyncStateService {
 			where: { id },
 			data: {
 				cursor: null,
+				resume: Prisma.JsonNull,
 				status: GoogleSyncStatus.IDLE,
 				lastError: null,
 				retryAfter: null,
