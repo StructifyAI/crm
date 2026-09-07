@@ -13,15 +13,13 @@ import {
 	type MatchContext,
 } from "../mailbox/mailbox-match.service";
 import type { Participant } from "../mailbox/participants";
-import {
-	GranolaApiClient,
-	GranolaUnauthorizedError,
-} from "./granola-api.client";
+import { GranolaApiClient } from "./granola-api.client";
 import { GRANOLA } from "./granola-config";
 
 export type GranolaSyncResult = {
 	skipped?: boolean;
 	reason?: string;
+	complete: boolean;
 	attempted: number;
 	created: number;
 	updated: number;
@@ -75,6 +73,7 @@ export class GranolaSyncService {
 			suppressedEmails,
 		};
 		const counters: Counters = {
+			complete: false,
 			attempted: 0,
 			created: 0,
 			updated: 0,
@@ -90,40 +89,36 @@ export class GranolaSyncService {
 			new Date(Date.now() - GRANOLA.initialLookbackDays * 24 * 60 * 60 * 1000)
 		).toISOString();
 
-		try {
-			for (; page < GRANOLA.maxPagesPerTick; page += 1) {
-				const result = await this.api.listNotes({
-					updatedAfter,
-					cursor,
-				});
+		for (; page < GRANOLA.maxPagesPerTick; page += 1) {
+			const result = await this.api.listNotes({
+				updatedAfter,
+				cursor,
+			});
 
-				if (result.outcome === "rate-limited") {
-					counters.rateLimited = true;
-					break;
-				}
-
-				for (const note of result.data.notes) {
-					counters.attempted += 1;
-					maxUpdatedAt = maxDate(maxUpdatedAt, new Date(note.updated_at));
-					const outcome = await this.apply(note, context);
-					if (outcome === "created") counters.created += 1;
-					if (outcome === "updated") counters.updated += 1;
-					if (outcome === "unmatched") counters.unmatched += 1;
-					if (outcome === "unmatched-owner") counters.unmatchedOwner += 1;
-				}
-
-				if (!result.data.hasMore || !result.data.cursor) break;
-				cursor = result.data.cursor;
+			if (result.outcome === "rate-limited") {
+				counters.rateLimited = true;
+				break;
 			}
-		} catch (error) {
-			if (error instanceof GranolaUnauthorizedError) throw error;
-			throw error;
+
+			for (const note of result.data.notes) {
+				counters.attempted += 1;
+				maxUpdatedAt = maxDate(maxUpdatedAt, new Date(note.updated_at));
+				const outcome = await this.apply(note, context);
+				if (outcome === "created") counters.created += 1;
+				if (outcome === "updated") counters.updated += 1;
+				if (outcome === "unmatched") counters.unmatched += 1;
+				if (outcome === "unmatched-owner") counters.unmatchedOwner += 1;
+			}
+
+			if (!result.data.hasMore || !result.data.cursor) {
+				counters.complete = true;
+				break;
+			}
+			cursor = result.data.cursor;
 		}
 
-		if (!counters.rateLimited) {
+		if (counters.complete) {
 			await writeGranolaSyncedAt(this.db, maxUpdatedAt ?? new Date());
-		} else if (maxUpdatedAt) {
-			await writeGranolaSyncedAt(this.db, maxUpdatedAt);
 		}
 
 		const result = {
@@ -284,6 +279,7 @@ export class GranolaSyncService {
 
 	private result(startedAt: number): GranolaSyncResult {
 		return {
+			complete: false,
 			attempted: 0,
 			created: 0,
 			updated: 0,
