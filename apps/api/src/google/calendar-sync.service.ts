@@ -5,7 +5,6 @@ import {
 	type MailboxSyncModel as MailboxSync,
 	RecordSource,
 } from "@crm/db";
-import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import {
 	type CalendarSyncResume,
 	parseCalendarSyncResume,
@@ -13,6 +12,7 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
+import { singleOpenDealId } from "../crm/single-open-deal";
 import { InjectDatabase } from "../database/database.constants";
 import {
 	MailboxMatchService,
@@ -254,9 +254,7 @@ export class CalendarSyncService {
 			return "ignored";
 		}
 
-		const dealId = match.companyId
-			? await this.singleOpenDealId(match.companyId)
-			: null;
+		const dealId = await singleOpenDealId(this.db, match.companyId);
 		const organizer = event.organizer?.email?.toLowerCase() ?? null;
 
 		const record = await this.db.calendarEvent.upsert({
@@ -428,20 +426,6 @@ export class CalendarSyncService {
 			},
 			activity.createdAt,
 		);
-	}
-
-	private async singleOpenDealId(companyId: string): Promise<string | null> {
-		const deals = await this.db.deal.findMany({
-			where: {
-				companyId,
-				archivedAt: null,
-				stage: { in: [...OPEN_DEAL_STAGES] },
-			},
-			select: { id: true },
-			take: 2,
-		});
-
-		return deals.length === 1 ? (deals[0]?.id ?? null) : null;
 	}
 
 	private participantsOf(event: GoogleEvent): Participant[] {
