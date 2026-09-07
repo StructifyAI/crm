@@ -197,6 +197,7 @@ Two rules follow for the serverless build:
   or create `MEETING` activities from attendee and invitee matches. It matches
   existing CRM records without creating them and links only the company's single
   open deal. The sync stores the Granola URL and note id in activity metadata.
+  Each tick resumes within a 40-second budget until the listing completes.
 - **Microsoft has no token-revocation endpoint.** `revoke` clears the columns and the
   UI says the consent itself is removed in the user's Microsoft account. Google's still
   posts to `oauth2.googleapis.com/revoke` and refuses to clear if that fails.

@@ -1,7 +1,9 @@
 import { ActivityType, type Db, type Prisma, RecordSource } from "@crm/db";
-import { readGranolaSyncedAt, writeGranolaSyncedAt } from "@crm/db/settings";
+import { readGranolaSyncState, writeGranolaSyncState } from "@crm/db/settings";
 import { activityMeta } from "@crm/validation/activity-meta";
 import type { GranolaNote } from "@crm/validation/granola";
+import type { GranolaSyncResume } from "@crm/validation/granola-sync-resume";
+import { parseGranolaSyncResume } from "@crm/validation/granola-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { EnvironmentVariables } from "../config/env.validation";
@@ -23,6 +25,8 @@ export type GranolaSyncResult = {
 	skipped?: boolean;
 	reason?: string;
 	complete: boolean;
+	resumed: boolean;
+	budgetExhausted: boolean;
 	attempted: number;
 	created: number;
 	updated: number;
@@ -63,13 +67,14 @@ export class GranolaSyncService {
 			};
 		}
 
-		const [internal, suppressedDomains, suppressedEmails, syncedAt] =
+		const [internal, suppressedDomains, suppressedEmails, state] =
 			await Promise.all([
 				this.match.internalIdentity(),
 				this.match.suppressedDomains(),
 				this.match.suppressedEmails(),
-				readGranolaSyncedAt(this.db),
+				readGranolaSyncState(this.db),
 			]);
+		const resume = parseGranolaSyncResume(state.granolaSyncResume);
 		const context: MatchContext = {
 			ourAddresses: internal.addresses,
 			ourDomains: internal.domains,
@@ -78,6 +83,8 @@ export class GranolaSyncService {
 		};
 		const counters: Counters = {
 			complete: false,
+			resumed: resume !== null,
+			budgetExhausted: false,
 			attempted: 0,
 			created: 0,
 			updated: 0,
@@ -86,15 +93,25 @@ export class GranolaSyncService {
 			unmatchedOwner: 0,
 			rateLimited: false,
 		};
-		let cursor: string | undefined;
-		let maxUpdatedAt: Date | null = null;
-		let page = 0;
-		const updatedAfter = (
-			syncedAt ??
-			new Date(Date.now() - GRANOLA.initialLookbackDays * 24 * 60 * 60 * 1000)
-		).toISOString();
+		let cursor: string | undefined = resume?.cursor ?? undefined;
+		let maxUpdatedAt: Date | null = resume?.maxUpdatedAt
+			? new Date(resume.maxUpdatedAt)
+			: null;
+		const updatedAfter =
+			resume?.updatedAfter ??
+			(
+				state.granolaSyncedAt ??
+				new Date(Date.now() - GRANOLA.initialLookbackDays * 24 * 60 * 60 * 1000)
+			).toISOString();
 
-		pages: for (; page < GRANOLA.maxPagesPerTick; page += 1) {
+		pages: for (;;) {
+			if (this.budgetExpired(startedAt)) {
+				counters.budgetExhausted = true;
+				await this.saveResume(updatedAfter, cursor ?? null, maxUpdatedAt);
+				break;
+			}
+
+			const pageCursor = cursor ?? null;
 			const result = await this.api.listNotes({
 				updatedAfter,
 				cursor,
@@ -102,18 +119,25 @@ export class GranolaSyncService {
 
 			if (result.outcome === "rate-limited") {
 				counters.rateLimited = true;
+				await this.saveResume(updatedAfter, pageCursor, maxUpdatedAt);
 				break;
 			}
 
 			for (const summary of result.data.notes) {
 				counters.attempted += 1;
 				maxUpdatedAt = maxDate(maxUpdatedAt, new Date(summary.updated_at));
+				if (this.budgetExpired(startedAt)) {
+					counters.budgetExhausted = true;
+					await this.saveResume(updatedAfter, pageCursor, maxUpdatedAt);
+					break pages;
+				}
 				let note: GranolaNote | null;
 				try {
 					note = await this.api.getNote(summary.id);
 				} catch (error) {
 					if (error instanceof GranolaRateLimitedError) {
 						counters.rateLimited = true;
+						await this.saveResume(updatedAfter, pageCursor, maxUpdatedAt);
 						break pages;
 					}
 					throw error;
@@ -137,7 +161,10 @@ export class GranolaSyncService {
 		}
 
 		if (counters.complete) {
-			await writeGranolaSyncedAt(this.db, maxUpdatedAt ?? new Date());
+			await writeGranolaSyncState(this.db, {
+				granolaSyncedAt: maxUpdatedAt ?? new Date(),
+				granolaSyncResume: null,
+			});
 		}
 
 		const result = {
@@ -146,6 +173,25 @@ export class GranolaSyncService {
 		};
 		this.logger.log({ message: "Granola sync complete", ...result });
 		return result;
+	}
+
+	private budgetExpired(startedAt: number): boolean {
+		return Date.now() - startedAt >= GRANOLA.tickBudgetMs;
+	}
+
+	private async saveResume(
+		updatedAfter: string,
+		cursor: string | null,
+		maxUpdatedAt: Date | null,
+	): Promise<void> {
+		const resume: GranolaSyncResume = {
+			updatedAfter,
+			cursor,
+			maxUpdatedAt: maxUpdatedAt?.toISOString() ?? null,
+		};
+		await writeGranolaSyncState(this.db, {
+			granolaSyncResume: resume,
+		});
 	}
 
 	private async apply(
@@ -299,6 +345,8 @@ export class GranolaSyncService {
 	private result(startedAt: number): GranolaSyncResult {
 		return {
 			complete: false,
+			resumed: false,
+			budgetExhausted: false,
 			attempted: 0,
 			created: 0,
 			updated: 0,

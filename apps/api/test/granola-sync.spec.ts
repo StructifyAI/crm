@@ -6,6 +6,7 @@ import {
 	type GranolaApiClient,
 	GranolaRateLimitedError,
 } from "../src/granola/granola-api.client";
+import { GRANOLA } from "../src/granola/granola-config";
 import { GranolaSyncService } from "../src/granola/granola-sync.service";
 
 const note = (overrides: Partial<GranolaNote> = {}): GranolaNote => ({
@@ -48,22 +49,37 @@ function build(options: {
 	}[];
 	details?: Record<string, GranolaNote | null>;
 	detailRateLimited?: boolean;
+	listRateLimited?: boolean;
+	resume?: unknown;
+	exhaustBudgetAfterFirstDetail?: boolean;
 }) {
 	const updates: { id: string; data: Prisma.ActivityUpdateInput }[] = [];
 	const creates: Prisma.ActivityCreateInput[] = [];
 	const stamps: ActivityTarget[] = [];
 	const saved: Date[] = [];
+	const resumes: unknown[] = [];
+	const stateUpdates: unknown[] = [];
 	const requests: { updatedAfter: string; cursor?: string }[] = [];
 	const pages = options.pages ?? [
 		{ notes: [summary()], hasMore: false, cursor: null },
 	];
 	let pageIndex = 0;
+	let detailsFetched = 0;
 
 	const db = {
 		appSetting: {
-			findUnique: async () => ({ granolaSyncedAt: options.syncedAt ?? null }),
-			upsert: async ({ update }: { update: { granolaSyncedAt: Date } }) => {
-				saved.push(update.granolaSyncedAt);
+			findUnique: async () => ({
+				granolaSyncedAt: options.syncedAt ?? null,
+				granolaSyncResume: options.resume ?? null,
+			}),
+			upsert: async ({ update }: { update: Record<string, unknown> }) => {
+				stateUpdates.push(update);
+				if (update.granolaSyncedAt instanceof Date) {
+					saved.push(update.granolaSyncedAt);
+				}
+				if ("granolaSyncResume" in update) {
+					resumes.push(update.granolaSyncResume);
+				}
 			},
 		},
 		user: {
@@ -100,6 +116,12 @@ function build(options: {
 	const api = {
 		listNotes: async (request: { updatedAfter: string; cursor?: string }) => {
 			requests.push(request);
+			if (options.listRateLimited) {
+				return {
+					outcome: "rate-limited" as const,
+					retryAfterMs: 60_000,
+				};
+			}
 			const page = pages[pageIndex] ?? {
 				notes: [],
 				hasMore: false,
@@ -111,6 +133,10 @@ function build(options: {
 		getNote: async (id: string) => {
 			if (options.detailRateLimited) {
 				throw new GranolaRateLimitedError(60_000);
+			}
+			detailsFetched += 1;
+			if (options.exhaustBudgetAfterFirstDetail && detailsFetched === 1) {
+				Date.now = () => GRANOLA.tickBudgetMs;
 			}
 			return options.details?.[id] === undefined
 				? note({ id })
@@ -143,7 +169,17 @@ function build(options: {
 		config as never,
 	);
 
-	return { service, updates, creates, stamps, saved, pages, requests };
+	return {
+		service,
+		updates,
+		creates,
+		stamps,
+		saved,
+		resumes,
+		stateUpdates,
+		pages,
+		requests,
+	};
 }
 
 describe("GranolaSyncService", () => {
@@ -301,22 +337,91 @@ describe("GranolaSyncService", () => {
 		expect(requests[1]?.cursor).toBe("cursor-2");
 	});
 
-	it("does not save the watermark when the page budget is exhausted", async () => {
-		const { service, saved } = build({
+	it("resumes when the time budget is exhausted mid-listing", async () => {
+		const { service, saved, resumes } = build({
 			key: "grn_test",
+			resume: {
+				updatedAfter: "2026-08-01T10:00:00.000Z",
+				cursor: "page-1",
+				maxUpdatedAt: null,
+			},
+			pages: [
+				{
+					notes: [summary({ id: "note-1" }), summary({ id: "note-2" })],
+					hasMore: true,
+					cursor: "cursor-2",
+				},
+			],
+			exhaustBudgetAfterFirstDetail: true,
+		});
+		const originalNow = Date.now;
+		Date.now = () => 0;
+		try {
+			const result = await service.run();
+
+			expect(result.budgetExhausted).toBe(true);
+			expect(result.complete).toBe(false);
+			expect(saved).toHaveLength(0);
+			expect(resumes).toHaveLength(1);
+			expect(resumes[0]).toMatchObject({
+				cursor: "page-1",
+				updatedAfter: "2026-08-01T10:00:00.000Z",
+				maxUpdatedAt: "2026-09-01T10:05:00.000Z",
+			});
+		} finally {
+			Date.now = originalNow;
+		}
+	});
+
+	it("continues from a stored resume and clears it after completion", async () => {
+		const { service, saved, resumes, requests, stateUpdates } = build({
+			key: "grn_test",
+			resume: {
+				updatedAfter: "2026-08-01T10:00:00.000Z",
+				cursor: "resume-cursor",
+				maxUpdatedAt: "2026-08-02T10:00:00.000Z",
+			},
 			importedActivity: { id: "activity-4", meta: {} },
-			pages: Array.from({ length: 50 }, (_, index) => ({
-				notes: [summary({ id: `note-${index}` })],
-				hasMore: true,
-				cursor: `cursor-${index + 1}`,
-			})),
+			pages: [
+				{
+					notes: [summary({ id: "note-1" })],
+					hasMore: false,
+					cursor: null,
+				},
+			],
 		});
 		const result = await service.run();
 
+		expect(result.resumed).toBe(true);
+		expect(result.complete).toBe(true);
+		expect(requests[0]).toEqual({
+			updatedAfter: "2026-08-01T10:00:00.000Z",
+			cursor: "resume-cursor",
+		});
+		expect(saved.at(-1)).toEqual(new Date("2026-09-01T10:05:00.000Z"));
+		expect(resumes).toHaveLength(1);
+		expect(stateUpdates.at(-1)).toHaveProperty("granolaSyncResume");
+	});
+
+	it("resumes after a list rate limit", async () => {
+		const { service, saved, resumes } = build({
+			key: "grn_test",
+			listRateLimited: true,
+			pages: [
+				{
+					notes: [],
+					hasMore: false,
+					cursor: null,
+				},
+			],
+		});
+		const result = await service.run();
+
+		expect(result.rateLimited).toBe(true);
 		expect(result.complete).toBe(false);
-		expect(result.rateLimited).toBe(false);
-		expect(result.attempted).toBe(50);
 		expect(saved).toHaveLength(0);
+		expect(resumes).toHaveLength(1);
+		expect(resumes[0]).toMatchObject({ cursor: null, maxUpdatedAt: null });
 	});
 
 	it("ignores a note whose detail is not available", async () => {
@@ -340,7 +445,7 @@ describe("GranolaSyncService", () => {
 	});
 
 	it("does not save the watermark when a detail request is rate-limited", async () => {
-		const { service, saved } = build({
+		const { service, saved, resumes } = build({
 			key: "grn_test",
 			detailRateLimited: true,
 		});
@@ -349,5 +454,7 @@ describe("GranolaSyncService", () => {
 		expect(result.rateLimited).toBe(true);
 		expect(result.complete).toBe(false);
 		expect(saved).toHaveLength(0);
+		expect(resumes).toHaveLength(1);
+		expect(resumes[0]).toMatchObject({ cursor: null });
 	});
 });

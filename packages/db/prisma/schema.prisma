@@ -1305,6 +1305,7 @@ model AppSetting {
 
   contextDevApiKey String?
   granolaSyncedAt DateTime?
+  granolaSyncResume Json?
 
   reportingCurrency String?
 
