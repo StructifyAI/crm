@@ -5,6 +5,7 @@ import {
 	type MailboxSyncModel as MailboxSync,
 	RecordSource,
 } from "@crm/db";
+import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import {
 	type CalendarSyncResume,
 	parseCalendarSyncResume,
@@ -253,6 +254,9 @@ export class CalendarSyncService {
 			return "ignored";
 		}
 
+		const dealId = match.companyId
+			? await this.singleOpenDealId(match.companyId)
+			: null;
 		const organizer = event.organizer?.email?.toLowerCase() ?? null;
 
 		const record = await this.db.calendarEvent.upsert({
@@ -298,6 +302,7 @@ export class CalendarSyncService {
 			startsAt: start.at,
 			companyId: match.companyId,
 			contactId: match.contactId,
+			dealId,
 			location: event.location ?? null,
 		});
 
@@ -384,6 +389,7 @@ export class CalendarSyncService {
 			startsAt: Date;
 			companyId: string | null;
 			contactId: string | null;
+			dealId: string | null;
 			location: string | null;
 		},
 	): Promise<void> {
@@ -398,6 +404,7 @@ export class CalendarSyncService {
 				occurredAt: summary.startsAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
+				dealId: summary.dealId,
 				createdById: userId,
 				calendarEventId,
 				meta: { synced: true, source: "calendar" },
@@ -408,14 +415,33 @@ export class CalendarSyncService {
 				occurredAt: summary.startsAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
+				dealId: summary.dealId,
 			},
 			select: { createdAt: true },
 		});
 
 		await this.stamp.touch(
-			{ companyId: summary.companyId, contactId: summary.contactId },
+			{
+				companyId: summary.companyId,
+				contactId: summary.contactId,
+				dealId: summary.dealId,
+			},
 			activity.createdAt,
 		);
+	}
+
+	private async singleOpenDealId(companyId: string): Promise<string | null> {
+		const deals = await this.db.deal.findMany({
+			where: {
+				companyId,
+				archivedAt: null,
+				stage: { in: [...OPEN_DEAL_STAGES] },
+			},
+			select: { id: true },
+			take: 2,
+		});
+
+		return deals.length === 1 ? (deals[0]?.id ?? null) : null;
 	}
 
 	private participantsOf(event: GoogleEvent): Participant[] {
