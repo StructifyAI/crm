@@ -1305,6 +1305,7 @@ model AppSetting {
   agentModelContextWindow Int?
 
   contextDevApiKey String?
+  granolaSyncedAt DateTime?
 
   reportingCurrency String?
 

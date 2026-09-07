@@ -1,0 +1,300 @@
+import { ActivityType, type Db, type Prisma, RecordSource } from "@crm/db";
+import { readGranolaSyncedAt, writeGranolaSyncedAt } from "@crm/db/settings";
+import { activityMeta } from "@crm/validation/activity-meta";
+import type { GranolaNote } from "@crm/validation/granola";
+import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import type { EnvironmentVariables } from "../config/env.validation";
+import { ActivityStampService } from "../crm/activity-stamp.service";
+import { singleOpenDealId } from "../crm/single-open-deal";
+import { InjectDatabase } from "../database/database.constants";
+import {
+	MailboxMatchService,
+	type MatchContext,
+} from "../mailbox/mailbox-match.service";
+import type { Participant } from "../mailbox/participants";
+import {
+	GranolaApiClient,
+	GranolaUnauthorizedError,
+} from "./granola-api.client";
+import { GRANOLA } from "./granola-config";
+
+export type GranolaSyncResult = {
+	skipped?: boolean;
+	reason?: string;
+	attempted: number;
+	created: number;
+	updated: number;
+	unmatched: number;
+	unmatchedOwner: number;
+	rateLimited: boolean;
+	durationMs: number;
+};
+
+type Counters = Omit<GranolaSyncResult, "durationMs" | "skipped" | "reason">;
+
+@Injectable()
+export class GranolaSyncService {
+	private readonly logger = new Logger(GranolaSyncService.name);
+
+	constructor(
+		@InjectDatabase() private readonly db: Db,
+		private readonly api: GranolaApiClient,
+		private readonly match: MailboxMatchService,
+		private readonly stamp: ActivityStampService,
+		private readonly config: ConfigService<EnvironmentVariables, true>,
+	) {}
+
+	async run(): Promise<GranolaSyncResult> {
+		const startedAt = Date.now();
+		const base = this.result(startedAt);
+		const apiKey = this.config.get("GRANOLA_API_KEY", { infer: true })?.trim();
+
+		if (!apiKey) {
+			this.logger.debug({
+				message: "Granola sync skipped: API key is not set",
+			});
+			return {
+				...base,
+				skipped: true,
+				reason: "GRANOLA_API_KEY is not set",
+			};
+		}
+
+		const [internal, suppressedDomains, suppressedEmails, syncedAt] =
+			await Promise.all([
+				this.match.internalIdentity(),
+				this.match.suppressedDomains(),
+				this.match.suppressedEmails(),
+				readGranolaSyncedAt(this.db),
+			]);
+		const context: MatchContext = {
+			ourAddresses: internal.addresses,
+			ourDomains: internal.domains,
+			suppressedDomains,
+			suppressedEmails,
+		};
+		const counters: Counters = {
+			attempted: 0,
+			created: 0,
+			updated: 0,
+			unmatched: 0,
+			unmatchedOwner: 0,
+			rateLimited: false,
+		};
+		let cursor: string | undefined;
+		let maxUpdatedAt: Date | null = null;
+		let page = 0;
+		const updatedAfter = (
+			syncedAt ??
+			new Date(Date.now() - GRANOLA.initialLookbackDays * 24 * 60 * 60 * 1000)
+		).toISOString();
+
+		try {
+			for (; page < GRANOLA.maxPagesPerTick; page += 1) {
+				const result = await this.api.listNotes({
+					updatedAfter,
+					cursor,
+				});
+
+				if (result.outcome === "rate-limited") {
+					counters.rateLimited = true;
+					break;
+				}
+
+				for (const note of result.data.notes) {
+					counters.attempted += 1;
+					maxUpdatedAt = maxDate(maxUpdatedAt, new Date(note.updated_at));
+					const outcome = await this.apply(note, context);
+					if (outcome === "created") counters.created += 1;
+					if (outcome === "updated") counters.updated += 1;
+					if (outcome === "unmatched") counters.unmatched += 1;
+					if (outcome === "unmatched-owner") counters.unmatchedOwner += 1;
+				}
+
+				if (!result.data.hasMore || !result.data.cursor) break;
+				cursor = result.data.cursor;
+			}
+		} catch (error) {
+			if (error instanceof GranolaUnauthorizedError) throw error;
+			throw error;
+		}
+
+		if (!counters.rateLimited) {
+			await writeGranolaSyncedAt(this.db, maxUpdatedAt ?? new Date());
+		} else if (maxUpdatedAt) {
+			await writeGranolaSyncedAt(this.db, maxUpdatedAt);
+		}
+
+		const result = {
+			...counters,
+			durationMs: Date.now() - startedAt,
+		};
+		this.logger.log({ message: "Granola sync complete", ...result });
+		return result;
+	}
+
+	private async apply(
+		note: GranolaNote,
+		context: MatchContext,
+	): Promise<
+		"created" | "updated" | "unmatched" | "unmatched-owner" | "ignored"
+	> {
+		const ownerEmail = note.owner?.email?.toLowerCase();
+		const author = ownerEmail
+			? await this.db.user.findFirst({
+					where: { email: { equals: ownerEmail, mode: "insensitive" } },
+					select: { id: true },
+				})
+			: null;
+		const existingCalendarActivity = await this.calendarActivity(note);
+
+		if (existingCalendarActivity) {
+			await this.updateActivity(existingCalendarActivity, note);
+			return "updated";
+		}
+
+		const existing = await this.db.activity.findFirst({
+			where: {
+				meta: { path: ["granola", "noteId"], equals: note.id },
+			},
+			select: { id: true, meta: true },
+		});
+
+		if (existing) {
+			await this.db.activity.update({
+				where: { id: existing.id },
+				data: {
+					body: this.composeBody(note),
+					meta: this.meta(existing.meta, note),
+				},
+			});
+			return "updated";
+		}
+
+		if (!author) return "unmatched-owner";
+
+		const participants = this.participants(note);
+		const match = await this.match.resolve(
+			{
+				participants,
+				allowCreate: false,
+				source: RecordSource.CALENDAR,
+				ownerId: author.id,
+			},
+			context,
+		);
+
+		if (!match.companyId && !match.contactId) return "unmatched";
+
+		const dealId = await singleOpenDealId(this.db, match.companyId);
+		const occurredAt =
+			note.calendar_event?.scheduled_start_time !== null &&
+			note.calendar_event?.scheduled_start_time !== undefined
+				? new Date(note.calendar_event.scheduled_start_time)
+				: new Date(note.created_at);
+		const activity = await this.db.activity.create({
+			data: {
+				type: ActivityType.MEETING,
+				subject: note.title ?? note.calendar_event?.event_title ?? "Meeting",
+				body: this.composeBody(note),
+				occurredAt,
+				companyId: match.companyId,
+				contactId: match.contactId,
+				dealId,
+				createdById: author.id,
+				meta: this.meta(null, note),
+			},
+			select: { createdAt: true },
+		});
+
+		await this.stamp.touch(
+			{ companyId: match.companyId, contactId: match.contactId, dealId },
+			activity.createdAt,
+		);
+		return "created";
+	}
+
+	private async calendarActivity(note: GranolaNote) {
+		const calendarEventId = note.calendar_event?.calendar_event_id;
+		if (!calendarEventId) return null;
+
+		const exact = await this.db.calendarEvent.findFirst({
+			where: { googleEventId: calendarEventId },
+			include: { activity: true },
+		});
+		if (exact?.activity) return exact.activity;
+
+		const baseId = calendarEventId.split("_", 1)[0];
+		if (baseId === calendarEventId) return null;
+
+		const prefixed = await this.db.calendarEvent.findFirst({
+			where: { googleEventId: baseId },
+			include: { activity: true },
+		});
+		return prefixed?.activity ?? null;
+	}
+
+	private async updateActivity(
+		activity: { id: string; meta: Prisma.JsonValue | null },
+		note: GranolaNote,
+	): Promise<void> {
+		await this.db.activity.update({
+			where: { id: activity.id },
+			data: {
+				body: this.composeBody(note),
+				meta: this.meta(activity.meta, note),
+			},
+		});
+	}
+
+	private meta(existing: Prisma.JsonValue | null, note: GranolaNote) {
+		const current = activityMeta.parse(existing) ?? {};
+		return {
+			...current,
+			granola: {
+				noteId: note.id,
+				url: note.web_url,
+				syncedAt: new Date().toISOString(),
+			},
+		};
+	}
+
+	private participants(note: GranolaNote): Participant[] {
+		const byEmail = new Map<string, Participant>();
+		for (const attendee of note.attendees) {
+			if (!attendee.email) continue;
+			const email = attendee.email.toLowerCase();
+			if (!byEmail.has(email)) {
+				byEmail.set(email, { email, name: attendee.name ?? null });
+			}
+		}
+		for (const invitee of note.calendar_event?.invitees ?? []) {
+			const email = invitee.email.toLowerCase();
+			if (!byEmail.has(email)) byEmail.set(email, { email, name: null });
+		}
+		return [...byEmail.values()];
+	}
+
+	private composeBody(note: GranolaNote): string {
+		const body = (note.summary_markdown ?? note.summary_text ?? "").trim();
+		if (body.length <= GRANOLA.bodyMaxChars) return body;
+		return `${body.slice(0, GRANOLA.bodyMaxChars - 1)}…`;
+	}
+
+	private result(startedAt: number): GranolaSyncResult {
+		return {
+			attempted: 0,
+			created: 0,
+			updated: 0,
+			unmatched: 0,
+			unmatchedOwner: 0,
+			rateLimited: false,
+			durationMs: Date.now() - startedAt,
+		};
+	}
+}
+
+function maxDate(current: Date | null, next: Date): Date {
+	return current && current > next ? current : next;
+}
