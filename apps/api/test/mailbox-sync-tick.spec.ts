@@ -30,6 +30,7 @@ class FakeState {
 			source,
 			status: GoogleSyncStatus.IDLE,
 			cursor: null,
+			resume: null,
 			lastSyncedAt: null,
 			lastError: null,
 			retryAfter: null,

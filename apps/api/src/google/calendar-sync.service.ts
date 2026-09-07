@@ -5,6 +5,10 @@ import {
 	type MailboxSyncModel as MailboxSync,
 	RecordSource,
 } from "@crm/db";
+import {
+	type CalendarSyncResume,
+	parseCalendarSyncResume,
+} from "@crm/validation/calendar-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
@@ -22,10 +26,7 @@ import {
 	eventTime,
 	type GoogleEvent,
 } from "./calendar.client";
-
-const MAX_PAGES_PER_TICK = 5;
-
-const HORIZON_DAYS = 180;
+import { CALENDAR_SYNC } from "./calendar-sync-config";
 
 export type SyncOutcome = {
 	source: "calendar";
@@ -74,6 +75,7 @@ export class CalendarSyncService {
 
 		await this.state.markRunning(row.id);
 
+		const resume = parseCalendarSyncResume(row.resume);
 		const [internal, suppressedDomains, suppressedEmails] = await Promise.all([
 			this.match.internalIdentity(),
 			this.match.suppressedDomains(),
@@ -87,17 +89,22 @@ export class CalendarSyncService {
 			suppressedEmails,
 		};
 
-		let pageToken: string | undefined;
+		let pageToken: string | undefined =
+			resume && !row.cursor ? resume.pageToken : undefined;
 		let syncToken = row.cursor ?? undefined;
+		const timeMin =
+			resume && !row.cursor ? resume.timeMin : new Date().toISOString();
+		const timeMax =
+			resume && !row.cursor ? resume.timeMax : this.horizon().toISOString();
 		let written = 0;
 		let removed = 0;
 
-		for (let page = 0; page < MAX_PAGES_PER_TICK; page += 1) {
+		for (let page = 0; page < CALENDAR_SYNC.maxPagesPerTick; page += 1) {
 			const result = await this.calendar.listEvents(token.accessToken, {
 				syncToken,
 				pageToken,
-				timeMin: new Date().toISOString(),
-				timeMax: this.horizon().toISOString(),
+				timeMin,
+				timeMax,
 			});
 
 			if (result.outcome === "cursor-invalid") {
@@ -155,6 +162,7 @@ export class CalendarSyncService {
 				await this.state.settle(row.id, {
 					cursor: syncToken ?? null,
 					status: GoogleSyncStatus.RUNNING,
+					resume: null,
 				});
 
 				this.logger.log({
@@ -174,8 +182,12 @@ export class CalendarSyncService {
 			}
 		}
 
+		const nextResume: CalendarSyncResume | null =
+			syncToken || !pageToken ? null : { pageToken, timeMin, timeMax };
+
 		await this.state.settle(row.id, {
 			status: GoogleSyncStatus.IDLE,
+			resume: nextResume,
 		});
 
 		return {
@@ -429,7 +441,7 @@ export class CalendarSyncService {
 
 	private horizon(): Date {
 		const to = new Date();
-		to.setDate(to.getDate() + HORIZON_DAYS);
+		to.setDate(to.getDate() + CALENDAR_SYNC.horizonDays);
 		return to;
 	}
 }
