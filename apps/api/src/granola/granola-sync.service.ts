@@ -13,7 +13,10 @@ import {
 	type MatchContext,
 } from "../mailbox/mailbox-match.service";
 import type { Participant } from "../mailbox/participants";
-import { GranolaApiClient } from "./granola-api.client";
+import {
+	GranolaApiClient,
+	GranolaRateLimitedError,
+} from "./granola-api.client";
 import { GRANOLA } from "./granola-config";
 
 export type GranolaSyncResult = {
@@ -23,6 +26,7 @@ export type GranolaSyncResult = {
 	attempted: number;
 	created: number;
 	updated: number;
+	ignored: number;
 	unmatched: number;
 	unmatchedOwner: number;
 	rateLimited: boolean;
@@ -77,6 +81,7 @@ export class GranolaSyncService {
 			attempted: 0,
 			created: 0,
 			updated: 0,
+			ignored: 0,
 			unmatched: 0,
 			unmatchedOwner: 0,
 			rateLimited: false,
@@ -89,7 +94,7 @@ export class GranolaSyncService {
 			new Date(Date.now() - GRANOLA.initialLookbackDays * 24 * 60 * 60 * 1000)
 		).toISOString();
 
-		for (; page < GRANOLA.maxPagesPerTick; page += 1) {
+		pages: for (; page < GRANOLA.maxPagesPerTick; page += 1) {
 			const result = await this.api.listNotes({
 				updatedAfter,
 				cursor,
@@ -100,9 +105,23 @@ export class GranolaSyncService {
 				break;
 			}
 
-			for (const note of result.data.notes) {
+			for (const summary of result.data.notes) {
 				counters.attempted += 1;
-				maxUpdatedAt = maxDate(maxUpdatedAt, new Date(note.updated_at));
+				maxUpdatedAt = maxDate(maxUpdatedAt, new Date(summary.updated_at));
+				let note: GranolaNote | null;
+				try {
+					note = await this.api.getNote(summary.id);
+				} catch (error) {
+					if (error instanceof GranolaRateLimitedError) {
+						counters.rateLimited = true;
+						break pages;
+					}
+					throw error;
+				}
+				if (!note) {
+					counters.ignored += 1;
+					continue;
+				}
 				const outcome = await this.apply(note, context);
 				if (outcome === "created") counters.created += 1;
 				if (outcome === "updated") counters.updated += 1;
@@ -283,6 +302,7 @@ export class GranolaSyncService {
 			attempted: 0,
 			created: 0,
 			updated: 0,
+			ignored: 0,
 			unmatched: 0,
 			unmatchedOwner: 0,
 			rateLimited: false,
