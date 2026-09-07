@@ -160,6 +160,17 @@ export function TimelineEntry({
 					/>
 				) : null}
 
+				{granolaUrl && !entry.calendarEvent ? (
+					<a
+						href={granolaUrl}
+						target="_blank"
+						rel="noreferrer"
+						className="text-muted-foreground text-xs underline underline-offset-3 hover:text-foreground"
+					>
+						Open in Granola
+					</a>
+				) : null}
+
 				{entry.emailThread ? (
 					<EmailThreadEntry
 						threadId={entry.emailThread.id}

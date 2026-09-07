@@ -247,8 +247,27 @@ describe("GranolaSyncService", () => {
 		const result = await service.run();
 
 		expect(result.attempted).toBe(2);
+		expect(result.complete).toBe(true);
 		expect(saved.at(-1)).toEqual(new Date("2026-09-02T10:05:00.000Z"));
 		expect(pages).toHaveLength(2);
 		expect(requests[1]?.cursor).toBe("cursor-2");
+	});
+
+	it("does not save the watermark when the page budget is exhausted", async () => {
+		const { service, saved } = build({
+			key: "grn_test",
+			importedActivity: { id: "activity-4", meta: {} },
+			pages: Array.from({ length: 50 }, (_, index) => ({
+				notes: [note({ id: `note-${index}` })],
+				hasMore: true,
+				cursor: `cursor-${index + 1}`,
+			})),
+		});
+		const result = await service.run();
+
+		expect(result.complete).toBe(false);
+		expect(result.rateLimited).toBe(false);
+		expect(result.attempted).toBe(50);
+		expect(saved).toHaveLength(0);
 	});
 });
