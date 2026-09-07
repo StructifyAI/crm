@@ -21,6 +21,7 @@ import { DealsModule } from "./deals/deals.module";
 import { EnrichmentModule } from "./enrichment/enrichment.module";
 import { FieldsModule } from "./fields/fields.module";
 import { GoogleModule } from "./google/google.module";
+import { GranolaModule } from "./granola/granola.module";
 import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
@@ -62,6 +63,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		DealsModule,
 		FieldsModule,
 		ActivitiesModule,
+		GranolaModule,
 		AgentModule,
 		EnrichmentModule,
 		DashboardModule,

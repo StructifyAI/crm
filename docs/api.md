@@ -191,6 +191,12 @@ Two rules follow for the serverless build:
   mailbox-wide delta, so the Outlook cursor is the last `receivedDateTime` seen,
   re-read with a one-second overlap; `rfcMessageId` is unique, so the overlap costs a
   duplicate fetch and never a duplicate row.
+- **Granola syncs meeting notes from `GET /v1/notes` through
+  `GET /internal/sync/granola` every 15 minutes.** Set `GRANOLA_API_KEY` to enable
+  it. Notes enrich matching Google Calendar meetings,
+  or create `MEETING` activities from attendee and invitee matches. It matches
+  existing CRM records without creating them and links only the company's single
+  open deal. The sync stores the Granola URL and note id in activity metadata.
 - **Microsoft has no token-revocation endpoint.** `revoke` clears the columns and the
   UI says the consent itself is removed in the user's Microsoft account. Google's still
   posts to `oauth2.googleapis.com/revoke` and refuses to clear if that fails.

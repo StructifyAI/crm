@@ -27,6 +27,7 @@ export function MeetingEntry({
 	isAllDay,
 	attendeeCount,
 	conferenceUrl,
+	granolaUrl,
 }: {
 	eventId: string;
 	startsAt: string;
@@ -34,6 +35,7 @@ export function MeetingEntry({
 	isAllDay: boolean;
 	attendeeCount: number;
 	conferenceUrl: string | null;
+	granolaUrl: string | null;
 }) {
 	const trpc = useTRPC();
 
@@ -70,6 +72,17 @@ export function MeetingEntry({
 					className="text-muted-foreground text-xs underline underline-offset-3 hover:text-foreground"
 				>
 					Join call
+				</a>
+			) : null}
+
+			{granolaUrl ? (
+				<a
+					href={granolaUrl}
+					target="_blank"
+					rel="noreferrer"
+					className="text-muted-foreground text-xs underline underline-offset-3 hover:text-foreground"
+				>
+					Open in Granola
 				</a>
 			) : null}
 		</div>

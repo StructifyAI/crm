@@ -4,6 +4,7 @@ import { DealStage } from "@crm/db/enums";
 import { Checkbox } from "@crm/ui/components/checkbox";
 import { StatusIndicator } from "@crm/ui/components/status-indicator";
 import { cn } from "@crm/ui/lib/utils";
+import { parseGranolaActivityMeta } from "@crm/validation/activity-meta";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -86,6 +87,7 @@ export function TimelineEntry({
 	const footnotes = Boolean(
 		deal || contact || (isTask && !done && entry.dueAt),
 	);
+	const granolaUrl = parseGranolaActivityMeta(entry.meta)?.url ?? null;
 
 	return (
 		<li className="flex gap-2.5 py-2">
@@ -154,6 +156,7 @@ export function TimelineEntry({
 						isAllDay={entry.calendarEvent.isAllDay}
 						attendeeCount={entry.calendarEvent.attendeeCount}
 						conferenceUrl={entry.calendarEvent.conferenceUrl}
+						granolaUrl={granolaUrl}
 					/>
 				) : null}
 
