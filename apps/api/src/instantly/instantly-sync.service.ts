@@ -76,13 +76,15 @@ export class InstantlySyncService {
 								where: { emailAccount: { in: mailboxes } },
 								select: { ownerId: true },
 							});
-							const ownerIds = [
-								...new Set(owners.map((row) => row.ownerId).filter(Boolean)),
-							];
-							if (ownerIds.length === 1 && owners.length === mailboxes.length) {
+							const ownerId = owners[0]?.ownerId;
+							if (
+								ownerId &&
+								owners.length === mailboxes.length &&
+								owners.every((row) => row.ownerId === ownerId)
+							) {
 								await this.db.contact.update({
 									where: { id: resolved.id },
-									data: { ownerId: ownerIds[0] },
+									data: { ownerId },
 								});
 							}
 						}

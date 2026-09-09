@@ -51,7 +51,11 @@ import {
 	DetailSheetStats,
 	type DetailSheetTab,
 } from "@/components/detail-sheet";
-import { LocalDateTime, LocalRelativeDate } from "@/components/local-date-time";
+import {
+	LocalDateTime,
+	LocalRelativeDate,
+	LocalRelativeTime,
+} from "@/components/local-date-time";
 import { factsByField } from "@/lib/contact-facts";
 import { ENRICHMENT_POLL_MS, isEnriching } from "@/lib/enrichment-status";
 import { savingField } from "@/lib/pending-field";
@@ -87,37 +91,26 @@ function instantlyStatusLabel(status: InstantlyContactStatus) {
 	if (status.nextContactAt) {
 		return {
 			tone: "info",
-			label: `In ${campaign} · next email ${relativeDay(status.nextContactAt)}`,
+			label: (
+				<>
+					In {campaign} · next email{" "}
+					<LocalRelativeDate date={status.nextContactAt} />
+				</>
+			),
 		} as const;
+	}
+	if (!status.lastContactAt) {
+		return { tone: "info", label: `In ${campaign}` } as const;
 	}
 	return {
 		tone: "info",
-		label: `In ${campaign} · last email ${relativePast(status.lastContactAt)}`,
+		label: (
+			<>
+				In {campaign} · last email{" "}
+				<LocalRelativeTime date={status.lastContactAt} />
+			</>
+		),
 	} as const;
-}
-
-function relativeDay(value: string): string {
-	const target = new Date(value);
-	const now = new Date();
-	const targetDay = Date.UTC(
-		target.getFullYear(),
-		target.getMonth(),
-		target.getDate(),
-	);
-	const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-	const days = Math.round((targetDay - today) / 86_400_000);
-	if (days < 0) return "next email due";
-	if (days === 0) return "today";
-	if (days === 1) return "tomorrow";
-	return `in ${days} days`;
-}
-
-function relativePast(value: string | null): string {
-	if (!value) return "sequence started";
-	const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
-	const days = Math.floor(elapsed / 86_400_000);
-	if (days === 0) return "today";
-	return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
