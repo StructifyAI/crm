@@ -628,14 +628,16 @@ export class CompaniesService {
 	}
 
 	private searchFilter(q: string): Prisma.CompanyWhereInput {
-		const term = q.trim();
-		if (!term) return {};
+		const terms = q.split(/\s+/).filter(Boolean);
+		if (terms.length === 0) return {};
 
 		return {
-			OR: [
-				{ name: { contains: term, mode: "insensitive" } },
-				{ domain: { contains: term, mode: "insensitive" } },
-			],
+			AND: terms.map((term) => ({
+				OR: [
+					{ name: { contains: term, mode: "insensitive" } },
+					{ domain: { contains: term, mode: "insensitive" } },
+				],
+			})),
 		};
 	}
 
