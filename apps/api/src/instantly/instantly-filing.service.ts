@@ -14,6 +14,14 @@ import {
 	splitName,
 } from "../mailbox/participants";
 
+type ResolveContactInput = {
+	email: string;
+	firstName?: string | null;
+	lastName?: string | null;
+	mailbox?: string | null;
+	reason: string;
+};
+
 @Injectable()
 export class InstantlyFilingService {
 	private readonly logger = new Logger(InstantlyFilingService.name);
@@ -25,64 +33,77 @@ export class InstantlyFilingService {
 		private readonly stamp: ActivityStampService,
 	) {}
 
-	async file(event: InstantlyWebhookEvent): Promise<void> {
+	async resolveContact(
+		input: ResolveContactInput,
+	): Promise<{ id: string; created: boolean } | null> {
+		const email = normalizeEmail(input.email);
+		if (!email || isMachineAddress(email) || isAutomatedAddress(email))
+			return null;
+		const domain = email.split("@")[1] ?? "";
+		if (!domain || isMachineDomain(domain)) return null;
+		if (await suppressionReason(this.db, email, domain)) return null;
+		const mailbox = input.mailbox
+			? await this.db.instantlyMailbox.findUnique({
+					where: { emailAccount: input.mailbox.trim().toLowerCase() },
+					select: { ownerId: true },
+				})
+			: null;
+		const existing = await this.db.contact.findFirst({
+			where: { email, archivedAt: null },
+			select: { id: true },
+		});
+		if (existing) return { id: existing.id, created: false };
+		const companyId = await this.companies.companyForEmail(email);
+		const derived = splitName(
+			[input.firstName, input.lastName].filter(Boolean).join(" ") || null,
+			email,
+		);
 		try {
-			const email = normalizeEmail(event.lead_email ?? "");
-			if (!email || isMachineAddress(email) || isAutomatedAddress(email))
-				return;
-
-			const domain = email.split("@")[1] ?? "";
-			if (!domain || isMachineDomain(domain)) return;
-
-			const suppressed = await suppressionReason(this.db, email, domain);
-			if (suppressed) return;
-
-			const mailbox = event.email_account
-				? await this.db.instantlyMailbox.findUnique({
-						where: { emailAccount: event.email_account.trim().toLowerCase() },
-						select: { ownerId: true },
-					})
-				: null;
-			const existing = await this.db.contact.findFirst({
-				where: { email, archivedAt: null },
+			const contact = await this.db.contact.create({
+				data: {
+					firstName: derived.firstName,
+					lastName: derived.lastName,
+					email,
+					companyId,
+					ownerId: mailbox?.ownerId ?? null,
+					source: RecordSource.INSTANTLY,
+					lastActivityAt: new Date(),
+				},
 				select: { id: true },
 			});
+			await this.agent.contactCreated(contact.id, input.reason);
+			return { id: contact.id, created: true };
+		} catch (error) {
+			const raced = await racedContact(this.db, error, email);
+			if (!raced) throw error;
+			return { id: raced.id, created: false };
+		}
+	}
 
-			if (existing) {
-				await this.attach(existing.id, event, mailbox?.ownerId ?? null);
-				return;
-			}
-
-			const companyId = await this.companies.companyForEmail(email);
-			const name = [event.firstName, event.lastName].filter(Boolean).join(" ");
-			const derived = splitName(name || null, email);
-			let contact: { id: string };
-
-			try {
-				contact = await this.db.contact.create({
-					data: {
-						firstName: derived.firstName,
-						lastName: derived.lastName,
-						email,
-						companyId,
-						ownerId: mailbox?.ownerId ?? null,
-						source: RecordSource.INSTANTLY,
-						lastActivityAt: new Date(),
-					},
-					select: { id: true },
+	async file(event: InstantlyWebhookEvent): Promise<void> {
+		try {
+			const resolved = await this.resolveContact({
+				email: event.lead_email ?? "",
+				firstName: event.firstName,
+				lastName: event.lastName,
+				mailbox: event.email_account,
+				reason: "Replied to an Instantly campaign",
+			});
+			if (!resolved || !event.campaign_id) return;
+			if (event.event_type === "reply_received") {
+				await this.attachReply(resolved.id, event);
+				await this.db.instantlyCampaignLead.updateMany({
+					where: { contactId: resolved.id, campaignId: event.campaign_id },
+					data: { replyCount: { increment: 1 } },
 				});
-			} catch (error) {
-				const raced = await racedContact(this.db, error, email);
-				if (!raced) throw error;
-				await this.attach(raced.id, event, mailbox?.ownerId ?? null);
 				return;
 			}
-
-			await this.attach(contact.id, event, mailbox?.ownerId ?? null);
-			await this.agent.contactCreated(
-				contact.id,
-				"Replied to an Instantly campaign",
-			);
+			const interestStatus = interestStatusFor(event.event_type);
+			if (interestStatus === undefined) return;
+			await this.db.instantlyCampaignLead.updateMany({
+				where: { contactId: resolved.id, campaignId: event.campaign_id },
+				data: { interestStatus },
+			});
 		} catch (error) {
 			this.logger.error({
 				message: "Instantly event was not filed",
@@ -93,10 +114,9 @@ export class InstantlyFilingService {
 		}
 	}
 
-	private async attach(
+	private async attachReply(
 		contactId: string,
 		event: InstantlyWebhookEvent,
-		mailboxOwnerId: string | null,
 	): Promise<void> {
 		if (event.unibox_url) {
 			const duplicate = await this.db.activity.findFirst({
@@ -109,20 +129,21 @@ export class InstantlyFilingService {
 			if (duplicate) return;
 		}
 
-		const author = await this.author(contactId, mailboxOwnerId);
+		const contact = await this.db.contact.findUnique({
+			where: { id: contactId },
+			select: { ownerId: true },
+		});
+		const author =
+			contact?.ownerId ??
+			(await this.db.user.findFirst({ select: { id: true } }))?.id;
 		if (!author) return;
-
 		const now = new Date();
-		const isReply = event.event_type === "reply_received";
+
 		const activity = await this.db.activity.create({
 			data: {
 				type: ActivityType.NOTE,
-				subject: isReply
-					? `Replied to "${event.campaign_name ?? "campaign"}" on Instantly`
-					: `Marked ${humanLabel(event.event_type)} on Instantly`,
-				body: isReply
-					? (event.reply_text_snippet ?? event.reply_text ?? "")
-					: null,
+				subject: `Replied to "${event.campaign_name ?? "campaign"}" on Instantly`,
+				body: event.reply_text_snippet ?? event.reply_text ?? "",
 				contactId,
 				occurredAt: now,
 				createdById: author,
@@ -139,31 +160,15 @@ export class InstantlyFilingService {
 
 		await this.stamp.touch({ contactId }, activity.createdAt);
 	}
-
-	private async author(
-		contactId: string,
-		mailboxOwnerId: string | null,
-	): Promise<string | null> {
-		const contact = await this.db.contact.findUnique({
-			where: { id: contactId },
-			select: { ownerId: true },
-		});
-		if (contact?.ownerId) return contact.ownerId;
-		if (mailboxOwnerId) return mailboxOwnerId;
-
-		const anyUser = await this.db.user.findFirst({ select: { id: true } });
-		return anyUser?.id ?? null;
-	}
 }
 
-function humanLabel(eventType: string): string {
-	const label = [
-		["lead_interested", "interested"],
-		["lead_neutral", "neutral"],
-		["lead_meeting_booked", "meeting booked"],
-		["lead_meeting_completed", "meeting completed"],
-		["lead_closed", "closed"],
-	].find(([key]) => key === eventType)?.[1];
-
-	return label ?? eventType.replaceAll("_", " ");
+export function interestStatusFor(eventType: string): number | undefined {
+	return {
+		lead_interested: 1,
+		lead_meeting_booked: 2,
+		lead_meeting_completed: 3,
+		lead_closed: 4,
+		lead_neutral: 0,
+		lead_not_interested: -1,
+	}[eventType];
 }

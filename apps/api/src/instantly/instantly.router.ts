@@ -13,11 +13,13 @@ import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import {
 	instantlyAddMailboxInput,
+	instantlyApiKeyInput,
 	instantlyMailboxesOutput,
 	instantlyMailboxOutput,
 	instantlyRemoveMailboxInput,
 	instantlySetMailboxOwnerInput,
 	instantlyStatusOutput,
+	instantlySyncOutput,
 } from "./instantly.contracts";
 import { InstantlyService } from "./instantly.service";
 
@@ -50,6 +52,34 @@ export class InstantlyRouter {
 	})
 	disconnect(@Ctx() ctx: AuthedTrpcContext) {
 		return this.service.disconnect(ctx.user.id);
+	}
+
+	@Mutation({
+		input: instantlyApiKeyInput,
+		output: instantlyStatusOutput,
+		meta: restMeta("POST", "/instantly/api-key", ["Instantly"]),
+	})
+	setApiKey(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof instantlyApiKeyInput>,
+	) {
+		return this.service.setApiKey(input.apiKey, ctx.user.id);
+	}
+
+	@Mutation({
+		output: instantlyStatusOutput,
+		meta: restMeta("DELETE", "/instantly/api-key", ["Instantly"]),
+	})
+	clearApiKey(@Ctx() ctx: AuthedTrpcContext) {
+		return this.service.clearApiKey(ctx.user.id);
+	}
+
+	@Mutation({
+		output: instantlySyncOutput,
+		meta: restMeta("POST", "/instantly/sync", ["Instantly"]),
+	})
+	sync(@Ctx() ctx: AuthedTrpcContext) {
+		return this.service.sync(ctx.user.id);
 	}
 
 	@Query({

@@ -9,6 +9,21 @@ export const instantlyStatusOutput = z.object({
 		total: z.number(),
 		mapped: z.number(),
 	}),
+	apiKeyConfigured: z.boolean(),
+	lastSyncAt: z.string().nullable(),
+	syncError: z.string().nullable(),
+	leads: z.number(),
+});
+
+export const instantlyApiKeyInput = z.object({
+	apiKey: z.string().trim().min(1),
+});
+
+export const instantlySyncOutput = z.object({
+	campaigns: z.number(),
+	leads: z.number(),
+	created: z.number(),
+	error: z.string().nullable(),
 });
 
 export const instantlyMailboxOutput = z.object({

@@ -17,23 +17,32 @@ import type {
 	InstantlyStatus,
 } from "./instantly.contracts";
 import { INSTANTLY } from "./instantly-config";
+import { InstantlySyncService } from "./instantly-sync.service";
 
 @Injectable()
 export class InstantlyService {
 	constructor(
 		@InjectDatabase() private readonly db: Db,
 		private readonly access: AgentAccessService,
+		private readonly syncService: InstantlySyncService,
 	) {}
 
 	async status(userId: string): Promise<InstantlyStatus> {
 		const role = await this.access.assertMember(userId);
-		const [setting, total, mapped] = await Promise.all([
+		const [setting, total, mapped, leadCount] = await Promise.all([
 			this.db.appSetting.findUnique({
 				where: { id: SETTINGS_ID },
-				select: { instantlyWebhookSecret: true, instantlyLastEventAt: true },
+				select: {
+					instantlyWebhookSecret: true,
+					instantlyLastEventAt: true,
+					instantlyApiKey: true,
+					instantlyLastSyncAt: true,
+					instantlySyncError: true,
+				},
 			}),
 			this.db.instantlyMailbox.count(),
 			this.db.instantlyMailbox.count({ where: { ownerId: { not: null } } }),
+			this.db.instantlyCampaignLead.count(),
 		]);
 		const connected = Boolean(setting?.instantlyWebhookSecret);
 
@@ -45,7 +54,36 @@ export class InstantlyService {
 			lastEventAt: setting?.instantlyLastEventAt?.toISOString() ?? null,
 			canManage: canManageConnections(role),
 			mailboxes: { total, mapped },
+			apiKeyConfigured: Boolean(setting?.instantlyApiKey),
+			lastSyncAt: setting?.instantlyLastSyncAt?.toISOString() ?? null,
+			syncError: setting?.instantlySyncError ?? null,
+			leads: leadCount,
 		};
+	}
+
+	async setApiKey(apiKey: string, userId: string): Promise<InstantlyStatus> {
+		await this.assertCanManage(userId);
+		await this.db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: apiKey },
+			update: { instantlyApiKey: apiKey, instantlySyncError: null },
+		});
+		return this.status(userId);
+	}
+
+	async clearApiKey(userId: string): Promise<InstantlyStatus> {
+		await this.assertCanManage(userId);
+		await this.db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID },
+			update: { instantlyApiKey: null, instantlySyncError: null },
+		});
+		return this.status(userId);
+	}
+
+	async sync(userId: string) {
+		await this.assertCanManage(userId);
+		return this.syncService.run();
 	}
 
 	async connect(userId: string): Promise<InstantlyStatus> {

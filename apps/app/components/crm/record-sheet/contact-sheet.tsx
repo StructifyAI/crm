@@ -67,6 +67,59 @@ type Contact = RouterOutputs["contacts"]["byId"];
 
 const NONE = "none";
 
+type InstantlyContactStatus = NonNullable<Contact["instantly"]>;
+
+function instantlyStatusLabel(status: InstantlyContactStatus) {
+	const campaign = `Instantly campaign "${status.campaignName}"`;
+	if (status.state === "replied")
+		return { tone: "success", label: `Replied to ${campaign}` } as const;
+	if (status.state === "queued")
+		return { tone: "info", label: `Queued in ${campaign}` } as const;
+	if (status.state === "paused")
+		return { tone: "neutral", label: `Paused in ${campaign}` } as const;
+	if (status.state === "finished")
+		return { tone: "neutral", label: `Finished ${campaign}` } as const;
+	if (status.state === "bounced")
+		return { tone: "warning", label: `Bounced in ${campaign}` } as const;
+	if (status.state === "unsubscribed") {
+		return { tone: "warning", label: `Unsubscribed from ${campaign}` } as const;
+	}
+	if (status.nextContactAt) {
+		return {
+			tone: "info",
+			label: `In ${campaign} · next email ${relativeDay(status.nextContactAt)}`,
+		} as const;
+	}
+	return {
+		tone: "info",
+		label: `In ${campaign} · last email ${relativePast(status.lastContactAt)}`,
+	} as const;
+}
+
+function relativeDay(value: string): string {
+	const target = new Date(value);
+	const now = new Date();
+	const targetDay = Date.UTC(
+		target.getFullYear(),
+		target.getMonth(),
+		target.getDate(),
+	);
+	const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+	const days = Math.round((targetDay - today) / 86_400_000);
+	if (days < 0) return "next email due";
+	if (days === 0) return "today";
+	if (days === 1) return "tomorrow";
+	return `in ${days} days`;
+}
+
+function relativePast(value: string | null): string {
+	if (!value) return "sequence started";
+	const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
+	const days = Math.floor(elapsed / 86_400_000);
+	if (days === 0) return "today";
+	return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
 	month: "short",
 	day: "numeric",
@@ -157,6 +210,9 @@ export function ContactSheet({ contactId }: { contactId: string }) {
 								tone="success"
 								label={`Primary contact at ${contact.company?.name ?? "this company"}`}
 							/>
+						) : null}
+						{contact.instantly ? (
+							<StatusIndicator {...instantlyStatusLabel(contact.instantly)} />
 						) : null}
 						{contact.enrichmentStatus !== "COMPLETE" ? (
 							<EnrichmentIndicator

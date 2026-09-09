@@ -18,7 +18,8 @@
 		"./granola": "./src/granola.ts",
 		"./granola-sync-resume": "./src/granola-sync-resume.ts",
 		"./saved-view": "./src/saved-view.ts",
-		"./instantly-webhook": "./src/instantly-webhook.ts"
+		"./instantly-webhook": "./src/instantly-webhook.ts",
+		"./instantly-api": "./src/instantly-api.ts"
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",

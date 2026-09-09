@@ -25,7 +25,7 @@ import { dealListInput, dealListOutput, dealIdInput, dealDetailOutput, dealCreat
 import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
 import { googleConnectionStatusOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
-import { instantlyStatusOutput, instantlyMailboxesOutput, instantlyAddMailboxInput, instantlySetMailboxOwnerInput, instantlyRemoveMailboxInput, instantlyMailboxOutput } from "../instantly/instantly.contracts";
+import { instantlyStatusOutput, instantlyMailboxesOutput, instantlyAddMailboxInput, instantlySetMailboxOwnerInput, instantlyRemoveMailboxInput, instantlyMailboxOutput, instantlyApiKeyInput, instantlySyncOutput } from "../instantly/instantly.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput } from "../settings/settings.contracts";
@@ -645,6 +645,16 @@ const appRouter = t.router({
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     disconnect: publicProcedure
       .output(instantlyStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setApiKey: publicProcedure
+      .input(instantlyApiKeyInput)
+      .output(instantlyStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    clearApiKey: publicProcedure
+      .output(instantlyStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    sync: publicProcedure
+      .output(instantlySyncOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     listMailboxes: publicProcedure
       .output(instantlyMailboxesOutput)

@@ -227,7 +227,11 @@ Malformed payloads return 204 to prevent repeated vendor retries.
 Lead events create or update contacts through the standard intake filters.
 Each sending mailbox maps to one workspace member as its contact owner.
 Unmapped mailboxes create unowned contacts.
-The connection uses webhooks only and has no Instantly API client.
+An optional read-only API key syncs campaign leads every 15 minutes.
+Only leads enrolled in campaigns are imported. Lead-list-only leads are ignored.
+The contact status line shows the campaign state and expected next email.
+An `email_sent` webhook updates that status line without creating an activity.
+Only replies create a note.
 
 Missing from the repo and living only in Paper: **hubspot** (`hubspot icon`
 `L5E-0`), **docusign** (`docusign logo` `L5Z-0`), **ergo** (`ergo logo` `KJJ-0`).

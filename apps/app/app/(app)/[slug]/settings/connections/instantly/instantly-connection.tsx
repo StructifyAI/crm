@@ -21,10 +21,12 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@crm/ui/components/select";
+import { StatusIndicator } from "@crm/ui/components/status-indicator";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { LocalRelativeTime } from "@/components/local-date-time";
 import { useCrmCache } from "@/lib/trpc/cache";
 import { useTRPC } from "@/lib/trpc/client";
 import { CopyValue } from "../../copy-value";
@@ -35,6 +37,10 @@ type Status = {
 	lastEventAt: string | null;
 	canManage: boolean;
 	mailboxes: { total: number; mapped: number };
+	apiKeyConfigured: boolean;
+	lastSyncAt: string | null;
+	syncError: string | null;
+	leads: number;
 };
 
 type Mailbox = {
@@ -65,6 +71,7 @@ export function InstantlyConnection({
 	const [mailboxes, setMailboxes] = useState(initialMailboxes);
 	const [emailAccount, setEmailAccount] = useState("");
 	const [confirming, setConfirming] = useState(false);
+	const [apiKey, setApiKey] = useState("");
 	const connect = useMutation(
 		trpc.instantly.connect.mutationOptions({
 			onSuccess: async () => {
@@ -118,6 +125,42 @@ export function InstantlyConnection({
 			onSuccess: (_, input) => {
 				setMailboxes((rows) => rows.filter((row) => row.id !== input.id));
 				toast.success("Mailbox removed.");
+			},
+			onError: (error) => toast.error(error.message),
+		}),
+	);
+	const saveApiKey = useMutation(
+		trpc.instantly.setApiKey.mutationOptions({
+			onSuccess: async () => {
+				await cache.instantly();
+				setApiKey("");
+				toast.success("API key saved.");
+				router.refresh();
+			},
+			onError: (error) => toast.error(error.message),
+		}),
+	);
+	const clearApiKey = useMutation(
+		trpc.instantly.clearApiKey.mutationOptions({
+			onSuccess: async () => {
+				await cache.instantly();
+				toast.success("API key removed.");
+				router.refresh();
+			},
+			onError: (error) => toast.error(error.message),
+		}),
+	);
+	const sync = useMutation(
+		trpc.instantly.sync.mutationOptions({
+			onSuccess: async (result) => {
+				await cache.instantly();
+				await cache.contact();
+				if (result.error) toast.error(result.error);
+				else
+					toast.success(
+						`Synced ${result.leads} leads from ${result.campaigns} campaigns`,
+					);
+				router.refresh();
 			},
 			onError: (error) => toast.error(error.message),
 		}),
@@ -179,6 +222,76 @@ export function InstantlyConnection({
 						<CopyValue value={webhookUrl} label="Webhook URL" />
 					) : null}
 				</div>
+			</section>
+			<section className="flex flex-col gap-4 px-(--spacing-block-inline) py-5">
+				<div>
+					<h2 className="font-medium text-sm">Lead sync</h2>
+					<p className="mt-1 text-muted-foreground text-xs">
+						Import campaign leads and show their next email on each contact.
+					</p>
+				</div>
+				{status.apiKeyConfigured ? (
+					<>
+						<div className="flex flex-wrap items-center gap-3">
+							<p className="text-sm">API key saved</p>
+							{status.lastSyncAt ? (
+								<p className="text-muted-foreground text-sm">
+									Last synced <LocalRelativeTime date={status.lastSyncAt} />
+								</p>
+							) : null}
+							<p className="text-muted-foreground text-sm">
+								{status.leads} leads
+							</p>
+							{status.syncError ? (
+								<StatusIndicator tone="error" label={status.syncError} />
+							) : null}
+						</div>
+						<div className="flex gap-2">
+							<Button
+								disabled={!status.canManage || sync.isPending}
+								onClick={() => sync.mutate()}
+							>
+								{sync.isPending ? "Syncing…" : "Sync now"}
+							</Button>
+							<Button
+								variant="outline"
+								disabled={!status.canManage || clearApiKey.isPending}
+								onClick={() => clearApiKey.mutate()}
+							>
+								Remove key
+							</Button>
+						</div>
+					</>
+				) : (
+					<form
+						className="flex max-w-md flex-col gap-3"
+						onSubmit={(event) => {
+							event.preventDefault();
+							saveApiKey.mutate({ apiKey });
+						}}
+					>
+						<Input
+							type="password"
+							value={apiKey}
+							onChange={(event) => setApiKey(event.target.value)}
+							placeholder="Paste your Instantly API key"
+							aria-label="Instantly API key"
+							disabled={!status.canManage}
+						/>
+						<p className="text-muted-foreground text-xs">
+							Instantly → Settings → Integrations → API keys. Read access to
+							campaigns and leads is enough.
+						</p>
+						<Button
+							type="submit"
+							disabled={
+								!status.canManage || !apiKey.trim() || saveApiKey.isPending
+							}
+						>
+							Save API key
+						</Button>
+					</form>
+				)}
 			</section>
 			<section className="flex flex-col gap-4 px-(--spacing-block-inline) py-5">
 				<div>

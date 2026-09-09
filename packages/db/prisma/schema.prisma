@@ -406,6 +406,7 @@ model Contact {
   fieldValues     FieldValue[]
   visitors        TrackedVisitor[]   @relation("VisitorContact")
   submissions     FormSubmission[]   @relation("SubmissionContact")
+  instantlyCampaigns InstantlyCampaignLead[]
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
@@ -1339,10 +1340,35 @@ model AppSetting {
   trackingPaused           Boolean @default(false)
   instantlyWebhookSecret   String?
   instantlyLastEventAt     DateTime?
+  instantlyApiKey          String?
+  instantlyLastSyncAt      DateTime?
+  instantlySyncError       String?
 
   updatedAt DateTime @updatedAt
 
   @@map("appSetting")
+}
+
+model InstantlyCampaignLead {
+  id             String    @id @default(cuid())
+  leadId         String    @unique
+  contactId      String
+  contact        Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  campaignId     String
+  campaignName   String
+  status         Int
+  interestStatus Int?
+  replyCount     Int       @default(0)
+  stepIndex      Int?
+  stepCount      Int?
+  sendingMailbox String?
+  lastContactAt  DateTime?
+  nextContactAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([contactId, campaignId])
+  @@map("instantlyCampaignLead")
 }
 
 enum DomainScope {

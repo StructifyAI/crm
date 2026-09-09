@@ -315,7 +315,7 @@ export function useCrmCache(): CrmCache {
 					trpc.instantly.status.queryKey(),
 					trpc.instantly.listMailboxes.queryKey(),
 				],
-				[],
+				[trpc.contacts.byId.queryKey(), ...listKeys()],
 				options,
 			),
 

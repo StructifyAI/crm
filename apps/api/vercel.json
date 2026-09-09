@@ -10,6 +10,10 @@
 			"schedule": "*/15 * * * *"
 		},
 		{
+			"path": "/internal/sync/instantly",
+			"schedule": "*/15 * * * *"
+		},
+		{
 			"path": "/internal/sync/rates",
 			"schedule": "0 6 * * *"
 		},

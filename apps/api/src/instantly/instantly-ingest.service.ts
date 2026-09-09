@@ -44,6 +44,29 @@ export class InstantlyIngestService {
 			) {
 				await this.filing.file(event);
 			}
+
+			if (
+				event.event_type === "email_sent" &&
+				event.campaign_id &&
+				event.lead_email
+			) {
+				const contact = await this.db.contact.findFirst({
+					where: {
+						email: event.lead_email.trim().toLowerCase(),
+						archivedAt: null,
+					},
+					select: { id: true },
+				});
+				if (contact) {
+					await this.db.instantlyCampaignLead.updateMany({
+						where: { contactId: contact.id, campaignId: event.campaign_id },
+						data: {
+							lastContactAt: new Date(event.timestamp),
+							sendingMailbox: event.email_account ?? null,
+						},
+					});
+				}
+			}
 		} catch (error) {
 			this.logger.error({
 				message: "Instantly event was not stored",
