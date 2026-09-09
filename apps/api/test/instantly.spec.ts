@@ -216,6 +216,12 @@ describe("Instantly filing", () => {
 				select: { ownerId: true },
 			}),
 		).toEqual({ ownerId: user.id });
+		expect(
+			await db.contact.findUnique({
+				where: { email: secondLead.email },
+				select: { ownerId: true },
+			}),
+		).toEqual({ ownerId: null });
 		expect(instantlyState(1, 0, new Date("2026-01-01T00:00:00.000Z"))).toBe(
 			"active",
 		);
