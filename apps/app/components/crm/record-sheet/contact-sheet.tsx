@@ -51,7 +51,11 @@ import {
 	DetailSheetStats,
 	type DetailSheetTab,
 } from "@/components/detail-sheet";
-import { LocalDateTime, LocalRelativeDate } from "@/components/local-date-time";
+import {
+	LocalDateTime,
+	LocalRelativeDate,
+	LocalRelativeTime,
+} from "@/components/local-date-time";
 import { factsByField } from "@/lib/contact-facts";
 import { ENRICHMENT_POLL_MS, isEnriching } from "@/lib/enrichment-status";
 import { savingField } from "@/lib/pending-field";
@@ -66,6 +70,48 @@ import { useOpenRecord, useRecordSheetView } from "./record-stack";
 type Contact = RouterOutputs["contacts"]["byId"];
 
 const NONE = "none";
+
+type InstantlyContactStatus = NonNullable<Contact["instantly"]>;
+
+function instantlyStatusLabel(status: InstantlyContactStatus) {
+	const campaign = `Instantly campaign "${status.campaignName}"`;
+	if (status.state === "replied")
+		return { tone: "success", label: `Replied to ${campaign}` } as const;
+	if (status.state === "queued")
+		return { tone: "info", label: `Queued in ${campaign}` } as const;
+	if (status.state === "paused")
+		return { tone: "neutral", label: `Paused in ${campaign}` } as const;
+	if (status.state === "finished")
+		return { tone: "neutral", label: `Finished ${campaign}` } as const;
+	if (status.state === "bounced")
+		return { tone: "warning", label: `Bounced in ${campaign}` } as const;
+	if (status.state === "unsubscribed") {
+		return { tone: "warning", label: `Unsubscribed from ${campaign}` } as const;
+	}
+	if (status.nextContactAt) {
+		return {
+			tone: "info",
+			label: (
+				<>
+					In {campaign} · next email{" "}
+					<LocalRelativeDate date={status.nextContactAt} />
+				</>
+			),
+		} as const;
+	}
+	if (!status.lastContactAt) {
+		return { tone: "info", label: `In ${campaign}` } as const;
+	}
+	return {
+		tone: "info",
+		label: (
+			<>
+				In {campaign} · last email{" "}
+				<LocalRelativeTime date={status.lastContactAt} />
+			</>
+		),
+	} as const;
+}
 
 const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
 	month: "short",
@@ -157,6 +203,9 @@ export function ContactSheet({ contactId }: { contactId: string }) {
 								tone="success"
 								label={`Primary contact at ${contact.company?.name ?? "this company"}`}
 							/>
+						) : null}
+						{contact.instantly ? (
+							<StatusIndicator {...instantlyStatusLabel(contact.instantly)} />
 						) : null}
 						{contact.enrichmentStatus !== "COMPLETE" ? (
 							<EnrichmentIndicator

@@ -257,6 +257,23 @@ export const contactByIdOutput = z.object({
 	relationship: contactRelationshipOutput,
 	isPrimaryContact: z.boolean(),
 	deals: z.array(contactDealOutput),
+	instantly: z
+		.object({
+			campaignName: z.string(),
+			state: z.enum([
+				"queued",
+				"active",
+				"paused",
+				"finished",
+				"bounced",
+				"unsubscribed",
+				"replied",
+			]),
+			interestStatus: z.number().nullable(),
+			lastContactAt: z.string().nullable(),
+			nextContactAt: z.string().nullable(),
+		})
+		.nullable(),
 });
 
 export const contactBasicOutput = z.object({

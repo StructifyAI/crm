@@ -219,6 +219,20 @@ flatten a list of separately-actionable objects.
 `packages/ui/src/components/brand-logos/` has claude, eve, github, google,
 microsoft, nextjs, slack, stripe, vercel. **Stripe is there** — use it.
 
+## Instantly
+
+Instantly sends webhook events to `/api/instantly/events/:secret`.
+The webhook secret stays in the URL and rotates from the connection page.
+Malformed payloads return 204 to prevent repeated vendor retries.
+Lead events create or update contacts through the standard intake filters.
+Each sending mailbox maps to one workspace member as its contact owner.
+Unmapped mailboxes create unowned contacts.
+An optional read-only API key syncs campaign leads every 15 minutes.
+Only leads enrolled in campaigns are imported. Lead-list-only leads are ignored.
+The contact status line shows the campaign state and expected next email.
+An `email_sent` webhook updates that status line without creating an activity.
+Only replies create a note.
+
 Missing from the repo and living only in Paper: **hubspot** (`hubspot icon`
 `L5E-0`), **docusign** (`docusign logo` `L5Z-0`), **ergo** (`ergo logo` `KJJ-0`).
 Extract their path data into `brand-logos/*.tsx` shaped like `stripe.tsx` when

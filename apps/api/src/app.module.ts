@@ -23,6 +23,7 @@ import { FieldsModule } from "./fields/fields.module";
 import { GoogleModule } from "./google/google.module";
 import { GranolaModule } from "./granola/granola.module";
 import { HealthModule } from "./health/health.module";
+import { InstantlyModule } from "./instantly/instantly.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
 import { MailboxModule } from "./mailbox/mailbox.module";
@@ -71,6 +72,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		MailboxModule,
 		GoogleModule,
 		MicrosoftModule,
+		InstantlyModule,
 		SyncModule,
 		SettingsModule,
 		WorkspaceModule,

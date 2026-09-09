@@ -3,6 +3,7 @@
 import Plug from "@carbon/icons-react/es/Plug";
 import DocusignLogo from "@crm/ui/components/brand-logos/docusign";
 import GoogleLogo from "@crm/ui/components/brand-logos/google";
+import InstantlyLogo from "@crm/ui/components/brand-logos/instantly";
 import MicrosoftLogo from "@crm/ui/components/brand-logos/microsoft";
 import SlackLogo from "@crm/ui/components/brand-logos/slack";
 import StripeLogo from "@crm/ui/components/brand-logos/stripe";
@@ -63,6 +64,14 @@ export function AddConnectionDialog({
 							name="Microsoft 365"
 							description="Bring in Outlook email and the people on it"
 							href={`/${slug}/settings/connections/microsoft`}
+						/>
+					) : null}
+					{!connected.includes("Instantly") ? (
+						<CatalogRow
+							logo={InstantlyLogo}
+							name="Instantly"
+							description="Bring in replies and interested leads from your cold-email campaigns"
+							href={`/${slug}/settings/connections/instantly`}
 						/>
 					) : null}
 					<CatalogRow

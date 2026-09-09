@@ -17,6 +17,7 @@
 		"./fields": "./src/fields.ts",
 		"./fields-shape": "./src/fields-shape.ts",
 		"./fx": "./src/fx.ts",
+		"./granola-sync-state": "./src/granola-sync-state.ts",
 		"./images": "./src/images.ts",
 		"./idempotency": "./src/idempotency.ts",
 		"./json": "./src/json.ts",

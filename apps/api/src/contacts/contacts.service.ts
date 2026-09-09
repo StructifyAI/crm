@@ -26,6 +26,7 @@ import { type BulkResult, requireOwner, runBulk } from "../crm/bulk";
 import { blankToNull, normalizeEmail, toCents } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
 import { FieldsService } from "../fields/fields.service";
+import { instantlyState } from "../instantly/instantly-state";
 import {
 	activityFacetCounts,
 	activityFilter,
@@ -214,6 +215,17 @@ export class ContactsService {
 						},
 					},
 				},
+				instantlyCampaigns: {
+					orderBy: { updatedAt: "desc" },
+					select: {
+						campaignName: true,
+						status: true,
+						interestStatus: true,
+						replyCount: true,
+						lastContactAt: true,
+						nextContactAt: true,
+					},
+				},
 			},
 		});
 
@@ -226,8 +238,20 @@ export class ContactsService {
 			contact.company?.id ?? null,
 		);
 
-		const { deals, createdAt, archivedAt, brief, facts, company, ...rest } =
-			contact;
+		const {
+			deals,
+			instantlyCampaigns,
+			createdAt,
+			archivedAt,
+			brief,
+			facts,
+			company,
+			...rest
+		} = contact;
+		const instantlyCampaign =
+			instantlyCampaigns.find((campaign) => campaign.status === 1) ??
+			instantlyCampaigns[0] ??
+			null;
 
 		return {
 			...rest,
@@ -257,6 +281,21 @@ export class ContactsService {
 				amountCents: toCents(deal.amount),
 				expectedCloseDate: deal.expectedCloseDate?.toISOString() ?? null,
 			})),
+			instantly: instantlyCampaign
+				? {
+						campaignName: instantlyCampaign.campaignName,
+						state: instantlyState(
+							instantlyCampaign.status,
+							instantlyCampaign.replyCount,
+							instantlyCampaign.lastContactAt,
+						),
+						interestStatus: instantlyCampaign.interestStatus,
+						lastContactAt:
+							instantlyCampaign.lastContactAt?.toISOString() ?? null,
+						nextContactAt:
+							instantlyCampaign.nextContactAt?.toISOString() ?? null,
+					}
+				: null,
 		};
 	}
 

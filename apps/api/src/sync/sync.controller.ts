@@ -19,6 +19,7 @@ import {
 } from "@nestjs/swagger";
 import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { EnvironmentVariables } from "../config/env.validation";
+import { InstantlySyncService } from "../instantly/instantly-sync.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
 
 @ApiTags("Internal — Cron")
@@ -36,6 +37,7 @@ export class SyncController {
 
 	constructor(
 		private readonly sync: MailboxSyncService,
+		private readonly instantly: InstantlySyncService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -73,19 +75,40 @@ export class SyncController {
 		return this.run(authorization);
 	}
 
+	@Get("instantly")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "Run the Instantly campaign lead sync" })
+	async instantlyViaGet(@Headers("authorization") authorization?: string) {
+		return this.runInstantly(authorization);
+	}
+
+	@Post("instantly")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async instantlyViaPost(@Headers("authorization") authorization?: string) {
+		return this.runInstantly(authorization);
+	}
+
 	private async run(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.sync.runDue();
+	}
+
+	private async runInstantly(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.instantly.run();
+	}
+
+	private assertSecret(authorization?: string) {
 		if (!this.secret) {
 			this.logger.error({
 				message: "CRON_SECRET is not set — refusing to run the sync route.",
 			});
 			throw new ServiceUnavailableException("Sync is not configured.");
 		}
-
 		if (!timingSafeEquals(authorization ?? "", `Bearer ${this.secret}`)) {
 			throw new ForbiddenException();
 		}
-
-		return this.sync.runDue();
 	}
 }
 
