@@ -22,6 +22,7 @@ import { withDiscardedCrmEvents } from "./agent-trigger.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "instantly-spec";
 const domain = `instantly-${suffix}.test`;
+const existingOwnerId = `instantly-existing-owner-${suffix}`;
 const queued: string[] = [];
 
 const agent = {
@@ -62,6 +63,7 @@ async function clean() {
 		where: { emailAccount: { endsWith: `@example.test` } },
 	});
 	await db.company.deleteMany({ where: { domain } });
+	await db.user.deleteMany({ where: { id: existingOwnerId } });
 }
 
 beforeAll(clean);
@@ -233,6 +235,106 @@ describe("Instantly filing", () => {
 				where: { leadId: secondLead.id },
 			}),
 		).toBeNull();
+	});
+
+	it("backfills unowned contacts and preserves existing owners", async () => {
+		const mappedOwner = await db.user.findFirstOrThrow({
+			select: { id: true },
+		});
+		await db.user.upsert({
+			where: { id: existingOwnerId },
+			create: {
+				id: existingOwnerId,
+				name: "Existing Owner",
+				email: `${existingOwnerId}@example.test`,
+			},
+			update: {},
+		});
+		const mappedMailbox = `backfill-${suffix}@example.test`;
+		await db.instantlyMailbox.create({
+			data: { emailAccount: mappedMailbox, ownerId: mappedOwner.id },
+		});
+		const unowned = await db.contact.create({
+			data: {
+				email: `backfill-unowned@${domain}`,
+				firstName: "Backfill",
+				lastName: "Unowned",
+			},
+			select: { id: true },
+		});
+		const owned = await db.contact.create({
+			data: {
+				email: `backfill-owned@${domain}`,
+				firstName: "Backfill",
+				lastName: "Owned",
+				ownerId: existingOwnerId,
+			},
+			select: { id: true },
+		});
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+
+		const campaign = {
+			id: `backfill-campaign-${suffix}`,
+			name: "Backfill",
+			status: 1,
+			email_list: [mappedMailbox],
+		};
+		const leads = [
+			{
+				id: `backfill-unowned-lead-${suffix}`,
+				email: `backfill-unowned@${domain}`,
+				campaign: campaign.id,
+				status: 1,
+				email_reply_count: 0,
+				status_summary: {
+					lastStep: {
+						from: mappedMailbox,
+						stepID: "0_0_0",
+						timestamp_executed: "2026-01-01T00:00:00.000Z",
+					},
+				},
+			},
+			{
+				id: `backfill-owned-lead-${suffix}`,
+				email: `backfill-owned@${domain}`,
+				campaign: campaign.id,
+				status: 1,
+				email_reply_count: 0,
+				status_summary: {
+					lastStep: {
+						from: mappedMailbox,
+						stepID: "0_0_0",
+						timestamp_executed: "2026-01-01T00:00:00.000Z",
+					},
+				},
+			},
+		];
+		const client = {
+			listCampaigns: async () => [campaign],
+			async *listCampaignLeads() {
+				yield leads;
+			},
+		} as unknown as InstantlyClient;
+		const sync = new InstantlySyncService(db, client, filing);
+
+		await sync.run();
+
+		expect(
+			await db.contact.findUnique({
+				where: { id: unowned.id },
+				select: { ownerId: true },
+			}),
+		).toEqual({ ownerId: mappedOwner.id });
+		expect(
+			await db.contact.findUnique({
+				where: { id: owned.id },
+				select: { ownerId: true },
+			}),
+		).toEqual({ ownerId: existingOwnerId });
 	});
 });
 

@@ -28,7 +28,7 @@ export async function racedContact(
 	db: Db,
 	cause: unknown,
 	email: string,
-): Promise<{ id: string } | null> {
+): Promise<{ id: string; ownerId: string | null } | null> {
 	if (
 		!(cause instanceof Prisma.PrismaClientKnownRequestError) ||
 		cause.code !== "P2002"
@@ -38,6 +38,6 @@ export async function racedContact(
 
 	return db.contact.findFirst({
 		where: { email, archivedAt: null },
-		select: { id: true },
+		select: { id: true, ownerId: true },
 	});
 }
