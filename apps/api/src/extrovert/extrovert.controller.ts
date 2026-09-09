@@ -19,7 +19,10 @@ import { InjectDatabase } from "../database/database.constants";
 import { EXTROVERT } from "./extrovert-config";
 import { ExtrovertIngestService } from "./extrovert-ingest.service";
 
-type RequestWithBody = IncomingMessage & { body?: unknown };
+type RequestWithBody = IncomingMessage & {
+	body?: unknown;
+	rawBody?: Buffer;
+};
 
 @Controller("api/extrovert")
 export class ExtrovertController {
@@ -81,6 +84,8 @@ async function readBody(
 		request.destroy();
 		return null;
 	}
+	if (request.rawBody) return request.rawBody.toString("utf8");
+	if (Buffer.isBuffer(request.body)) return request.body.toString("utf8");
 	if (request.body !== undefined) return JSON.stringify(request.body);
 	return new Promise((resolve) => {
 		const chunks: Buffer[] = [];

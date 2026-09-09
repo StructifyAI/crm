@@ -106,7 +106,11 @@ export class ExtrovertService {
 		await this.db.appSetting.upsert({
 			where: { id: SETTINGS_ID },
 			create: { id: SETTINGS_ID },
-			update: { extrovertWebhookSecret: null },
+			update: {
+				extrovertWebhookSecret: null,
+				extrovertApiKey: null,
+				extrovertLastSyncError: null,
+			},
 		});
 		return this.status(userId);
 	}

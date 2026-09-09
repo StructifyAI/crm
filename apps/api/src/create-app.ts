@@ -14,9 +14,16 @@ import {
 	generateOpenApiDocument,
 } from "trpc-to-openapi";
 import { AppModule } from "./app.module";
+import { EXTROVERT } from "./extrovert/extrovert-config";
+import { INSTANTLY } from "./instantly/instantly-config";
 import { ContextLogger } from "./logging/context-logger";
 import { REST_BRIDGE_PATH } from "./trpc/openapi";
 import { createBaseTrpcContext } from "./trpc/trpc.context";
+
+const WEBHOOK_MAX_BODY_BYTES = Math.max(
+	EXTROVERT.webhook.maxBodyBytes,
+	INSTANTLY.webhook.maxBodyBytes,
+);
 
 export async function createApp(): Promise<NestExpressApplication> {
 	const app = await NestFactory.create<NestExpressApplication>(
@@ -26,6 +33,7 @@ export async function createApp(): Promise<NestExpressApplication> {
 	);
 
 	app.use(helmet());
+	app.use(["/api/extrovert/events", "/api/instantly/events"], readWebhookBody);
 	app.useGlobalPipes(
 		new ValidationPipe({
 			whitelist: true,
@@ -113,4 +121,29 @@ export async function createApp(): Promise<NestExpressApplication> {
 	});
 
 	return app;
+}
+
+function readWebhookBody(
+	request: Request & { rawBody?: Buffer },
+	_response: Response,
+	next: NextFunction,
+): void {
+	if (
+		request.method !== "POST" ||
+		!request.headers["content-type"]?.startsWith("application/json")
+	) {
+		next();
+		return;
+	}
+	const chunks: Buffer[] = [];
+	let size = 0;
+	request.on("data", (chunk: Buffer) => {
+		size += chunk.length;
+		if (size <= WEBHOOK_MAX_BODY_BYTES) chunks.push(chunk);
+	});
+	request.on("end", () => {
+		request.rawBody = Buffer.concat(chunks);
+		next();
+	});
+	request.on("error", next);
 }

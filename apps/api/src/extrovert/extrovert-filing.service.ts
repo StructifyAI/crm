@@ -14,6 +14,7 @@ type ResolveContactInput = {
 	firstName?: string | null;
 	lastName?: string | null;
 	campaignOwnerId?: string | null;
+	queueEnrichment: boolean;
 };
 
 @Injectable()
@@ -74,10 +75,12 @@ export class ExtrovertFilingService {
 			},
 			select: { id: true, ownerId: true },
 		});
-		await this.agent.contactCreated(
-			contact.id,
-			"Added from an Extrovert campaign",
-		);
+		if (input.queueEnrichment) {
+			await this.agent.contactCreated(
+				contact.id,
+				"Added from an Extrovert campaign",
+			);
+		}
 		return { id: contact.id, created: true, ownerId: contact.ownerId };
 	}
 
@@ -124,6 +127,7 @@ export class ExtrovertFilingService {
 			linkedinUrl: event.linkedinUrl,
 			firstName: parts[0] ?? null,
 			lastName: parts[1] ?? null,
+			queueEnrichment: true,
 		});
 		if (!resolved) return;
 		const campaign = event.campaignName

@@ -78,6 +78,7 @@ export class ExtrovertSyncService {
 						firstName: names.firstName,
 						lastName: names.lastName,
 						campaignOwnerId: ownerId,
+						queueEnrichment: false,
 					});
 					if (!resolved) continue;
 					const lastCommentAt = maxDate(

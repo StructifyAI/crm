@@ -13,10 +13,12 @@ import type {
 	ExtrovertProspect,
 	ExtrovertTeamMember,
 } from "@crm/validation/extrovert-api";
+import { AgentAccessService } from "../src/agent/agent-access.service";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { ExtrovertClient } from "../src/extrovert/extrovert.client";
 import { ExtrovertController } from "../src/extrovert/extrovert.controller";
+import { ExtrovertService } from "../src/extrovert/extrovert.service";
 import { ExtrovertFilingService } from "../src/extrovert/extrovert-filing.service";
 import { ExtrovertIngestService } from "../src/extrovert/extrovert-ingest.service";
 import { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
@@ -210,6 +212,7 @@ describe("Extrovert filing", () => {
 			linkedinUrl: "http://linkedin.com/in/Slug/",
 			firstName: "Ignored",
 			campaignOwnerId: ownerId,
+			queueEnrichment: false,
 		});
 		expect(matched).toMatchObject({
 			id: existing.id,
@@ -224,6 +227,7 @@ describe("Extrovert filing", () => {
 		await filing.resolveContact({
 			linkedinUrl: "https://www.linkedin.com/in/slug",
 			campaignOwnerId: ownerId,
+			queueEnrichment: false,
 		});
 		expect(
 			await db.contact.findUnique({
@@ -236,6 +240,7 @@ describe("Extrovert filing", () => {
 			linkedinUrl: `https://www.linkedin.com/in/new-person-${suffix}`,
 			firstName: "New",
 			lastName: "Person",
+			queueEnrichment: false,
 		});
 		expect(created).not.toBeNull();
 		if (!created) throw new Error("Expected a contact");
@@ -249,7 +254,51 @@ describe("Extrovert filing", () => {
 			source: "EXTROVERT",
 			linkedinUrl: `https://www.linkedin.com/in/new-person-${suffix}`,
 		});
-		expect(queued).toContain(created?.id);
+		expect(queued).not.toContain(created?.id);
+	});
+});
+
+describe("Extrovert connection", () => {
+	it("disconnects the webhook and API settings", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: {
+				id: SETTINGS_ID,
+				extrovertWebhookSecret: "correct-secret",
+				extrovertApiKey: "test-key",
+				extrovertLastSyncError: "sync failed",
+			},
+			update: {
+				extrovertWebhookSecret: "correct-secret",
+				extrovertApiKey: "test-key",
+				extrovertLastSyncError: "sync failed",
+			},
+		});
+		const access = {
+			assertMember: async () => "owner",
+		} as unknown as AgentAccessService;
+		const service = new ExtrovertService(
+			db,
+			access,
+			{} as ExtrovertSyncService,
+		);
+
+		await service.disconnect(ownerId);
+
+		expect(
+			await db.appSetting.findUnique({
+				where: { id: SETTINGS_ID },
+				select: {
+					extrovertWebhookSecret: true,
+					extrovertApiKey: true,
+					extrovertLastSyncError: true,
+				},
+			}),
+		).toEqual({
+			extrovertWebhookSecret: null,
+			extrovertApiKey: null,
+			extrovertLastSyncError: null,
+		});
 	});
 });
 
@@ -403,7 +452,7 @@ describe("Extrovert webhook", () => {
 		).rejects.toMatchObject({ status: 403 });
 	});
 
-	it("returns 204 for invalid bodies without writing", async () => {
+	it("returns 204 for malformed JSON without writing", async () => {
 		await db.appSetting.upsert({
 			where: { id: SETTINGS_ID },
 			create: { id: SETTINGS_ID, extrovertWebhookSecret: "correct-secret" },
@@ -415,7 +464,9 @@ describe("Extrovert webhook", () => {
 		const controller = new ExtrovertController(db, ingest);
 
 		await expect(
-			controller.events("correct-secret", { body: { invalid: true } } as never),
+			controller.events("correct-secret", {
+				rawBody: Buffer.from("garbage"),
+			} as never),
 		).resolves.toBeUndefined();
 		expect(
 			await db.appSetting.findUnique({
@@ -456,6 +507,7 @@ describe("Extrovert webhook", () => {
 			select: { id: true },
 		});
 		expect(contact).not.toBeNull();
+		expect(queued).toContain(contact?.id as string);
 		expect(
 			await db.activity.count({
 				where: {
