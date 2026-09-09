@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { canManageConnections, WORKSPACE_ID } from "@crm/auth";
 import type { Db } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
+import { parseExtrovertSyncResume } from "@crm/validation/extrovert-sync-resume";
 import {
 	BadRequestException,
 	ForbiddenException,
@@ -37,12 +38,28 @@ export class ExtrovertService {
 					extrovertApiKey: true,
 					extrovertLastSyncAt: true,
 					extrovertLastSyncError: true,
+					extrovertSyncResume: true,
+					extrovertConnectionFieldId: true,
 				},
 			}),
 			this.db.extrovertProspect.count(),
 			this.db.extrovertMember.count(),
 		]);
 		const connected = Boolean(setting?.extrovertWebhookSecret);
+		const connectionField = setting?.extrovertConnectionFieldId
+			? await this.db.fieldDefinition.findUnique({
+					where: { id: setting.extrovertConnectionFieldId },
+					select: {
+						id: true,
+						key: true,
+						label: true,
+						type: true,
+						entity: true,
+						archivedAt: true,
+					},
+				})
+			: null;
+		const resume = parseExtrovertSyncResume(setting?.extrovertSyncResume);
 		return {
 			connected,
 			webhookUrl: connected
@@ -54,7 +71,49 @@ export class ExtrovertService {
 			lastSyncError: setting?.extrovertLastSyncError ?? null,
 			prospectCount,
 			memberCount,
+			connectionField:
+				connectionField?.entity === "CONTACT" &&
+				connectionField.archivedAt === null &&
+				(connectionField.type === "USER" ||
+					connectionField.type === "SELECT" ||
+					connectionField.type === "TEXT")
+					? {
+							id: connectionField.id,
+							key: connectionField.key,
+							label: connectionField.label,
+							type: connectionField.type,
+						}
+					: null,
+			syncInProgress: resume !== null,
+			syncProgress: resume
+				? { done: resume.offset, total: resume.total }
+				: null,
 		};
+	}
+
+	async setConnectionField(fieldId: string | null, userId: string) {
+		await this.assertCanManage(userId);
+		if (fieldId) {
+			const field = await this.db.fieldDefinition.findUnique({
+				where: { id: fieldId },
+				select: { entity: true, archivedAt: true, type: true },
+			});
+			if (
+				field?.entity !== "CONTACT" ||
+				field.archivedAt !== null ||
+				!["USER", "SELECT", "TEXT"].includes(field.type)
+			) {
+				throw new BadRequestException(
+					"Choose an active contact field of type user, select, or text.",
+				);
+			}
+		}
+		await this.db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, extrovertConnectionFieldId: fieldId },
+			update: { extrovertConnectionFieldId: fieldId },
+		});
+		return this.status(userId);
 	}
 
 	async setApiKey(apiKey: string, userId: string): Promise<ExtrovertStatus> {

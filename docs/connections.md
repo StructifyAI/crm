@@ -242,11 +242,15 @@ Malformed payloads return 204 to prevent repeated vendor retries.
 Webhook LinkedIn URLs resolve to contacts through normalized profile URLs.
 New contacts use the Extrovert record source and receive an engagement note.
 Existing contacts receive a note without changing an existing owner.
-An optional API key syncs campaign prospects every 15 minutes.
+An optional API key syncs prospects from the v2 API every 15 minutes.
+Each sync uses 200-prospect pages and resumes from its saved offset.
+The status page shows progress while a sync continues across ticks.
 Team members map to CRM owners by case-insensitive email matching.
 Manual owner mappings stay in place until a user removes them.
 Sync-created contacts are not enriched automatically; webhook-created contacts are.
-The contact status line shows the campaign name, comments, likes, and connection state.
+The connection page can select an active contact `USER`, `SELECT`, or `TEXT` field.
+The sync writes the Extrovert member with the connected LinkedIn account into that field.
+The contact status line shows the campaign name, comments, likes, and connection member.
 
 Missing from the repo and living only in Paper: **hubspot** (`hubspot icon`
 `L5E-0`), **docusign** (`docusign logo` `L5Z-0`), **ergo** (`ergo logo` `KJJ-0`).

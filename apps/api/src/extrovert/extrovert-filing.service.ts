@@ -17,6 +17,12 @@ type ResolveContactInput = {
 	queueEnrichment: boolean;
 };
 
+type ResolvedContact = {
+	id: string;
+	created: boolean;
+	ownerId: string | null;
+};
+
 @Injectable()
 export class ExtrovertFilingService {
 	private readonly logger = new Logger(ExtrovertFilingService.name);
@@ -29,59 +35,120 @@ export class ExtrovertFilingService {
 
 	async resolveContact(
 		input: ResolveContactInput,
-	): Promise<{ id: string; created: boolean; ownerId: string | null } | null> {
+	): Promise<ResolvedContact | null> {
 		const normalized = normalizeLinkedinUrl(input.linkedinUrl);
-		const slug = normalized ? linkedinSlug(normalized) : null;
-		if (!normalized || !slug) return null;
-		const existing = await this.db.contact.findFirst({
+		if (!normalized) return null;
+		return (await this.resolveContacts([input])).get(normalized) ?? null;
+	}
+
+	async resolveContacts(
+		inputs: ResolveContactInput[],
+	): Promise<Map<string, ResolvedContact>> {
+		const normalizedInputs = inputs
+			.map((input) => ({
+				...input,
+				normalized: normalizeLinkedinUrl(input.linkedinUrl),
+			}))
+			.filter(
+				(input): input is ResolveContactInput & { normalized: string } =>
+					input.normalized !== null,
+			);
+		const unique = new Map(
+			normalizedInputs.map((input) => [input.normalized, input]),
+		);
+		if (unique.size === 0) return new Map();
+
+		const slugs = [...unique.keys()]
+			.map(linkedinSlug)
+			.filter((slug): slug is string => slug !== null);
+		const existing = await this.db.contact.findMany({
 			where: {
 				archivedAt: null,
 				OR: [
-					{ linkedinUrl: normalized },
-					{
-						linkedinUrl: {
-							endsWith: `/in/${slug}`,
-							mode: "insensitive",
+					{ linkedinUrl: { in: [...unique.keys()] } },
+					...slugs.flatMap((slug) => [
+						{
+							linkedinUrl: {
+								endsWith: `/in/${slug}`,
+								mode: "insensitive" as const,
+							},
 						},
-					},
-					{
-						linkedinUrl: {
-							endsWith: `/in/${slug}/`,
-							mode: "insensitive",
+						{
+							linkedinUrl: {
+								endsWith: `/in/${slug}/`,
+								mode: "insensitive" as const,
+							},
 						},
-					},
+					]),
 				],
 			},
-			select: { id: true, ownerId: true },
+			select: { id: true, ownerId: true, linkedinUrl: true },
 		});
-		if (existing) {
-			if (existing.ownerId === null && input.campaignOwnerId) {
-				const updated = await this.db.contact.update({
-					where: { id: existing.id },
-					data: { ownerId: input.campaignOwnerId },
-					select: { ownerId: true },
+		const byNormalized = new Map<string, ResolvedContact>();
+		for (const row of existing) {
+			const normalized = row.linkedinUrl
+				? normalizeLinkedinUrl(row.linkedinUrl)
+				: null;
+			if (normalized && unique.has(normalized)) {
+				byNormalized.set(normalized, {
+					id: row.id,
+					created: false,
+					ownerId: row.ownerId,
 				});
-				return { id: existing.id, created: false, ownerId: updated.ownerId };
+				continue;
 			}
-			return { id: existing.id, created: false, ownerId: existing.ownerId };
+			const slug = row.linkedinUrl ? linkedinSlug(row.linkedinUrl) : null;
+			if (!slug) continue;
+			for (const input of unique.values()) {
+				if (linkedinSlug(input.normalized) !== slug) continue;
+				byNormalized.set(input.normalized, {
+					id: row.id,
+					created: false,
+					ownerId: row.ownerId,
+				});
+			}
 		}
-		const contact = await this.db.contact.create({
-			data: {
-				firstName: input.firstName?.trim() || "Unknown",
-				lastName: input.lastName?.trim() || null,
-				linkedinUrl: normalized,
-				source: RecordSource.EXTROVERT,
-				ownerId: input.campaignOwnerId ?? null,
-			},
-			select: { id: true, ownerId: true },
-		});
-		if (input.queueEnrichment) {
-			await this.agent.contactCreated(
-				contact.id,
-				"Added from an Extrovert campaign",
-			);
+
+		for (const [normalized, input] of unique) {
+			const current = byNormalized.get(normalized);
+			if (current) {
+				if (current.ownerId === null && input.campaignOwnerId) {
+					const updated = await this.db.contact.update({
+						where: { id: current.id },
+						data: { ownerId: input.campaignOwnerId },
+						select: { ownerId: true },
+					});
+					byNormalized.set(normalized, {
+						...current,
+						ownerId: updated.ownerId,
+					});
+				}
+				continue;
+			}
+			const contact = await this.db.contact.create({
+				data: {
+					firstName: input.firstName?.trim() || "Unknown",
+					lastName: input.lastName?.trim() || null,
+					linkedinUrl: normalized,
+					source: RecordSource.EXTROVERT,
+					ownerId: input.campaignOwnerId ?? null,
+				},
+				select: { id: true, ownerId: true },
+			});
+			if (input.queueEnrichment) {
+				await this.agent.contactCreated(
+					contact.id,
+					"Added from an Extrovert campaign",
+				);
+			}
+			byNormalized.set(normalized, {
+				id: contact.id,
+				created: true,
+				ownerId: contact.ownerId,
+			});
 		}
-		return { id: contact.id, created: true, ownerId: contact.ownerId };
+
+		return byNormalized;
 	}
 
 	async fileEngagementNote(contactId: string, text: string): Promise<void> {

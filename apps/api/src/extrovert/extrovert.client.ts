@@ -1,9 +1,8 @@
 import {
 	type ExtrovertCampaign,
-	type ExtrovertProspect,
 	type ExtrovertTeamMember,
 	parseExtrovertCampaignList,
-	parseExtrovertProspectList,
+	parseExtrovertProspectsV2,
 	parseExtrovertTeamMemberList,
 } from "@crm/validation/extrovert-api";
 import { Injectable } from "@nestjs/common";
@@ -25,12 +24,18 @@ export class ExtrovertClient {
 		);
 	}
 
-	async listProspects(
+	async listProspectsPage(
 		key: string,
-		campaignId: string,
-	): Promise<ExtrovertProspect[]> {
-		return parseExtrovertProspectList(
-			await this.request(key, EXTROVERT.api.prospectsPath, { campaignId }),
+		input: { limit: number; offset: number },
+	): Promise<{
+		prospects: ReturnType<typeof parseExtrovertProspectsV2>["prospects"];
+		total: number;
+	}> {
+		return parseExtrovertProspectsV2(
+			await this.request(key, EXTROVERT.api.prospectsPath, {
+				limit: String(input.limit),
+				offset: String(input.offset),
+			}),
 		);
 	}
 

@@ -234,8 +234,8 @@ export class ContactsService {
 						directComments: true,
 						indirectComments: true,
 						likes: true,
-						lastCommentAt: true,
 						connectionStatus: true,
+						connectedMember: { select: { name: true } },
 					},
 				},
 			},
@@ -316,8 +316,8 @@ export class ContactsService {
 						directComments: extrovert.directComments,
 						indirectComments: extrovert.indirectComments,
 						likes: extrovert.likes,
-						lastCommentAt: extrovert.lastCommentAt?.toISOString() ?? null,
 						connectionStatus: extrovert.connectionStatus,
+						connectedMemberName: extrovert.connectedMember?.name ?? null,
 					}
 				: null,
 		};
