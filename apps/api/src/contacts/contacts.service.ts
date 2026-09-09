@@ -226,6 +226,18 @@ export class ContactsService {
 						nextContactAt: true,
 					},
 				},
+				extrovertProspects: {
+					orderBy: { updatedAt: "desc" },
+					take: 1,
+					select: {
+						campaignName: true,
+						directComments: true,
+						indirectComments: true,
+						likes: true,
+						lastCommentAt: true,
+						connectionStatus: true,
+					},
+				},
 			},
 		});
 
@@ -241,6 +253,7 @@ export class ContactsService {
 		const {
 			deals,
 			instantlyCampaigns,
+			extrovertProspects,
 			createdAt,
 			archivedAt,
 			brief,
@@ -252,6 +265,7 @@ export class ContactsService {
 			instantlyCampaigns.find((campaign) => campaign.status === 1) ??
 			instantlyCampaigns[0] ??
 			null;
+		const extrovert = extrovertProspects[0] ?? null;
 
 		return {
 			...rest,
@@ -294,6 +308,16 @@ export class ContactsService {
 							instantlyCampaign.lastContactAt?.toISOString() ?? null,
 						nextContactAt:
 							instantlyCampaign.nextContactAt?.toISOString() ?? null,
+					}
+				: null,
+			extrovert: extrovert
+				? {
+						campaignName: extrovert.campaignName,
+						directComments: extrovert.directComments,
+						indirectComments: extrovert.indirectComments,
+						likes: extrovert.likes,
+						lastCommentAt: extrovert.lastCommentAt?.toISOString() ?? null,
+						connectionStatus: extrovert.connectionStatus,
 					}
 				: null,
 		};

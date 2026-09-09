@@ -2,6 +2,7 @@
 
 import Plug from "@carbon/icons-react/es/Plug";
 import DocusignLogo from "@crm/ui/components/brand-logos/docusign";
+import ExtrovertLogo from "@crm/ui/components/brand-logos/extrovert";
 import GoogleLogo from "@crm/ui/components/brand-logos/google";
 import InstantlyLogo from "@crm/ui/components/brand-logos/instantly";
 import MicrosoftLogo from "@crm/ui/components/brand-logos/microsoft";
@@ -72,6 +73,14 @@ export function AddConnectionDialog({
 							name="Instantly"
 							description="Bring in replies and interested leads from your cold-email campaigns"
 							href={`/${slug}/settings/connections/instantly`}
+						/>
+					) : null}
+					{!connected.includes("Extrovert") ? (
+						<CatalogRow
+							logo={ExtrovertLogo}
+							name="Extrovert"
+							description="Bring in LinkedIn prospects and engagement from commenting campaigns"
+							href={`/${slug}/settings/connections/extrovert`}
 						/>
 					) : null}
 					<CatalogRow

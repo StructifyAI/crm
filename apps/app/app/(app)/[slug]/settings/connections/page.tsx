@@ -1,3 +1,4 @@
+import ExtrovertLogo from "@crm/ui/components/brand-logos/extrovert";
 import GoogleLogo from "@crm/ui/components/brand-logos/google";
 import InstantlyLogo from "@crm/ui/components/brand-logos/instantly";
 import MicrosoftLogo from "@crm/ui/components/brand-logos/microsoft";
@@ -32,11 +33,12 @@ async function ConnectionsSettingsPageContent({
 	const [{ slug }, query] = await Promise.all([params, searchParams]);
 	const queryClient = getServerQueryClient();
 	const trpc = getServerTrpc();
-	const [google, microsoft, slack, instantly] = await Promise.all([
+	const [google, microsoft, slack, instantly, extrovert] = await Promise.all([
 		queryClient.fetchQuery(trpc.google.status.queryOptions()),
 		queryClient.fetchQuery(trpc.microsoft.status.queryOptions()),
 		queryClient.fetchQuery(trpc.slack.status.queryOptions()),
 		queryClient.fetchQuery(trpc.instantly.status.queryOptions()),
+		queryClient.fetchQuery(trpc.extrovert.status.queryOptions()),
 	]);
 	const rows = [
 		...(google.linked
@@ -96,6 +98,25 @@ async function ConnectionsSettingsPageContent({
 					},
 				]
 			: []),
+		...(extrovert.connected
+			? [
+					{
+						name: "Extrovert",
+						status: extrovert.lastEventAt ? (
+							<>
+								Last event <LocalRelativeTime date={extrovert.lastEventAt} />
+							</>
+						) : (
+							"Connected, waiting for the first event"
+						),
+						bringsIn:
+							"Prospects and LinkedIn engagement from your campaigns, filed as contacts",
+						sends: "Nothing, so nothing here can change Extrovert",
+						href: `/${slug}/settings/connections/extrovert`,
+						logo: ExtrovertLogo,
+					},
+				]
+			: []),
 	];
 
 	return (
@@ -142,6 +163,12 @@ async function ConnectionsSettingsPageContent({
 							name="Google Workspace"
 							description="File email and meetings against the right company"
 							href={`/${slug}/settings/connections/google`}
+						/>
+						<StarterRow
+							logo={ExtrovertLogo}
+							name="Extrovert"
+							description="File LinkedIn prospects and engagement from commenting campaigns"
+							href={`/${slug}/settings/connections/extrovert`}
 						/>
 						<StarterRow
 							logo={SlackLogo}

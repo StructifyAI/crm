@@ -233,6 +233,19 @@ The contact status line shows the campaign state and expected next email.
 An `email_sent` webhook updates that status line without creating an activity.
 Only replies create a note.
 
+## Extrovert
+
+Extrovert sends webhook events to `/api/extrovert/events/:secret`.
+The webhook secret stays in the URL and rotates from the connection page.
+Malformed payloads return 204 to prevent repeated vendor retries.
+Webhook LinkedIn URLs resolve to contacts through normalized profile URLs.
+New contacts use the Extrovert record source and receive an engagement note.
+Existing contacts receive a note without changing an existing owner.
+An optional API key syncs campaign prospects every 15 minutes.
+Team members map to CRM owners by case-insensitive email matching.
+Manual owner mappings stay in place until a user removes them.
+The contact status line shows the campaign name, comments, likes, and connection state.
+
 Missing from the repo and living only in Paper: **hubspot** (`hubspot icon`
 `L5E-0`), **docusign** (`docusign logo` `L5Z-0`), **ergo** (`ergo logo` `KJJ-0`).
 Extract their path data into `brand-logos/*.tsx` shaped like `stripe.tsx` when

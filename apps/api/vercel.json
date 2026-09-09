@@ -14,6 +14,10 @@
 			"schedule": "*/15 * * * *"
 		},
 		{
+			"path": "/internal/sync/extrovert",
+			"schedule": "*/15 * * * *"
+		},
+		{
 			"path": "/internal/sync/rates",
 			"schedule": "0 6 * * *"
 		},

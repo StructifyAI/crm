@@ -72,6 +72,29 @@ type Contact = RouterOutputs["contacts"]["byId"];
 const NONE = "none";
 
 type InstantlyContactStatus = NonNullable<Contact["instantly"]>;
+type ExtrovertContactStatus = NonNullable<Contact["extrovert"]>;
+
+function extrovertStatusLabel(status: ExtrovertContactStatus) {
+	const comments = status.directComments + status.indirectComments;
+	const prefix =
+		status.connectionStatus === "connected" ? "Connected on LinkedIn · " : "";
+	const detail =
+		comments > 0
+			? `${comments} comment${comments === 1 ? "" : "s"}${status.lastCommentAt ? ", last " : ""}`
+			: "";
+	return {
+		tone: status.connectionStatus === "connected" ? "success" : "info",
+		label: (
+			<>
+				{prefix}In Extrovert campaign "{status.campaignName}"
+				{detail ? ` · ${detail}` : ""}
+				{status.lastCommentAt ? (
+					<LocalRelativeDate date={status.lastCommentAt} />
+				) : null}
+			</>
+		),
+	} as const;
+}
 
 function instantlyStatusLabel(status: InstantlyContactStatus) {
 	const campaign = `Instantly campaign "${status.campaignName}"`;
@@ -206,6 +229,9 @@ export function ContactSheet({ contactId }: { contactId: string }) {
 						) : null}
 						{contact.instantly ? (
 							<StatusIndicator {...instantlyStatusLabel(contact.instantly)} />
+						) : null}
+						{contact.extrovert ? (
+							<StatusIndicator {...extrovertStatusLabel(contact.extrovert)} />
 						) : null}
 						{contact.enrichmentStatus !== "COMPLETE" ? (
 							<EnrichmentIndicator

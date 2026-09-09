@@ -274,6 +274,16 @@ export const contactByIdOutput = z.object({
 			nextContactAt: z.string().nullable(),
 		})
 		.nullable(),
+	extrovert: z
+		.object({
+			campaignName: z.string(),
+			directComments: z.number(),
+			indirectComments: z.number(),
+			likes: z.number(),
+			lastCommentAt: z.string().nullable(),
+			connectionStatus: z.string().nullable(),
+		})
+		.nullable(),
 });
 
 export const contactBasicOutput = z.object({

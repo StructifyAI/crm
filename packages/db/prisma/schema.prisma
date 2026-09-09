@@ -43,6 +43,7 @@ model User {
   conversationFeedback    AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
   slackMemberMatch        SlackMemberMatch?
   instantlyMailboxes      InstantlyMailbox[]            @relation("InstantlyMailboxOwner")
+  extrovertMembers        ExtrovertMember[]             @relation("ExtrovertMemberOwner")
 
   members     Member[]
   invitations Invitation[]
@@ -119,6 +120,20 @@ model InstantlyMailbox {
   updatedAt    DateTime  @updatedAt
 
   @@map("instantlyMailbox")
+}
+
+model ExtrovertMember {
+  id          String   @id
+  name        String
+  email       String?
+  linkedinUrl String?
+  ownerId     String?
+  owner       User?    @relation("ExtrovertMemberOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  lastSeenAt  DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("extrovertMember")
 }
 
 model Session {
@@ -216,6 +231,7 @@ enum RecordSource {
   CALENDAR
   TRACKING
   INSTANTLY
+  EXTROVERT
 }
 
 enum AgentConversationKind {
@@ -407,6 +423,7 @@ model Contact {
   visitors        TrackedVisitor[]   @relation("VisitorContact")
   submissions     FormSubmission[]   @relation("SubmissionContact")
   instantlyCampaigns InstantlyCampaignLead[]
+  extrovertProspects ExtrovertProspect[]
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
@@ -1343,6 +1360,11 @@ model AppSetting {
   instantlyApiKey          String?
   instantlyLastSyncAt      DateTime?
   instantlySyncError       String?
+  extrovertApiKey          String?
+  extrovertWebhookSecret   String?
+  extrovertLastEventAt     DateTime?
+  extrovertLastSyncAt      DateTime?
+  extrovertLastSyncError   String?
 
   updatedAt DateTime @updatedAt
 
@@ -1369,6 +1391,27 @@ model InstantlyCampaignLead {
 
   @@unique([contactId, campaignId])
   @@map("instantlyCampaignLead")
+}
+
+model ExtrovertProspect {
+  id               String    @id
+  contactId        String
+  contact          Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  campaignId       String
+  campaignName     String
+  listName         String?
+  memberId         String?
+  directComments   Int
+  indirectComments Int
+  likes            Int
+  lastCommentAt    DateTime?
+  connectionStatus String?
+  connectedDate    DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([contactId])
+  @@map("extrovertProspect")
 }
 
 enum DomainScope {
