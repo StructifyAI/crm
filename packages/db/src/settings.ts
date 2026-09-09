@@ -7,6 +7,25 @@ import {
 
 export const SETTINGS_ID = "app";
 
+export async function readExtrovertApiKey(db: Db): Promise<string | null> {
+	const row = await db.appSetting.findUnique({
+		where: { id: SETTINGS_ID },
+		select: { extrovertApiKey: true },
+	});
+	return row?.extrovertApiKey?.trim() || null;
+}
+
+export async function writeExtrovertApiKey(
+	db: Db,
+	apiKey: string | null,
+): Promise<void> {
+	await db.appSetting.upsert({
+		where: { id: SETTINGS_ID },
+		create: { id: SETTINGS_ID, extrovertApiKey: apiKey },
+		update: { extrovertApiKey: apiKey },
+	});
+}
+
 export const DEFAULT_AGENT_MODEL = {
 	id: "zai/glm-5.2-fast",
 	contextWindowTokens: 1_000_000,

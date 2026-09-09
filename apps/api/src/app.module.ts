@@ -19,6 +19,7 @@ import { DashboardModule } from "./dashboard/dashboard.module";
 import { DatabaseModule } from "./database/database.module";
 import { DealsModule } from "./deals/deals.module";
 import { EnrichmentModule } from "./enrichment/enrichment.module";
+import { ExtrovertModule } from "./extrovert/extrovert.module";
 import { FieldsModule } from "./fields/fields.module";
 import { GoogleModule } from "./google/google.module";
 import { GranolaModule } from "./granola/granola.module";
@@ -73,6 +74,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		GoogleModule,
 		MicrosoftModule,
 		InstantlyModule,
+		ExtrovertModule,
 		SyncModule,
 		SettingsModule,
 		WorkspaceModule,

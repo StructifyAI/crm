@@ -39,6 +39,7 @@ export type CrmCache = {
 	workspace(options?: Options): Promise<void>;
 	slack(options?: Options): Promise<void>;
 	instantly(options?: Options): Promise<void>;
+	extrovert(options?: Options): Promise<void>;
 	sso(options?: Options): Promise<void>;
 	apiKeys(options?: Options): Promise<void>;
 	tracking(options?: Options): Promise<void>;
@@ -314,6 +315,16 @@ export function useCrmCache(): CrmCache {
 				[
 					trpc.instantly.status.queryKey(),
 					trpc.instantly.listMailboxes.queryKey(),
+				],
+				[trpc.contacts.byId.queryKey(), ...listKeys()],
+				options,
+			),
+
+		extrovert: (options) =>
+			run(
+				[
+					trpc.extrovert.status.queryKey(),
+					trpc.extrovert.listMembers.queryKey(),
 				],
 				[trpc.contacts.byId.queryKey(), ...listKeys()],
 				options,

@@ -19,7 +19,10 @@
 		"./granola-sync-resume": "./src/granola-sync-resume.ts",
 		"./saved-view": "./src/saved-view.ts",
 		"./instantly-webhook": "./src/instantly-webhook.ts",
-		"./instantly-api": "./src/instantly-api.ts"
+		"./instantly-api": "./src/instantly-api.ts",
+		"./extrovert-api": "./src/extrovert-api.ts",
+		"./extrovert-webhook": "./src/extrovert-webhook.ts",
+		"./linkedin-url": "./src/linkedin-url.ts"
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",
