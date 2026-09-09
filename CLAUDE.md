@@ -15,6 +15,10 @@ two commits that are submitted upstream and not yet released:
   `MEETING` activities get a `dealId` when the company has exactly one open deal.
 - `feat(api): sync Granola meeting notes onto meetings` — `GRANOLA_API_KEY`, cron
   `/internal/sync/granola`, migrations `granola_sync` and `granola_sync_resume`.
+- `feat: add Instantly connection with campaign sync and mailbox owner mapping` —
+  `INSTANTLY` record source, `InstantlyMailbox`/`InstantlyCampaignLead`, cron
+  `/internal/sync/instantly`, migrations `instantly_connection` and
+  `instantly_backfill`.
 - `fix(api): read function crons from vercel.json` — `build-func.mjs` emitted a
   hardcoded single cron, dropping rates, telemetry, retention and prune crons in
   production. Replaces the deleted `structify-crons` branch.
