@@ -843,16 +843,18 @@ export class ContactsService {
 	}
 
 	private searchFilter(q: string): Prisma.ContactWhereInput {
-		const term = q.trim();
-		if (!term) return {};
+		const terms = q.split(/\s+/).filter(Boolean);
+		if (terms.length === 0) return {};
 
 		return {
-			OR: [
-				{ firstName: { contains: term, mode: "insensitive" } },
-				{ lastName: { contains: term, mode: "insensitive" } },
-				{ email: { contains: term, mode: "insensitive" } },
-				{ company: { name: { contains: term, mode: "insensitive" } } },
-			],
+			AND: terms.map((term) => ({
+				OR: [
+					{ firstName: { contains: term, mode: "insensitive" } },
+					{ lastName: { contains: term, mode: "insensitive" } },
+					{ email: { contains: term, mode: "insensitive" } },
+					{ company: { name: { contains: term, mode: "insensitive" } } },
+				],
+			})),
 		};
 	}
 
