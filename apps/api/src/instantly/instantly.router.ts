@@ -7,7 +7,7 @@ import {
 	Router,
 	UseMiddlewares,
 } from "nestjs-trpc";
-import type { z } from "zod";
+import { z } from "zod";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
@@ -116,6 +116,7 @@ export class InstantlyRouter {
 
 	@Mutation({
 		input: instantlyRemoveMailboxInput,
+		output: z.void(),
 		meta: restMeta("DELETE", "/instantly/mailboxes/{id}", ["Instantly"]),
 	})
 	removeMailbox(

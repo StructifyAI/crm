@@ -7,7 +7,7 @@ import {
 	Router,
 	UseMiddlewares,
 } from "nestjs-trpc";
-import type { z } from "zod";
+import { z } from "zod";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
@@ -103,6 +103,7 @@ export class ExtrovertRouter {
 
 	@Mutation({
 		input: extrovertRemoveMemberInput,
+		output: z.void(),
 		meta: restMeta("DELETE", "/extrovert/members/{id}", ["Extrovert"]),
 	})
 	removeMember(
