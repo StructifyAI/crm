@@ -155,6 +155,7 @@ describe("Extrovert client", () => {
 			return new Response(
 				JSON.stringify({
 					status: "success",
+					statusCode: 200,
 					data: [
 						{
 							id: "campaign-1",
@@ -350,7 +351,17 @@ describe("Extrovert sync", () => {
 		});
 		const client = {
 			listTeamMembers: async () => [member],
-			listCampaigns: async () => [],
+			listCampaigns: async () => [
+				campaign({
+					owner: {
+						id: memberId,
+						name: "Mapped Member",
+						firstName: "Mapped",
+						lastName: "Member",
+					},
+				}),
+			],
+			listProspects: async () => [],
 		} as unknown as ExtrovertClient;
 		const sync = new ExtrovertSyncService(db, client, filing);
 

@@ -41,8 +41,9 @@ export class ExtrovertSyncService {
 			const members = await this.client.listTeamMembers(
 				setting.extrovertApiKey,
 			);
+			const memberOwners = new Map<string, string | null>();
 			for (const member of members) {
-				await this.upsertMember(member);
+				memberOwners.set(member.id, (await this.upsertMember(member)).ownerId);
 			}
 			const campaigns = await this.client.listCampaigns(
 				setting.extrovertApiKey,
@@ -53,9 +54,14 @@ export class ExtrovertSyncService {
 			result.campaigns = activeCampaigns.length;
 			const observed = new Set<string>();
 			for (const campaign of activeCampaigns) {
-				const ownerId = campaign.owner
-					? (await this.upsertMember(campaign.owner)).ownerId
-					: null;
+				let ownerId: string | null = null;
+				if (campaign.owner) {
+					if (memberOwners.has(campaign.owner.id)) {
+						ownerId = memberOwners.get(campaign.owner.id) ?? null;
+					} else {
+						ownerId = (await this.upsertMember(campaign.owner)).ownerId;
+					}
+				}
 				const prospects = await this.client.listProspects(
 					setting.extrovertApiKey,
 					campaign.id,
