@@ -26,7 +26,7 @@ import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
 import { googleConnectionStatusOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { instantlyStatusOutput, instantlyMailboxesOutput, instantlyAddMailboxInput, instantlySetMailboxOwnerInput, instantlyRemoveMailboxInput, instantlyMailboxOutput, instantlyApiKeyInput, instantlySyncOutput } from "../instantly/instantly.contracts";
-import { extrovertStatusOutput, extrovertMembersOutput, extrovertSetMemberOwnerInput, extrovertRemoveMemberInput, extrovertMemberOutput, extrovertApiKeyInput, extrovertSyncOutput } from "../extrovert/extrovert.contracts";
+import { extrovertStatusOutput, extrovertMembersOutput, extrovertSetMemberOwnerInput, extrovertRemoveMemberInput, extrovertMemberOutput, extrovertApiKeyInput, extrovertSyncOutput, extrovertSetConnectionFieldInput } from "../extrovert/extrovert.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput } from "../settings/settings.contracts";
@@ -692,6 +692,10 @@ const appRouter = t.router({
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     sync: publicProcedure
       .output(extrovertSyncOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setConnectionField: publicProcedure
+      .input(extrovertSetConnectionFieldInput)
+      .output(extrovertStatusOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     listMembers: publicProcedure
       .output(extrovertMembersOutput)

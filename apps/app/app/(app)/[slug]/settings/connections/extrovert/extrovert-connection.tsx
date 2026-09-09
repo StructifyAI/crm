@@ -20,7 +20,7 @@ import {
 	SelectValue,
 } from "@crm/ui/components/select";
 import { StatusIndicator } from "@crm/ui/components/status-indicator";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -38,6 +38,14 @@ type Status = {
 	lastSyncError: string | null;
 	prospectCount: number;
 	memberCount: number;
+	connectionField: {
+		id: string;
+		key: string;
+		label: string;
+		type: "USER" | "SELECT" | "TEXT";
+	} | null;
+	syncInProgress: boolean;
+	syncProgress: { done: number; total: number | null } | null;
 };
 
 type Member = {
@@ -68,6 +76,12 @@ export function ExtrovertConnection({
 	const [members, setMembers] = useState(initialMembers);
 	const [apiKey, setApiKey] = useState("");
 	const [confirming, setConfirming] = useState(false);
+	const fields = useQuery(
+		trpc.fields.list.queryOptions({
+			entity: "CONTACT",
+			includeArchived: false,
+		}),
+	);
 	const connect = useMutation(
 		trpc.extrovert.connect.mutationOptions({
 			onSuccess: async () => {
@@ -119,8 +133,20 @@ export function ExtrovertConnection({
 				if (result.error) toast.error(result.error);
 				else
 					toast.success(
-						`Synced ${result.prospects} prospects from ${result.campaigns} campaigns`,
+						result.complete
+							? `Synced ${result.prospects} prospects`
+							: `Synced ${result.prospects} prospects. The next tick continues this sync.`,
 					);
+				router.refresh();
+			},
+			onError: (error) => toast.error(error.message),
+		}),
+	);
+	const setConnectionField = useMutation(
+		trpc.extrovert.setConnectionField.mutationOptions({
+			onSuccess: async () => {
+				await cache.extrovert();
+				toast.success("Connected-via field saved.");
 				router.refresh();
 			},
 			onError: (error) => toast.error(error.message),
@@ -213,6 +239,13 @@ export function ExtrovertConnection({
 							<p className="text-muted-foreground text-sm">
 								{status.prospectCount} prospects
 							</p>
+							{status.syncInProgress && status.syncProgress ? (
+								<p className="text-muted-foreground text-sm">
+									Syncing… {status.syncProgress.done} of{" "}
+									{status.syncProgress.total ?? "an unknown number"}. Continues
+									every 15 minutes.
+								</p>
+							) : null}
 							{status.lastSyncError ? (
 								<StatusIndicator tone="error" label={status.lastSyncError} />
 							) : null}
@@ -250,6 +283,39 @@ export function ExtrovertConnection({
 						</Button>
 					</form>
 				)}
+			</section>
+			<section className="flex flex-col gap-4 px-(--spacing-block-inline) py-5">
+				<div>
+					<h2 className="font-medium text-sm">Connected via</h2>
+					<p className="mt-1 text-muted-foreground text-xs">
+						Sync writes the Extrovert member whose LinkedIn account is connected
+						to the contact into this field.
+					</p>
+				</div>
+				<Select
+					value={status.connectionField?.id ?? "none"}
+					onValueChange={(fieldId) =>
+						setConnectionField.mutate({
+							fieldId: fieldId === "none" ? null : fieldId,
+						})
+					}
+				>
+					<SelectTrigger className="max-w-md" aria-label="Connected via field">
+						<SelectValue placeholder="None" />
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="none">None</SelectItem>
+						{fields.data
+							?.filter((field) =>
+								["USER", "SELECT", "TEXT"].includes(field.type),
+							)
+							.map((field) => (
+								<SelectItem value={field.id} key={field.id}>
+									{field.label}
+								</SelectItem>
+							))}
+					</SelectContent>
+				</Select>
 			</section>
 			<section className="flex flex-col gap-4 px-(--spacing-block-inline) py-5">
 				<div>

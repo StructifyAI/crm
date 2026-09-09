@@ -21,6 +21,7 @@
 		"./instantly-webhook": "./src/instantly-webhook.ts",
 		"./instantly-api": "./src/instantly-api.ts",
 		"./extrovert-api": "./src/extrovert-api.ts",
+		"./extrovert-sync-resume": "./src/extrovert-sync-resume.ts",
 		"./extrovert-webhook": "./src/extrovert-webhook.ts",
 		"./linkedin-url": "./src/linkedin-url.ts"
 	},

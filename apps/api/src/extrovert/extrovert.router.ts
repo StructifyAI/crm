@@ -16,6 +16,7 @@ import {
 	extrovertMemberOutput,
 	extrovertMembersOutput,
 	extrovertRemoveMemberInput,
+	extrovertSetConnectionFieldInput,
 	extrovertSetMemberOwnerInput,
 	extrovertStatusOutput,
 	extrovertSyncOutput,
@@ -79,6 +80,18 @@ export class ExtrovertRouter {
 	})
 	sync(@Ctx() ctx: AuthedTrpcContext) {
 		return this.service.sync(ctx.user.id);
+	}
+
+	@Mutation({
+		input: extrovertSetConnectionFieldInput,
+		output: extrovertStatusOutput,
+		meta: restMeta("PUT", "/extrovert/connection-field", ["Extrovert"]),
+	})
+	setConnectionField(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof extrovertSetConnectionFieldInput>,
+	) {
+		return this.service.setConnectionField(input.fieldId, ctx.user.id);
 	}
 
 	@Query({

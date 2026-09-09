@@ -276,12 +276,12 @@ export const contactByIdOutput = z.object({
 		.nullable(),
 	extrovert: z
 		.object({
-			campaignName: z.string(),
+			campaignName: z.string().nullable(),
 			directComments: z.number(),
 			indirectComments: z.number(),
 			likes: z.number(),
-			lastCommentAt: z.string().nullable(),
 			connectionStatus: z.string().nullable(),
+			connectedMemberName: z.string().nullable(),
 		})
 		.nullable(),
 });

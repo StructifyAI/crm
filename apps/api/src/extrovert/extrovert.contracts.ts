@@ -9,6 +9,21 @@ export const extrovertStatusOutput = z.object({
 	lastSyncError: z.string().nullable(),
 	prospectCount: z.number(),
 	memberCount: z.number(),
+	connectionField: z
+		.object({
+			id: z.string(),
+			key: z.string(),
+			label: z.string(),
+			type: z.enum(["USER", "SELECT", "TEXT"]),
+		})
+		.nullable(),
+	syncInProgress: z.boolean(),
+	syncProgress: z
+		.object({
+			done: z.number(),
+			total: z.number().nullable(),
+		})
+		.nullable(),
 });
 
 export const extrovertApiKeyInput = z.object({
@@ -16,10 +31,17 @@ export const extrovertApiKeyInput = z.object({
 });
 
 export const extrovertSyncOutput = z.object({
-	campaigns: z.number(),
+	complete: z.boolean(),
+	resumed: z.boolean(),
 	prospects: z.number(),
 	created: z.number(),
+	fieldSkipped: z.number(),
+	total: z.number().nullable(),
 	error: z.string().nullable(),
+});
+
+export const extrovertSetConnectionFieldInput = z.object({
+	fieldId: z.string().nullable(),
 });
 
 export const extrovertMemberOutput = z.object({

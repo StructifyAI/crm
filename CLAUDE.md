@@ -21,7 +21,7 @@ two commits that are submitted upstream and not yet released:
   `instantly_backfill`.
 - `feat(api,app): extrovert connection` — `EXTROVERT` record source,
   `ExtrovertMember`/`ExtrovertProspect`, webhook `/api/extrovert/events/:secret`, cron
-  `/internal/sync/extrovert`, migration `extrovert_connection`.
+  `/internal/sync/extrovert`, migrations `extrovert_connection` and `extrovert_v2_sync`.
 - `fix(api): match every word of a contact or company search` — search splits on
   whitespace; every word must match a field.
 - `fix(api): read function crons from vercel.json` — `build-func.mjs` emitted a

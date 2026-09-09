@@ -130,6 +130,7 @@ model ExtrovertMember {
   ownerId     String?
   owner       User?    @relation("ExtrovertMemberOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   lastSeenAt  DateTime
+  connectedProspects ExtrovertProspect[] @relation("ExtrovertConnectedMember")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1060,6 +1061,7 @@ model FieldDefinition {
 
   options FieldOption[]
   values  FieldValue[]
+  extrovertConnectionSettings AppSetting[] @relation("ExtrovertConnectionField")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1365,6 +1367,9 @@ model AppSetting {
   extrovertLastEventAt     DateTime?
   extrovertLastSyncAt      DateTime?
   extrovertLastSyncError   String?
+  extrovertSyncResume      Json?
+  extrovertConnectionFieldId String?
+  extrovertConnectionField FieldDefinition? @relation("ExtrovertConnectionField", fields: [extrovertConnectionFieldId], references: [id], onDelete: SetNull)
 
   updatedAt DateTime @updatedAt
 
@@ -1397,20 +1402,24 @@ model ExtrovertProspect {
   id               String    @id
   contactId        String
   contact          Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  campaignId       String
-  campaignName     String
+  campaignId       String?
+  campaignName     String?
   listName         String?
   memberId         String?
+  connectedMemberId String?
+  connectedMember   ExtrovertMember? @relation("ExtrovertConnectedMember", fields: [connectedMemberId], references: [id], onDelete: SetNull)
   directComments   Int
   indirectComments Int
   likes            Int
-  lastCommentAt    DateTime?
   connectionStatus String?
   connectedDate    DateTime?
+  lastSeenAt        DateTime
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   @@index([contactId])
+  @@index([lastSeenAt])
+  @@index([connectedMemberId])
   @@map("extrovertProspect")
 }
 

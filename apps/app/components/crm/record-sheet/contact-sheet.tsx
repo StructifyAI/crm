@@ -76,21 +76,22 @@ type ExtrovertContactStatus = NonNullable<Contact["extrovert"]>;
 
 function extrovertStatusLabel(status: ExtrovertContactStatus) {
 	const comments = status.directComments + status.indirectComments;
-	const prefix =
-		status.connectionStatus === "connected" ? "Connected on LinkedIn · " : "";
-	const detail =
-		comments > 0
-			? `${comments} comment${comments === 1 ? "" : "s"}${status.lastCommentAt ? ", last " : ""}`
+	const prefix = status.connectedMemberName
+		? `Connected on LinkedIn via ${status.connectedMemberName} · `
+		: status.connectionStatus === "connected"
+			? "Connected on LinkedIn · "
 			: "";
+	const detail =
+		comments > 0 ? `${comments} comment${comments === 1 ? "" : "s"}` : "";
 	return {
 		tone: status.connectionStatus === "connected" ? "success" : "info",
 		label: (
 			<>
-				{prefix}In Extrovert campaign "{status.campaignName}"
+				{prefix}
+				{status.campaignName
+					? `In Extrovert campaign "${status.campaignName}"`
+					: "In Extrovert"}
 				{detail ? ` · ${detail}` : ""}
-				{status.lastCommentAt ? (
-					<LocalRelativeDate date={status.lastCommentAt} />
-				) : null}
 			</>
 		),
 	} as const;

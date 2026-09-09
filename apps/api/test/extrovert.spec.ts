@@ -6,13 +6,13 @@ import {
 	expect,
 	it,
 } from "bun:test";
-import { db } from "@crm/db";
+import { db, Prisma } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
 import type {
-	ExtrovertCampaign,
-	ExtrovertProspect,
+	ExtrovertProspectV2,
 	ExtrovertTeamMember,
 } from "@crm/validation/extrovert-api";
+import { BadRequestException } from "@nestjs/common";
 import { AgentAccessService } from "../src/agent/agent-access.service";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
@@ -44,36 +44,44 @@ const stamp = new ActivityStampService(db);
 const filing = new ExtrovertFilingService(db, agent, stamp);
 const ingest = new ExtrovertIngestService(db, filing);
 
-function campaign(overrides: Partial<ExtrovertCampaign> = {}) {
-	return {
-		id: `campaign-${suffix}`,
-		name: "Spring",
-		isActive: true,
-		isDeleted: false,
-		...overrides,
-	} satisfies ExtrovertCampaign;
-}
-
 function prospect(
 	id: string,
 	profileUrl: string,
-	overrides: Partial<ExtrovertProspect> = {},
+	overrides: Partial<ExtrovertProspectV2> = {},
 ) {
 	return {
 		id,
-		fullName: "Taylor Prospect",
-		firstName: "Taylor",
-		lastName: "Prospect",
-		campaignId: `campaign-${suffix}`,
-		campaignName: "Spring",
-		createdAt: "2026-01-01T00:00:00.000Z",
-		directComments: 1,
-		indirectComments: 2,
-		likes: 3,
-		prospectProfileUrl: profileUrl,
+		isDeleted: false,
+		linkedInProfile: {
+			name: "Taylor Prospect",
+			linkedInUrl: profileUrl,
+		},
+		campaign: { id: `campaign-${suffix}`, name: "Spring" },
+		user: { id: memberId, name: "Mapped Member" },
+		userConnection: null,
+		statistics: {
+			totalPostsCount: 0,
+			answeredPostsCount: 0,
+			totalAnsweredPostsCount: 1,
+			indirectAnsweredPostsCount: 2,
+			postsLikesCount: 3,
+			indirectPostsLikesCount: 0,
+		},
 		...overrides,
-	} satisfies ExtrovertProspect;
+	} satisfies ExtrovertProspectV2;
 }
+
+const appliedValues: Array<Record<string, unknown>> = [];
+const fields = {
+	applyValues: async (
+		_tx: unknown,
+		_entity: string,
+		_recordId: string,
+		values: Record<string, unknown>,
+	) => {
+		appliedValues.push(values);
+	},
+} as never;
 
 async function clean() {
 	await db.extrovertProspect.deleteMany({
@@ -98,6 +106,9 @@ async function clean() {
 	await db.extrovertMember.deleteMany({
 		where: { id: { startsWith: `extrovert-member-${suffix}` } },
 	});
+	await db.fieldDefinition.deleteMany({
+		where: { key: { startsWith: `extrovert-connected-${suffix}` } },
+	});
 	await db.appSetting.updateMany({
 		data: {
 			extrovertApiKey: null,
@@ -105,6 +116,8 @@ async function clean() {
 			extrovertLastEventAt: null,
 			extrovertLastSyncAt: null,
 			extrovertLastSyncError: null,
+			extrovertSyncResume: Prisma.JsonNull,
+			extrovertConnectionFieldId: null,
 		},
 	});
 	await db.user.deleteMany({
@@ -136,6 +149,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
 	queued.length = 0;
+	appliedValues.length = 0;
 	await db.extrovertProspect.deleteMany({
 		where: { id: { startsWith: `extrovert-prospect-${suffix}` } },
 	});
@@ -182,13 +196,16 @@ describe("Extrovert client", () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (input: string | URL) => {
 			expect(String(input)).toBe(
-				"https://api.goextrovert.com/api/client/v1/prospects?campaignId=campaign-1",
+				"https://api.goextrovert.com/client/v2/prospects?limit=200&offset=0",
 			);
 			return new Response("invalid", { status: 401 });
 		}) as unknown as typeof fetch;
 		try {
 			await expect(
-				new ExtrovertClient().listProspects("bad-key", "campaign-1"),
+				new ExtrovertClient().listProspectsPage("bad-key", {
+					limit: 200,
+					offset: 0,
+				}),
 			).rejects.toThrow("Extrovert API key is invalid.");
 		} finally {
 			globalThis.fetch = originalFetch;
@@ -323,13 +340,14 @@ describe("Extrovert sync", () => {
 		let includeSecond = true;
 		const client = {
 			listTeamMembers: async () => [],
-			listCampaigns: async () => [campaign()],
-			listProspects: async () => (includeSecond ? [first, second] : [first]),
+			listProspectsPage: async () => ({
+				prospects: includeSecond ? [first, second] : [first],
+				total: includeSecond ? 2 : 1,
+			}),
 		} as unknown as ExtrovertClient;
-		const sync = new ExtrovertSyncService(db, client, filing);
+		const sync = new ExtrovertSyncService(db, client, filing, fields);
 
 		await expect(sync.run()).resolves.toMatchObject({
-			campaigns: 1,
 			prospects: 2,
 			created: 2,
 			error: null,
@@ -344,18 +362,19 @@ describe("Extrovert sync", () => {
 		).not.toBeNull();
 
 		const firstContact = await db.contact.findFirstOrThrow({
-			where: { linkedinUrl: first.prospectProfileUrl },
+			where: { linkedinUrl: first.linkedInProfile?.linkedInUrl },
 			select: { id: true },
 		});
 		await db.extrovertProspect.create({
 			data: {
 				id: `extrovert-prospect-preserved-${suffix}`,
 				contactId: firstContact.id,
-				campaignId: first.campaignId,
-				campaignName: first.campaignName,
+				campaignId: first.campaign?.id,
+				campaignName: first.campaign?.name,
 				directComments: 0,
 				indirectComments: 0,
 				likes: 0,
+				lastSeenAt: new Date(),
 			},
 		});
 		const failingClient = {
@@ -367,6 +386,7 @@ describe("Extrovert sync", () => {
 			db,
 			failingClient,
 			filing,
+			fields,
 		).run();
 		expect(failed.error).toBe("Extrovert sync failed");
 		expect(
@@ -380,6 +400,111 @@ describe("Extrovert sync", () => {
 				select: { extrovertLastSyncError: true },
 			}),
 		).toEqual({ extrovertLastSyncError: "Extrovert sync failed" });
+	});
+
+	it("paginates by the full response length and completes after the final page", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, extrovertApiKey: "test-key" },
+			update: { extrovertApiKey: "test-key" },
+		});
+		const first = prospect(
+			`extrovert-prospect-page-first-${suffix}`,
+			`https://www.linkedin.com/in/page-first-${suffix}`,
+		);
+		const second = prospect(
+			`extrovert-prospect-page-second-${suffix}`,
+			`https://www.linkedin.com/in/page-second-${suffix}`,
+		);
+		const third = prospect(
+			`extrovert-prospect-page-third-${suffix}`,
+			`https://www.linkedin.com/in/page-third-${suffix}`,
+		);
+		const offsets: number[] = [];
+		const client = {
+			listTeamMembers: async () => [],
+			listProspectsPage: async (
+				_key: string,
+				input: { limit: number; offset: number },
+			) => {
+				offsets.push(input.offset);
+				return input.offset === 0
+					? { prospects: [first, second], total: 3 }
+					: { prospects: [third], total: 3 };
+			},
+		} as unknown as ExtrovertClient;
+
+		const result = await new ExtrovertSyncService(
+			db,
+			client,
+			filing,
+			fields,
+		).run();
+
+		expect(result).toMatchObject({ complete: true, prospects: 3, total: 3 });
+		expect(offsets).toEqual([0, 2]);
+	});
+
+	it("resumes from the stored offset without loading team members", async () => {
+		const resumedMemberId = `${memberId}-resumed`;
+		await db.extrovertMember.create({
+			data: {
+				id: resumedMemberId,
+				name: "Resumed Member",
+				lastSeenAt: new Date(),
+			},
+		});
+		const item = prospect(
+			`extrovert-prospect-resumed-${suffix}`,
+			`https://www.linkedin.com/in/resumed-${suffix}`,
+			{ userConnection: null },
+		);
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: {
+				id: SETTINGS_ID,
+				extrovertApiKey: "test-key",
+				extrovertSyncResume: {
+					runStartedAt: "2026-01-01T00:00:00.000Z",
+					offset: 2,
+					total: 3,
+				},
+			},
+			update: {
+				extrovertApiKey: "test-key",
+				extrovertSyncResume: {
+					runStartedAt: "2026-01-01T00:00:00.000Z",
+					offset: 2,
+					total: 3,
+				},
+			},
+		});
+		let membersCalled = false;
+		const offsets: number[] = [];
+		const client = {
+			listTeamMembers: async () => {
+				membersCalled = true;
+				return [];
+			},
+			listProspectsPage: async (
+				_key: string,
+				input: { limit: number; offset: number },
+			) => {
+				offsets.push(input.offset);
+				return { prospects: [item], total: 3 };
+			},
+		} as unknown as ExtrovertClient;
+
+		const result = await new ExtrovertSyncService(
+			db,
+			client,
+			filing,
+			fields,
+		).run();
+
+		expect(result).toMatchObject({ complete: true, resumed: true, total: 3 });
+		expect(membersCalled).toBe(false);
+		expect(offsets).toEqual([2]);
 	});
 
 	it("maps members by email and keeps manual owner mappings", async () => {
@@ -400,19 +525,9 @@ describe("Extrovert sync", () => {
 		});
 		const client = {
 			listTeamMembers: async () => [member],
-			listCampaigns: async () => [
-				campaign({
-					owner: {
-						id: memberId,
-						name: "Mapped Member",
-						firstName: "Mapped",
-						lastName: "Member",
-					},
-				}),
-			],
-			listProspects: async () => [],
+			listProspectsPage: async () => ({ prospects: [], total: 0 }),
 		} as unknown as ExtrovertClient;
-		const sync = new ExtrovertSyncService(db, client, filing);
+		const sync = new ExtrovertSyncService(db, client, filing, fields);
 
 		await sync.run();
 		expect(
@@ -432,6 +547,191 @@ describe("Extrovert sync", () => {
 				select: { ownerId: true },
 			}),
 		).toEqual({ ownerId: manualOwnerId });
+	});
+
+	it("writes the connected member owner to the selected contact field", async () => {
+		const connectedMemberId = `${memberId}-connected`;
+		const field = await db.fieldDefinition.create({
+			data: {
+				entity: "CONTACT",
+				key: `extrovert-connected-${suffix}`,
+				label: "Connected via",
+				type: "USER",
+				position: 99,
+			},
+		});
+		const member = {
+			id: connectedMemberId,
+			name: "Mapped Member",
+			firstName: "Mapped",
+			lastName: "Member",
+			linkedInProfile: {
+				email: `${ownerId}@example.test`,
+				linkedInUrl: `https://www.linkedin.com/in/member-${suffix}`,
+			},
+		} satisfies ExtrovertTeamMember;
+		const item = prospect(
+			`extrovert-prospect-connected-${suffix}`,
+			`https://www.linkedin.com/in/connected-${suffix}`,
+			{
+				userConnection: {
+					userId: connectedMemberId,
+					status: "connected",
+					connectedDate: "2026-01-01T00:00:00.000Z",
+				},
+			},
+		);
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: {
+				id: SETTINGS_ID,
+				extrovertApiKey: "test-key",
+				extrovertConnectionFieldId: field.id,
+			},
+			update: {
+				extrovertApiKey: "test-key",
+				extrovertConnectionFieldId: field.id,
+			},
+		});
+		const client = {
+			listTeamMembers: async () => [member],
+			listProspectsPage: async () => ({ prospects: [item], total: 1 }),
+		} as unknown as ExtrovertClient;
+
+		const result = await new ExtrovertSyncService(
+			db,
+			client,
+			filing,
+			fields,
+		).run();
+
+		expect(result).toMatchObject({
+			complete: true,
+			error: null,
+			fieldSkipped: 0,
+		});
+		expect(appliedValues).toEqual([{ [field.key]: ownerId }]);
+	});
+
+	it("skips a user field when the connected member has no CRM owner", async () => {
+		const field = await db.fieldDefinition.create({
+			data: {
+				entity: "CONTACT",
+				key: `extrovert-connected-${suffix}-unmapped`,
+				label: "Connected via",
+				type: "USER",
+				position: 99,
+			},
+		});
+		const unmappedMemberId = `${memberId}-unmapped`;
+		const member = {
+			id: unmappedMemberId,
+			name: "Unmapped Member",
+			firstName: "Unmapped",
+			lastName: "Member",
+			linkedInProfile: {},
+		} satisfies ExtrovertTeamMember;
+		const item = prospect(
+			`extrovert-prospect-unmapped-${suffix}`,
+			`https://www.linkedin.com/in/unmapped-${suffix}`,
+			{
+				userConnection: {
+					userId: unmappedMemberId,
+					status: "connected",
+					connectedDate: null,
+				},
+			},
+		);
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: {
+				id: SETTINGS_ID,
+				extrovertApiKey: "test-key",
+				extrovertConnectionFieldId: field.id,
+			},
+			update: {
+				extrovertApiKey: "test-key",
+				extrovertConnectionFieldId: field.id,
+			},
+		});
+		const client = {
+			listTeamMembers: async () => [member],
+			listProspectsPage: async () => ({ prospects: [item], total: 1 }),
+		} as unknown as ExtrovertClient;
+
+		const result = await new ExtrovertSyncService(
+			db,
+			client,
+			filing,
+			fields,
+		).run();
+
+		expect(result.fieldSkipped).toBe(1);
+		expect(appliedValues).toHaveLength(0);
+	});
+
+	it("skips an invalid select label without failing the sync", async () => {
+		const field = await db.fieldDefinition.create({
+			data: {
+				entity: "CONTACT",
+				key: `extrovert-connected-${suffix}-select`,
+				label: "Connected via",
+				type: "SELECT",
+				position: 99,
+			},
+		});
+		const member = {
+			id: memberId,
+			name: "Unlisted Member",
+			firstName: "Unlisted",
+			lastName: "Member",
+			linkedInProfile: {},
+		} satisfies ExtrovertTeamMember;
+		const item = prospect(
+			`extrovert-prospect-select-${suffix}`,
+			`https://www.linkedin.com/in/select-${suffix}`,
+			{
+				userConnection: {
+					userId: memberId,
+					status: "connected",
+					connectedDate: null,
+				},
+			},
+		);
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: {
+				id: SETTINGS_ID,
+				extrovertApiKey: "test-key",
+				extrovertConnectionFieldId: field.id,
+			},
+			update: {
+				extrovertApiKey: "test-key",
+				extrovertConnectionFieldId: field.id,
+			},
+		});
+		const invalidFields = {
+			applyValues: async () => {
+				throw new BadRequestException("Unknown select option.");
+			},
+		} as never;
+		const client = {
+			listTeamMembers: async () => [member],
+			listProspectsPage: async () => ({ prospects: [item], total: 1 }),
+		} as unknown as ExtrovertClient;
+
+		const result = await new ExtrovertSyncService(
+			db,
+			client,
+			filing,
+			invalidFields,
+		).run();
+
+		expect(result).toMatchObject({
+			complete: true,
+			error: null,
+			fieldSkipped: 1,
+		});
 	});
 });
 
