@@ -1,5 +1,4 @@
-import { workspaceDomains } from "@crm/auth";
-import { ActivityType, type Db, Prisma, RecordSource } from "@crm/db";
+import { ActivityType, type Db, RecordSource } from "@crm/db";
 import type { Touch } from "@crm/db/attribution";
 import {
 	CONTACT_CAP_REASON,
@@ -11,6 +10,7 @@ import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
 import { isMachineDomain } from "../companies/domain";
 import { ActivityStampService } from "../crm/activity-stamp.service";
+import { racedContact, suppressionReason } from "../crm/contact-intake";
 import { normalizeEmail } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
 import {
@@ -79,11 +79,7 @@ export class TrackingFilingService {
 			return this.skip(submission.id, "Not a domain a human reads");
 		}
 
-		if (workspaceDomains().includes(domain)) {
-			return this.skip(submission.id, "One of our own addresses");
-		}
-
-		const suppressed = await this.suppressed(email, domain);
+		const suppressed = await suppressionReason(this.db, email, domain);
 		if (suppressed) return this.skip(submission.id, suppressed);
 
 		const existing = await this.db.contact.findFirst({
@@ -121,7 +117,7 @@ export class TrackingFilingService {
 		} catch (error) {
 			await this.counters.release(window);
 
-			const raced = await this.raced(error, email);
+			const raced = await racedContact(this.db, error, email);
 			if (!raced) throw error;
 
 			await this.attach(submission.id, raced.id, submission);
@@ -143,23 +139,6 @@ export class TrackingFilingService {
 		});
 
 		return { filed: true, contactId: contact.id };
-	}
-
-	private async raced(
-		cause: unknown,
-		email: string,
-	): Promise<{ id: string } | null> {
-		if (
-			!(cause instanceof Prisma.PrismaClientKnownRequestError) ||
-			cause.code !== "P2002"
-		) {
-			return null;
-		}
-
-		return this.db.contact.findFirst({
-			where: { email, archivedAt: null },
-			select: { id: true },
-		});
 	}
 
 	private async attach(
@@ -238,26 +217,5 @@ export class TrackingFilingService {
 		});
 
 		return { filed: false, reason };
-	}
-
-	private async suppressed(
-		email: string,
-		domain: string,
-	): Promise<string | null> {
-		const [contact, host] = await Promise.all([
-			this.db.suppressedContact.findFirst({
-				where: { email: { equals: email, mode: "insensitive" } },
-				select: { email: true },
-			}),
-			this.db.suppressedDomain.findUnique({
-				where: { domain },
-				select: { domain: true },
-			}),
-		]);
-
-		if (contact) return "This address was deleted by a rep";
-		if (host) return "This domain is suppressed";
-
-		return null;
 	}
 }

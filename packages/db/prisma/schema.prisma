@@ -42,6 +42,7 @@ model User {
   conversationSubmissions AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback    AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
   slackMemberMatch        SlackMemberMatch?
+  instantlyMailboxes      InstantlyMailbox[]            @relation("InstantlyMailboxOwner")
 
   members     Member[]
   invitations Invitation[]
@@ -106,6 +107,18 @@ model SlackWorkspaceGrant {
   updatedAt  DateTime @updatedAt
 
   @@map("slackWorkspaceGrant")
+}
+
+model InstantlyMailbox {
+  id           String    @id @default(cuid())
+  emailAccount String    @unique
+  ownerId      String?
+  owner        User?     @relation("InstantlyMailboxOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  lastSeenAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("instantlyMailbox")
 }
 
 model Session {
@@ -202,6 +215,7 @@ enum RecordSource {
   EMAIL
   CALENDAR
   TRACKING
+  INSTANTLY
 }
 
 enum AgentConversationKind {
@@ -1323,6 +1337,8 @@ model AppSetting {
   trackingCookieDays       Int     @default(395)
   trackingConfigHash       String?
   trackingPaused           Boolean @default(false)
+  instantlyWebhookSecret   String?
+  instantlyLastEventAt     DateTime?
 
   updatedAt DateTime @updatedAt
 

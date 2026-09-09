@@ -25,6 +25,7 @@ import { dealListInput, dealListOutput, dealIdInput, dealDetailOutput, dealCreat
 import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
 import { googleConnectionStatusOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
+import { instantlyStatusOutput, instantlyMailboxesOutput, instantlyAddMailboxInput, instantlySetMailboxOwnerInput, instantlyRemoveMailboxInput, instantlyMailboxOutput } from "../instantly/instantly.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput } from "../settings/settings.contracts";
@@ -633,6 +634,32 @@ const appRouter = t.router({
     setArchiveRetention: publicProcedure
       .input(setArchiveRetentionDaysInput)
       .output(archiveRetentionOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  instantly: t.router({
+    status: publicProcedure
+      .output(instantlyStatusOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    connect: publicProcedure
+      .output(instantlyStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    disconnect: publicProcedure
+      .output(instantlyStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    listMailboxes: publicProcedure
+      .output(instantlyMailboxesOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    addMailbox: publicProcedure
+      .input(instantlyAddMailboxInput)
+      .output(instantlyMailboxOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setMailboxOwner: publicProcedure
+      .input(instantlySetMailboxOwnerInput)
+      .output(instantlyMailboxOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    removeMailbox: publicProcedure
+      .input(instantlyRemoveMailboxInput)
+      .output(z.void())
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   slack: t.router({

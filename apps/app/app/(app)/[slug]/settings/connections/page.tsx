@@ -1,4 +1,5 @@
 import GoogleLogo from "@crm/ui/components/brand-logos/google";
+import InstantlyLogo from "@crm/ui/components/brand-logos/instantly";
 import MicrosoftLogo from "@crm/ui/components/brand-logos/microsoft";
 import SlackLogo from "@crm/ui/components/brand-logos/slack";
 import { Button } from "@crm/ui/components/button";
@@ -6,6 +7,7 @@ import { Spinner } from "@crm/ui/components/spinner";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
+import { LocalRelativeTime } from "@/components/local-date-time";
 import { requireSession } from "@/lib/session";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
 import { AddConnectionDialog } from "./add-connection-dialog";
@@ -30,10 +32,11 @@ async function ConnectionsSettingsPageContent({
 	const [{ slug }, query] = await Promise.all([params, searchParams]);
 	const queryClient = getServerQueryClient();
 	const trpc = getServerTrpc();
-	const [google, microsoft, slack] = await Promise.all([
+	const [google, microsoft, slack, instantly] = await Promise.all([
 		queryClient.fetchQuery(trpc.google.status.queryOptions()),
 		queryClient.fetchQuery(trpc.microsoft.status.queryOptions()),
 		queryClient.fetchQuery(trpc.slack.status.queryOptions()),
+		queryClient.fetchQuery(trpc.instantly.status.queryOptions()),
 	]);
 	const rows = [
 		...(google.linked
@@ -71,6 +74,25 @@ async function ConnectionsSettingsPageContent({
 						sends: "Nothing yet",
 						href: `/${slug}/settings/connections/microsoft`,
 						logo: MicrosoftLogo,
+					},
+				]
+			: []),
+		...(instantly.connected
+			? [
+					{
+						name: "Instantly",
+						status: instantly.lastEventAt ? (
+							<>
+								Last event <LocalRelativeTime date={instantly.lastEventAt} />
+							</>
+						) : (
+							"Connected, waiting for the first event"
+						),
+						bringsIn:
+							"Replies and interested leads from campaigns, filed as contacts",
+						sends: "Nothing, so nothing here can change Instantly",
+						href: `/${slug}/settings/connections/instantly`,
+						logo: InstantlyLogo,
 					},
 				]
 			: []),
@@ -133,6 +155,12 @@ async function ConnectionsSettingsPageContent({
 							description="File Outlook email against the right company"
 							href={`/${slug}/settings/connections/microsoft`}
 						/>
+						<StarterRow
+							logo={InstantlyLogo}
+							name="Instantly"
+							description="File replies and interested leads from cold-email campaigns"
+							href={`/${slug}/settings/connections/instantly`}
+						/>
 					</div>
 					<p className="px-(--spacing-block-inline) text-muted-foreground text-sm">
 						Looking for something else?{" "}
@@ -171,7 +199,7 @@ function ConnectionCard({
 	logo: Logo,
 }: {
 	name: string;
-	status: string;
+	status: React.ReactNode;
 	bringsIn: string;
 	sends: string;
 	href: string;

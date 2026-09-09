@@ -17,7 +17,8 @@
 		"./field-templates": "./src/field-templates.ts",
 		"./granola": "./src/granola.ts",
 		"./granola-sync-resume": "./src/granola-sync-resume.ts",
-		"./saved-view": "./src/saved-view.ts"
+		"./saved-view": "./src/saved-view.ts",
+		"./instantly-webhook": "./src/instantly-webhook.ts"
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",
