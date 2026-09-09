@@ -1,5 +1,8 @@
 import { ActivityType, type Db, type Prisma, RecordSource } from "@crm/db";
-import { readGranolaSyncState, writeGranolaSyncState } from "@crm/db/settings";
+import {
+	readGranolaSyncState,
+	writeGranolaSyncState,
+} from "@crm/db/granola-sync-state";
 import { activityMeta } from "@crm/validation/activity-meta";
 import type { GranolaNote } from "@crm/validation/granola";
 import type { GranolaSyncResume } from "@crm/validation/granola-sync-resume";
