@@ -19,6 +19,9 @@ two commits that are submitted upstream and not yet released:
   `INSTANTLY` record source, `InstantlyMailbox`/`InstantlyCampaignLead`, cron
   `/internal/sync/instantly`, migrations `instantly_connection` and
   `instantly_backfill`.
+- `feat(api,app): extrovert connection` — `EXTROVERT` record source,
+  `ExtrovertMember`/`ExtrovertProspect`, webhook `/api/extrovert/events/:secret`, cron
+  `/internal/sync/extrovert`, migration `extrovert_connection`.
 - `fix(api): read function crons from vercel.json` — `build-func.mjs` emitted a
   hardcoded single cron, dropping rates, telemetry, retention and prune crons in
   production. Replaces the deleted `structify-crons` branch.
