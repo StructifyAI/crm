@@ -35,7 +35,7 @@ export class InstantlyFilingService {
 
 	async resolveContact(
 		input: ResolveContactInput,
-	): Promise<{ id: string; created: boolean } | null> {
+	): Promise<{ id: string; created: boolean; ownerId: string | null } | null> {
 		const email = normalizeEmail(input.email);
 		if (!email || isMachineAddress(email) || isAutomatedAddress(email))
 			return null;
@@ -50,9 +50,11 @@ export class InstantlyFilingService {
 			: null;
 		const existing = await this.db.contact.findFirst({
 			where: { email, archivedAt: null },
-			select: { id: true },
+			select: { id: true, ownerId: true },
 		});
-		if (existing) return { id: existing.id, created: false };
+		if (existing) {
+			return { id: existing.id, created: false, ownerId: existing.ownerId };
+		}
 		const companyId = await this.companies.companyForEmail(email);
 		const derived = splitName(
 			[input.firstName, input.lastName].filter(Boolean).join(" ") || null,
@@ -69,14 +71,18 @@ export class InstantlyFilingService {
 					source: RecordSource.INSTANTLY,
 					lastActivityAt: new Date(),
 				},
-				select: { id: true },
+				select: { id: true, ownerId: true },
 			});
 			await this.agent.contactCreated(contact.id, input.reason);
-			return { id: contact.id, created: true };
+			return {
+				id: contact.id,
+				created: true,
+				ownerId: contact.ownerId,
+			};
 		} catch (error) {
 			const raced = await racedContact(this.db, error, email);
 			if (!raced) throw error;
-			return { id: raced.id, created: false };
+			return { id: raced.id, created: false, ownerId: raced.ownerId };
 		}
 	}
 

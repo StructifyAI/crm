@@ -226,7 +226,7 @@ The webhook secret stays in the URL and rotates from the connection page.
 Malformed payloads return 204 to prevent repeated vendor retries.
 Lead events create or update contacts through the standard intake filters.
 Each sending mailbox maps to one workspace member as its contact owner.
-Unmapped mailboxes create unowned contacts.
+Every sync fills the owner for unowned contacts, and unmapped mailboxes stay unowned.
 An optional read-only API key syncs campaign leads every 15 minutes.
 Only leads enrolled in campaigns are imported. Lead-list-only leads are ignored.
 The contact status line shows the campaign state and expected next email.

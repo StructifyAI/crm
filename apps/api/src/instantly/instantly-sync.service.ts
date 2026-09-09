@@ -54,6 +54,20 @@ export class InstantlySyncService {
 						update: {},
 					});
 				}
+				const mailboxOwners = await this.db.instantlyMailbox.findMany({
+					where: { emailAccount: { in: mailboxes } },
+					select: { emailAccount: true, ownerId: true },
+				});
+				const ownerId = mailboxOwners[0]?.ownerId;
+				const campaignOwnerId =
+					ownerId &&
+					mailboxOwners.length === mailboxes.length &&
+					mailboxOwners.every((row) => row.ownerId === ownerId)
+						? ownerId
+						: null;
+				const ownerByMailbox = new Map(
+					mailboxOwners.map((row) => [row.emailAccount, row.ownerId]),
+				);
 				for await (const leads of this.client.listCampaignLeads(
 					setting.instantlyApiKey,
 					campaign.id,
@@ -71,22 +85,15 @@ export class InstantlySyncService {
 						});
 						if (!resolved) continue;
 
-						if (resolved.created && !lastStep?.from) {
-							const owners = await this.db.instantlyMailbox.findMany({
-								where: { emailAccount: { in: mailboxes } },
-								select: { ownerId: true },
+						const mailboxOwner = lastStep?.from
+							? ownerByMailbox.get(lastStep.from.trim().toLowerCase())
+							: null;
+						const candidateOwnerId = mailboxOwner ?? campaignOwnerId;
+						if (resolved.ownerId === null && candidateOwnerId) {
+							await this.db.contact.update({
+								where: { id: resolved.id },
+								data: { ownerId: candidateOwnerId },
 							});
-							const ownerId = owners[0]?.ownerId;
-							if (
-								ownerId &&
-								owners.length === mailboxes.length &&
-								owners.every((row) => row.ownerId === ownerId)
-							) {
-								await this.db.contact.update({
-									where: { id: resolved.id },
-									data: { ownerId },
-								});
-							}
 						}
 
 						const stepIndex = stepIndexFrom(lastStep?.stepID);
