@@ -236,11 +236,6 @@ Only replies create a note.
 ## Extrovert
 
 Extrovert sends webhook events to `/api/extrovert/events/:secret`.
-
-Extrovert posted comments become contact notes. Extrovert DM threads become contact notes.
-One note exists for each comment. One note exists for each conversation and updates in place.
-The sync matches existing LinkedIn URLs only. The sync never creates contacts.
-Sync-created contacts are not enriched automatically. Webhook-created contacts are enriched.
 The webhook secret stays in the URL and rotates from the connection page.
 Disconnecting removes the webhook secret and API key.
 Malformed payloads return 204 to prevent repeated vendor retries.
@@ -256,6 +251,10 @@ Sync-created contacts are not enriched automatically; webhook-created contacts a
 The connection page can select an active contact `USER`, `SELECT`, or `TEXT` field.
 The sync writes the Extrovert member with the connected LinkedIn account into that field.
 The contact status line shows the campaign name, comments, likes, and connection member.
+The activity sync runs every 15 minutes at `/internal/sync/extrovert-engagement`.
+Each posted comment becomes one note on the matched contact.
+Each DM conversation becomes one note that updates in place when a new message arrives.
+The activity sync matches existing contacts by LinkedIn URL only and never creates contacts.
 
 Missing from the repo and living only in Paper: **hubspot** (`hubspot icon`
 `L5E-0`), **docusign** (`docusign logo` `L5Z-0`), **ergo** (`ergo logo` `KJJ-0`).
