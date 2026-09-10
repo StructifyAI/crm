@@ -7,6 +7,7 @@ import { ExtrovertClient } from "./extrovert.client";
 import { ExtrovertController } from "./extrovert.controller";
 import { ExtrovertRouter } from "./extrovert.router";
 import { ExtrovertService } from "./extrovert.service";
+import { ExtrovertEngagementSyncService } from "./extrovert-engagement-sync.service";
 import { ExtrovertFilingService } from "./extrovert-filing.service";
 import { ExtrovertIngestService } from "./extrovert-ingest.service";
 import { ExtrovertSyncService } from "./extrovert-sync.service";
@@ -19,9 +20,10 @@ import { ExtrovertSyncService } from "./extrovert-sync.service";
 		ExtrovertClient,
 		ExtrovertIngestService,
 		ExtrovertSyncService,
+		ExtrovertEngagementSyncService,
 		ExtrovertRouter,
 		ExtrovertService,
 	],
-	exports: [ExtrovertSyncService],
+	exports: [ExtrovertSyncService, ExtrovertEngagementSyncService],
 })
 export class ExtrovertModule {}

@@ -61,6 +61,104 @@ const extrovertUserConnection = z
 	})
 	.passthrough();
 
+export const extrovertPersonRef = z
+	.object({
+		id: z.string().nullable(),
+		name: z.string(),
+		linkedInUrl: z.string().nullable(),
+	})
+	.passthrough();
+
+const extrovertCampaignRef = z
+	.object({
+		id: z.string(),
+		name: z.string(),
+	})
+	.passthrough();
+
+const extrovertPagination = z
+	.object({
+		limit: z.number(),
+		offset: z.number(),
+		total: z.number(),
+	})
+	.passthrough();
+
+export const extrovertCommentV2 = z
+	.object({
+		postId: z.string(),
+		ownerId: z.string(),
+		author: extrovertPersonRef,
+		prospect: extrovertPersonRef.nullable(),
+		engagementRoute: z.string(),
+		campaign: extrovertCampaignRef.nullable(),
+		post: z
+			.object({
+				text: z.string().nullable(),
+				linkedInUrl: z.string().nullable(),
+				publishedAt: z.string().nullable().optional(),
+			})
+			.passthrough(),
+		draft: z.object({ text: z.string().nullable() }).passthrough().nullable(),
+		state: z.string(),
+		completedAt: z.string().nullable(),
+		updatedAt: z.string(),
+	})
+	.passthrough();
+
+export const extrovertCommentsPage = z
+	.object({
+		comments: z.array(extrovertCommentV2),
+		pagination: extrovertPagination,
+	})
+	.passthrough();
+
+export const extrovertConversationV2 = z
+	.object({
+		connectionId: z.string(),
+		ownerId: z.string(),
+		prospect: extrovertPersonRef,
+		context: z
+			.object({ campaign: extrovertCampaignRef.nullable() })
+			.passthrough()
+			.nullable(),
+		connectedAt: z.string().nullable(),
+		lastMessage: z
+			.object({
+				text: z.string(),
+				author: z.enum(["Owner", "Prospect"]),
+				sentAt: z.string(),
+			})
+			.passthrough()
+			.nullable(),
+	})
+	.passthrough();
+
+export const extrovertConversationsPage = z
+	.object({
+		conversations: z.array(extrovertConversationV2),
+		pagination: extrovertPagination,
+	})
+	.passthrough();
+
+export const extrovertDmMessage = z
+	.object({
+		dmId: z.string(),
+		text: z.string(),
+		author: z.enum(["Owner", "Prospect"]),
+		sentAt: z.string(),
+	})
+	.passthrough();
+
+export const extrovertConversationDetail = z
+	.object({
+		connectionId: z.string(),
+		prospect: extrovertPersonRef,
+		messages: z.array(extrovertDmMessage),
+		messagePagination: extrovertPagination,
+	})
+	.passthrough();
+
 export const extrovertProspectV2 = z
 	.object({
 		id: z.string(),
@@ -98,6 +196,16 @@ const extrovertEnvelope = <T extends z.ZodType>(data: T) =>
 export type ExtrovertCampaign = z.infer<typeof extrovertCampaign>;
 export type ExtrovertTeamMember = z.infer<typeof extrovertTeamMember>;
 export type ExtrovertProspectV2 = z.infer<typeof extrovertProspectV2>;
+export type ExtrovertCommentV2 = z.infer<typeof extrovertCommentV2>;
+export type ExtrovertCommentsPage = z.infer<typeof extrovertCommentsPage>;
+export type ExtrovertConversationV2 = z.infer<typeof extrovertConversationV2>;
+export type ExtrovertConversationsPage = z.infer<
+	typeof extrovertConversationsPage
+>;
+export type ExtrovertDmMessage = z.infer<typeof extrovertDmMessage>;
+export type ExtrovertConversationDetail = z.infer<
+	typeof extrovertConversationDetail
+>;
 
 export const extrovertProspectsV2Response = extrovertEnvelope(
 	z.object({
@@ -108,6 +216,14 @@ export const extrovertProspectsV2Response = extrovertEnvelope(
 			total: z.number(),
 		}),
 	}),
+);
+
+const extrovertCommentsResponse = extrovertEnvelope(extrovertCommentsPage);
+const extrovertConversationsResponse = extrovertEnvelope(
+	extrovertConversationsPage,
+);
+const extrovertConversationDetailResponse = extrovertEnvelope(
+	extrovertConversationDetail,
 );
 
 export function parseExtrovertCampaignList(
@@ -128,4 +244,22 @@ export function parseExtrovertProspectsV2(value: unknown): {
 } {
 	const parsed = extrovertProspectsV2Response.parse(value).data;
 	return { prospects: parsed.users, total: parsed.pagination.total };
+}
+
+export function parseExtrovertCommentsPage(
+	value: unknown,
+): ExtrovertCommentsPage {
+	return extrovertCommentsResponse.parse(value).data;
+}
+
+export function parseExtrovertConversationsPage(
+	value: unknown,
+): ExtrovertConversationsPage {
+	return extrovertConversationsResponse.parse(value).data;
+}
+
+export function parseExtrovertConversationDetail(
+	value: unknown,
+): ExtrovertConversationDetail {
+	return extrovertConversationDetailResponse.parse(value).data;
 }

@@ -251,6 +251,10 @@ Sync-created contacts are not enriched automatically; webhook-created contacts a
 The connection page can select an active contact `USER`, `SELECT`, or `TEXT` field.
 The sync writes the Extrovert member with the connected LinkedIn account into that field.
 The contact status line shows the campaign name, comments, likes, and connection member.
+The activity sync runs every 15 minutes at `/internal/sync/extrovert-engagement`.
+Each posted comment becomes one note on the matched contact.
+Each DM conversation becomes one note that updates in place when a new message arrives.
+The activity sync matches existing contacts by LinkedIn URL only and never creates contacts.
 
 Missing from the repo and living only in Paper: **hubspot** (`hubspot icon`
 `L5E-0`), **docusign** (`docusign logo` `L5Z-0`), **ergo** (`ergo logo` `KJJ-0`).

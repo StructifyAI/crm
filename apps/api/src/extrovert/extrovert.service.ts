@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { canManageConnections, WORKSPACE_ID } from "@crm/auth";
 import type { Db } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
+import { parseExtrovertEngagementResume } from "@crm/validation/extrovert-engagement-resume";
 import { parseExtrovertSyncResume } from "@crm/validation/extrovert-sync-resume";
 import {
 	BadRequestException,
@@ -39,6 +40,8 @@ export class ExtrovertService {
 					extrovertLastSyncAt: true,
 					extrovertLastSyncError: true,
 					extrovertSyncResume: true,
+					extrovertEngagementResume: true,
+					extrovertEngagementSyncAt: true,
 					extrovertConnectionFieldId: true,
 				},
 			}),
@@ -68,6 +71,8 @@ export class ExtrovertService {
 			hasApiKey: Boolean(setting?.extrovertApiKey),
 			lastEventAt: setting?.extrovertLastEventAt?.toISOString() ?? null,
 			lastSyncAt: setting?.extrovertLastSyncAt?.toISOString() ?? null,
+			engagementSyncAt:
+				setting?.extrovertEngagementSyncAt?.toISOString() ?? null,
 			lastSyncError: setting?.extrovertLastSyncError ?? null,
 			prospectCount,
 			memberCount,
@@ -85,6 +90,9 @@ export class ExtrovertService {
 						}
 					: null,
 			syncInProgress: resume !== null,
+			engagementSyncInProgress:
+				parseExtrovertEngagementResume(setting?.extrovertEngagementResume) !==
+				null,
 			syncProgress: resume
 				? { done: resume.offset, total: resume.total }
 				: null,

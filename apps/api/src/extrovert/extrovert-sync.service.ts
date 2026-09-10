@@ -18,7 +18,7 @@ import { ExtrovertClient } from "./extrovert.client";
 import { EXTROVERT } from "./extrovert-config";
 import { ExtrovertFilingService } from "./extrovert-filing.service";
 
-type Member = {
+export type ExtrovertMemberOwner = {
 	id: string;
 	name: string;
 	ownerId: string | null;
@@ -144,7 +144,7 @@ export class ExtrovertSyncService {
 	private async processPage(
 		prospects: ExtrovertProspectV2[],
 		runStartedAt: string,
-		memberOwners: Map<string, Member>,
+		memberOwners: Map<string, ExtrovertMemberOwner>,
 		fieldDefinition: Pick<FieldDefinitionWithOptions, "key" | "type"> | null,
 	): Promise<
 		Pick<ExtrovertSyncResult, "prospects" | "created" | "fieldSkipped">
@@ -188,7 +188,7 @@ export class ExtrovertSyncService {
 	private async processProspect(
 		prospect: ExtrovertProspectV2,
 		runStartedAt: string,
-		memberOwners: Map<string, Member>,
+		memberOwners: Map<string, ExtrovertMemberOwner>,
 		fieldDefinition: Pick<FieldDefinitionWithOptions, "key" | "type"> | null,
 		resolved: Awaited<ReturnType<ExtrovertFilingService["resolveContacts"]>>,
 	): Promise<
@@ -244,10 +244,10 @@ export class ExtrovertSyncService {
 		};
 	}
 
-	private async loadMembers(
+	async loadMembers(
 		apiKey: string,
 		resumed: boolean,
-	): Promise<Map<string, Member>> {
+	): Promise<Map<string, ExtrovertMemberOwner>> {
 		if (resumed) {
 			const rows = await this.db.extrovertMember.findMany({
 				select: { id: true, name: true, ownerId: true },
@@ -278,7 +278,7 @@ export class ExtrovertSyncService {
 	private async writeConnectionField(
 		contactId: string,
 		field: Pick<FieldDefinitionWithOptions, "key" | "type">,
-		member: Member,
+		member: ExtrovertMemberOwner,
 	): Promise<number> {
 		let value: string | null = null;
 		if (field.type === "USER") {
@@ -316,7 +316,9 @@ export class ExtrovertSyncService {
 		return Date.now() - startedAt >= EXTROVERT.sync.tickBudgetMs;
 	}
 
-	private async upsertMember(member: ExtrovertTeamMember): Promise<Member> {
+	private async upsertMember(
+		member: ExtrovertTeamMember,
+	): Promise<ExtrovertMemberOwner> {
 		const email = member.linkedInProfile?.email?.trim().toLowerCase() || null;
 		const user = email
 			? await this.db.user.findFirst({

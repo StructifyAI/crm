@@ -1368,6 +1368,8 @@ model AppSetting {
   extrovertLastSyncAt      DateTime?
   extrovertLastSyncError   String?
   extrovertSyncResume      Json?
+  extrovertEngagementResume Json?
+  extrovertEngagementSyncAt DateTime?
   extrovertConnectionFieldId String?
   extrovertConnectionField FieldDefinition? @relation("ExtrovertConnectionField", fields: [extrovertConnectionFieldId], references: [id], onDelete: SetNull)
 

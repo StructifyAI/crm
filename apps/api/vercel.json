@@ -18,6 +18,10 @@
 			"schedule": "*/15 * * * *"
 		},
 		{
+			"path": "/internal/sync/extrovert-engagement",
+			"schedule": "*/15 * * * *"
+		},
+		{
 			"path": "/internal/sync/rates",
 			"schedule": "0 6 * * *"
 		},

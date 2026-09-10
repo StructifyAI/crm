@@ -19,6 +19,7 @@ import {
 } from "@nestjs/swagger";
 import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { EnvironmentVariables } from "../config/env.validation";
+import { ExtrovertEngagementSyncService } from "../extrovert/extrovert-engagement-sync.service";
 import { ExtrovertSyncService } from "../extrovert/extrovert-sync.service";
 import { InstantlySyncService } from "../instantly/instantly-sync.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
@@ -40,6 +41,7 @@ export class SyncController {
 		private readonly sync: MailboxSyncService,
 		private readonly instantly: InstantlySyncService,
 		private readonly extrovert: ExtrovertSyncService,
+		private readonly extrovertEngagement: ExtrovertEngagementSyncService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -105,6 +107,24 @@ export class SyncController {
 		return this.runExtrovert(authorization);
 	}
 
+	@Get("extrovert-engagement")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "Run the Extrovert comment and DM activity sync" })
+	async extrovertEngagementViaGet(
+		@Headers("authorization") authorization?: string,
+	) {
+		return this.runExtrovertEngagement(authorization);
+	}
+
+	@Post("extrovert-engagement")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async extrovertEngagementViaPost(
+		@Headers("authorization") authorization?: string,
+	) {
+		return this.runExtrovertEngagement(authorization);
+	}
+
 	private async run(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.sync.runDue();
@@ -118,6 +138,11 @@ export class SyncController {
 	private async runExtrovert(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.extrovert.run();
+	}
+
+	private async runExtrovertEngagement(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.extrovertEngagement.run();
 	}
 
 	private assertSecret(authorization?: string) {

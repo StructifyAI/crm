@@ -6,6 +6,7 @@ export const extrovertStatusOutput = z.object({
 	hasApiKey: z.boolean(),
 	lastEventAt: z.string().nullable(),
 	lastSyncAt: z.string().nullable(),
+	engagementSyncAt: z.string().nullable(),
 	lastSyncError: z.string().nullable(),
 	prospectCount: z.number(),
 	memberCount: z.number(),
@@ -18,6 +19,7 @@ export const extrovertStatusOutput = z.object({
 		})
 		.nullable(),
 	syncInProgress: z.boolean(),
+	engagementSyncInProgress: z.boolean(),
 	syncProgress: z
 		.object({
 			done: z.number(),
