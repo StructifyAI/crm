@@ -844,6 +844,7 @@ describe("Extrovert engagement sync", () => {
 	it("files and deduplicates comments, and updates DM activities in place", async () => {
 		const engagementMemberId = `${memberId}-engagement`;
 		const engagementUrl = `https://www.linkedin.com/in/engagement-${suffix}-engagement`;
+		const postText = `${"a".repeat(279)}😀\uD83D\u0000`;
 		const contact = await db.contact.create({
 			data: {
 				firstName: "Engagement",
@@ -887,7 +888,7 @@ describe("Extrovert engagement sync", () => {
 			engagementRoute: "Direct",
 			campaign: { id: `campaign-${suffix}`, name: "Campaign" },
 			post: {
-				text: "A long post",
+				text: postText,
 				linkedInUrl: "https://www.linkedin.com/posts/post",
 				publishedAt: "2026-09-12T00:00:00.000Z",
 			},
@@ -902,6 +903,7 @@ describe("Extrovert engagement sync", () => {
 				postId: `topical-${suffix}`,
 				prospect: null,
 				engagementRoute: "Topical",
+				reactionBehavior: { behavior: "React only" },
 			},
 			{
 				...comment,
@@ -1008,6 +1010,23 @@ describe("Extrovert engagement sync", () => {
 			select: { id: true, body: true },
 		});
 		expect(firstDm.body).toContain("Mapped Member");
+		const commentActivity = await db.activity.findFirstOrThrow({
+			where: {
+				contactId: contact.id,
+				subject: "LinkedIn comment by Mapped Member",
+			},
+			select: { body: true },
+		});
+		expect(commentActivity.body).toBeDefined();
+		expect(
+			(
+				commentActivity.body as string & {
+					isWellFormed: () => boolean;
+				}
+			).isWellFormed(),
+		).toBe(true);
+		expect(commentActivity.body).not.toContain("\u0000");
+		expect(commentActivity.body).toEndWith(`> ${"a".repeat(279)}😀`);
 		await run.run();
 		expect(detailCalls).toBe(1);
 		lastMessageAt = "2026-09-12T03:00:00.000Z";

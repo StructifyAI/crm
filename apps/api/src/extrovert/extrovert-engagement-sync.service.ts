@@ -26,6 +26,16 @@ export type ExtrovertEngagementSyncResult = {
 type Resume = NonNullable<ReturnType<typeof parseExtrovertEngagementResume>>;
 type ExistingDm = { id: string; lastMessageAt: string };
 
+export function safeText(value: string, max?: number): string {
+	const wellFormed = (
+		value as string & { toWellFormed: () => string }
+	).toWellFormed();
+	const sanitized = wellFormed.split("\u0000").join("");
+	return max === undefined
+		? sanitized
+		: Array.from(sanitized).slice(0, max).join("");
+}
+
 @Injectable()
 export class ExtrovertEngagementSyncService {
 	private readonly logger = new Logger(ExtrovertEngagementSyncService.name);
@@ -267,6 +277,8 @@ export class ExtrovertEngagementSyncService {
 		existing: Set<string>,
 	): Promise<"created" | "skipped"> {
 		if (comment.state !== "Posted") return "skipped";
+		const draftText = comment.draft?.text;
+		if (!draftText || !safeText(draftText).trim()) return "skipped";
 		const target =
 			comment.prospect ??
 			(comment.engagementRoute === "Direct" ? comment.author : null);
@@ -280,15 +292,15 @@ export class ExtrovertEngagementSyncService {
 		const key = `${comment.postId}:${comment.ownerId}`;
 		if (existing.has(key)) return "skipped";
 		const quote = comment.post.text
-			? `\n\n> ${comment.post.text.slice(0, EXTROVERT.engagement.postExcerptChars)}`
+			? `\n\n> ${safeText(comment.post.text, EXTROVERT.engagement.postExcerptChars)}`
 			: "";
-		const body = `${comment.draft?.text ?? ""}\n\nOn ${comment.author.name}'s post: ${comment.post.linkedInUrl ?? ""}${quote}`;
+		const body = `${safeText(draftText)}\n\nOn ${safeText(comment.author.name)}'s post: ${safeText(comment.post.linkedInUrl ?? "")}${quote}`;
 		const author = await this.filing.authorFor(match.id, member.ownerId);
 		if (!author) return "skipped";
 		const activity = await this.db.activity.create({
 			data: {
 				type: ActivityType.NOTE,
-				subject: `LinkedIn comment by ${member.name}`,
+				subject: `LinkedIn comment by ${safeText(member.name)}`,
 				body,
 				contactId: match.id,
 				occurredAt: new Date(comment.completedAt ?? comment.updatedAt),
@@ -344,7 +356,7 @@ export class ExtrovertEngagementSyncService {
 			)
 			.map(
 				(message) =>
-					`${message.author === "Owner" ? member.name : conversation.prospect.name} (${new Date(message.sentAt).toISOString()}): ${message.text}`,
+					`${safeText(message.author === "Owner" ? member.name : conversation.prospect.name)} (${new Date(message.sentAt).toISOString()}): ${safeText(message.text)}`,
 			)
 			.join("\n\n");
 		const author = await this.filing.authorFor(match.id, member.ownerId);
@@ -373,7 +385,7 @@ export class ExtrovertEngagementSyncService {
 			const activity = await this.db.activity.create({
 				data: {
 					type: ActivityType.NOTE,
-					subject: `LinkedIn messages with ${member.name}`,
+					subject: `LinkedIn messages with ${safeText(member.name)}`,
 					body: transcript,
 					contactId: match.id,
 					occurredAt: new Date(lastMessage.sentAt),
