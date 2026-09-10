@@ -1,7 +1,7 @@
 import { db, FactBand, FactStatus, type Prisma } from "@crm/db";
 import { type Evidence, scoreEvidence } from "./evidence";
 import { currentFocus } from "./focus";
-import { isDerivedName, splitName } from "./names";
+import { hostOf, isDerivedName, normalise, splitName } from "./names";
 
 const FIELDS = {
 	name: { column: null },
@@ -50,16 +50,73 @@ export type RecordFactInput = {
 	evidence: Evidence[];
 	method: string;
 	sourceUrl?: string;
+	employerDomain?: string;
 };
 
 export type RecordFactResult = {
 	stored: boolean;
 	applied: boolean;
+	linkedCompanyId: string | null;
 	band: FactBand | null;
 	score: number;
 	rationale: string;
 	reason?: string;
 };
+
+export async function linkEmployer(
+	tx: Prisma.TransactionClient,
+	contactId: string,
+	employer: { name: string; domain: string | null },
+): Promise<string | null> {
+	const contact = await tx.contact.findUnique({
+		where: { id: contactId },
+		select: { companyId: true },
+	});
+	if (contact?.companyId) return null;
+
+	const host = employer.domain ? hostOf(employer.domain) : "";
+	if (host) {
+		const company = await tx.company.findFirst({
+			where: { domain: host, archivedAt: null },
+			select: { id: true },
+		});
+		if (company) {
+			await tx.contact.update({
+				where: { id: contactId },
+				data: { companyId: company.id },
+			});
+			return company.id;
+		}
+	}
+
+	const name = normalise(employer.name);
+	if (name.length < 3) return null;
+
+	const firstWord = normalise(employer.name.trim().split(/\s+/)[0] ?? "");
+	if (!firstWord) return null;
+
+	const candidates = await tx.company.findMany({
+		where: {
+			archivedAt: null,
+			name: { contains: firstWord, mode: "insensitive" },
+		},
+		select: { id: true, name: true },
+		take: 50,
+	});
+	const matches = candidates.filter(
+		(candidate) => normalise(candidate.name) === name,
+	);
+	if (matches.length !== 1) return null;
+
+	const companyId = matches[0]?.id;
+	if (!companyId) return null;
+
+	await tx.contact.update({
+		where: { id: contactId },
+		data: { companyId },
+	});
+	return companyId;
+}
 
 export async function recordFact(
 	input: RecordFactInput,
@@ -75,7 +132,13 @@ export async function recordFact(
 	};
 
 	if (!trimmed) {
-		return { ...base, stored: false, applied: false, reason: "Empty value." };
+		return {
+			...base,
+			stored: false,
+			applied: false,
+			linkedCompanyId: null,
+			reason: "Empty value.",
+		};
 	}
 
 	if (scored.band === null) {
@@ -83,6 +146,7 @@ export async function recordFact(
 			...base,
 			stored: false,
 			applied: false,
+			linkedCompanyId: null,
 			reason:
 				"Below the floor for keeping — not stored. Find a source that identifies them, or leave the field alone.",
 		};
@@ -109,6 +173,7 @@ export async function recordFact(
 			...base,
 			stored: false,
 			applied: false,
+			linkedCompanyId: null,
 			reason: "No such contact.",
 		};
 	}
@@ -128,6 +193,7 @@ export async function recordFact(
 			...base,
 			stored: false,
 			applied: false,
+			linkedCompanyId: null,
 			reason:
 				"A person has already dismissed this exact value. Do not offer it again.",
 		};
@@ -142,6 +208,7 @@ export async function recordFact(
 			...base,
 			stored: false,
 			applied: false,
+			linkedCompanyId: null,
 			reason: "Already on the record, from this same source. Nothing changed.",
 		};
 	}
@@ -154,6 +221,7 @@ export async function recordFact(
 			...base,
 			stored: false,
 			applied: false,
+			linkedCompanyId: null,
 			reason: `A person already filled in ${field}. That outranks anything found on the web.`,
 		};
 	}
@@ -173,12 +241,14 @@ export async function recordFact(
 			...base,
 			stored: false,
 			applied: false,
+			linkedCompanyId: null,
 			reason:
 				"This exact value is already in front of a rep, waiting on them. Offering it twice only makes them read it twice.",
 		};
 	}
 
 	const sessionId = currentFocus().sessionId;
+	let linkedCompanyId: string | null = null;
 
 	await db.$transaction(async (tx) => {
 		if (applies) {
@@ -207,23 +277,30 @@ export async function recordFact(
 			},
 		});
 
-		if (!applies) return;
-
-		if (column) {
-			await tx.contact.update({
-				where: { id: contactId },
-				data: { [column]: trimmed },
-			});
-		}
-
-		if (field === "name") {
-			const split = splitName(trimmed);
-			if (split) {
+		if (applies) {
+			if (column) {
 				await tx.contact.update({
 					where: { id: contactId },
-					data: { firstName: split.firstName, lastName: split.lastName },
+					data: { [column]: trimmed },
 				});
 			}
+
+			if (field === "name") {
+				const split = splitName(trimmed);
+				if (split) {
+					await tx.contact.update({
+						where: { id: contactId },
+						data: { firstName: split.firstName, lastName: split.lastName },
+					});
+				}
+			}
+		}
+
+		if (applies && field === "employer") {
+			linkedCompanyId = await linkEmployer(tx, contactId, {
+				name: trimmed,
+				domain: input.employerDomain ?? null,
+			});
 		}
 	});
 
@@ -231,6 +308,7 @@ export async function recordFact(
 		...base,
 		stored: true,
 		applied: applies,
+		linkedCompanyId,
 		reason: applies
 			? undefined
 			: "The record already carries a value here, and only VERIFIED evidence may replace one, so this is kept as a proposal for a rep to accept or dismiss. This is a normal outcome, not a failure — do not try to raise the score.",

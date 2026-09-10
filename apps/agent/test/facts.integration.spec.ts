@@ -7,11 +7,40 @@ const suffix = process.env.TEST_RUN_ID ?? "facts-spec";
 const email = `evidence.subject.${suffix}@example.test`;
 
 let contactId: string;
+let contactCounter = 0;
+const extraContactIds: string[] = [];
+const companyIds: string[] = [];
 
 const seen = (kind: Evidence["kind"], detail = "observed"): Evidence => ({
 	kind,
 	detail,
 });
+
+async function newContact(label: string, companyId?: string): Promise<string> {
+	const contact = await db.contact.create({
+		data: {
+			firstName: label,
+			email: `evidence.${suffix}.${++contactCounter}.${label}@example.test`,
+			companyId,
+		},
+		select: { id: true },
+	});
+	extraContactIds.push(contact.id);
+	return contact.id;
+}
+
+async function newCompany(
+	name: string,
+	domain: string | null,
+	archivedAt?: Date,
+): Promise<string> {
+	const company = await db.company.create({
+		data: { name, domain, archivedAt },
+		select: { id: true },
+	});
+	companyIds.push(company.id);
+	return company.id;
+}
 
 beforeAll(async () => {
 	await db.contact.deleteMany({ where: { email } });
@@ -23,7 +52,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+	await db.contact.deleteMany({ where: { id: { in: extraContactIds } } });
 	await db.contact.deleteMany({ where: { email } });
+	await db.company.deleteMany({ where: { id: { in: companyIds } } });
 });
 
 describe("recordFact", () => {
@@ -258,6 +289,174 @@ describe("recordFact", () => {
 
 		expect(Array.isArray(fact?.evidence)).toBe(true);
 		expect(fact?.score).toBeGreaterThan(0.85);
+	});
+
+	it("links an applied employer fact to an active company by domain", async () => {
+		const companyId = await newCompany(
+			`Domain Match ${suffix}`,
+			`domain-match-${suffix}.test`,
+		);
+		const id = await newContact("Domain");
+
+		const result = await recordFact({
+			contactId: id,
+			field: "employer",
+			value: `Domain Match ${suffix}`,
+			employerDomain: `https://www.domain-match-${suffix}.test/role`,
+			evidence: [seen("linkedin.employer-and-name")],
+			method: "linkedin.profile",
+		});
+
+		expect(result.applied).toBe(true);
+		expect(result.linkedCompanyId).toBe(companyId);
+		const contact = await db.contact.findUnique({
+			where: { id },
+			select: { companyId: true },
+		});
+		expect(contact).toEqual({ companyId });
+	});
+
+	it("links an applied employer fact by unique normalized company name", async () => {
+		const companyId = await newCompany(
+			`acme inc ${suffix}`,
+			`name-match-${suffix}.test`,
+		);
+		const id = await newContact("Name");
+
+		const result = await recordFact({
+			contactId: id,
+			field: "employer",
+			value: `Acme, Inc. ${suffix}`,
+			evidence: [seen("linkedin.employer-and-name")],
+			method: "linkedin.profile",
+		});
+
+		expect(result.linkedCompanyId).toBe(companyId);
+	});
+
+	it("does not link when normalized company name is not unique", async () => {
+		await newCompany(`Twin Corp ${suffix}`, `twin-one-${suffix}.test`);
+		await newCompany(`Twin Corp ${suffix}`, `twin-two-${suffix}.test`);
+		const id = await newContact("Duplicate");
+
+		const result = await recordFact({
+			contactId: id,
+			field: "employer",
+			value: `Twin Corp ${suffix}`,
+			evidence: [seen("linkedin.employer-and-name")],
+			method: "linkedin.profile",
+		});
+
+		expect(result.linkedCompanyId).toBeNull();
+		const contact = await db.contact.findUnique({
+			where: { id },
+			select: { companyId: true },
+		});
+		expect(contact).toEqual({ companyId: null });
+	});
+
+	it("does not replace a contact company", async () => {
+		const existingCompanyId = await newCompany(
+			`Existing ${suffix}`,
+			`existing-${suffix}.test`,
+		);
+		const otherCompanyId = await newCompany(
+			`Other ${suffix}`,
+			`other-${suffix}.test`,
+		);
+		const id = await newContact("Existing", existingCompanyId);
+
+		const result = await recordFact({
+			contactId: id,
+			field: "employer",
+			value: `Other ${suffix}`,
+			employerDomain: `other-${suffix}.test`,
+			evidence: [seen("linkedin.employer-and-name")],
+			method: "linkedin.profile",
+		});
+
+		expect(result.linkedCompanyId).toBeNull();
+		expect(otherCompanyId).not.toBe(existingCompanyId);
+		const contact = await db.contact.findUnique({
+			where: { id },
+			select: { companyId: true },
+		});
+		expect(contact).toEqual({ companyId: existingCompanyId });
+	});
+
+	it("does not link to an archived company", async () => {
+		const id = await newContact("Archived");
+		await newCompany(
+			`Archived ${suffix}`,
+			`archived-${suffix}.test`,
+			new Date(),
+		);
+
+		const result = await recordFact({
+			contactId: id,
+			field: "employer",
+			value: `Archived ${suffix}`,
+			employerDomain: `archived-${suffix}.test`,
+			evidence: [seen("linkedin.employer-and-name")],
+			method: "linkedin.profile",
+		});
+
+		expect(result.linkedCompanyId).toBeNull();
+	});
+
+	it("ignores employerDomain on non-employer facts", async () => {
+		const companyId = await newCompany(
+			`Title Match ${suffix}`,
+			`title-match-${suffix}.test`,
+		);
+		const id = await newContact("Title");
+
+		const result = await recordFact({
+			contactId: id,
+			field: "title",
+			value: "Director",
+			employerDomain: `title-match-${suffix}.test`,
+			evidence: [seen("linkedin.employer-and-name")],
+			method: "linkedin.profile",
+		});
+
+		expect(result.linkedCompanyId).toBeNull();
+		expect(companyId).toBeDefined();
+		const contact = await db.contact.findUnique({
+			where: { id },
+			select: { companyId: true },
+		});
+		expect(contact).toEqual({ companyId: null });
+	});
+
+	it("does not link a proposed employer replacement", async () => {
+		const id = await newContact("Proposed");
+		await recordFact({
+			contactId: id,
+			field: "employer",
+			value: "Old Co",
+			evidence: [seen("linkedin.employer-and-name")],
+			method: "linkedin.profile",
+		});
+		await newCompany("Acme", `proposed-acme-${suffix}.test`);
+
+		const result = await recordFact({
+			contactId: id,
+			field: "employer",
+			value: "Acme",
+			employerDomain: `proposed-acme-${suffix}.test`,
+			evidence: [seen("handle.name-form"), seen("search.cites-profile")],
+			method: "linkedin.profile",
+		});
+
+		expect(result.applied).toBe(false);
+		expect(result.band).toBe("PROBABLE");
+		expect(result.linkedCompanyId).toBeNull();
+		const contact = await db.contact.findUnique({
+			where: { id },
+			select: { companyId: true },
+		});
+		expect(contact).toEqual({ companyId: null });
 	});
 });
 

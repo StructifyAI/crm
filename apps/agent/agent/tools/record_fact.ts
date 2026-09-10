@@ -8,7 +8,7 @@ import { assertResearchPurpose } from "../lib/session-purpose";
 
 export default defineTool({
 	description:
-		"Record one claim about a contact — title, employer, a profile URL, seniority — together with the evidence for it. The evidence decides whether it is written to the record or offered to a rep as a suggestion. Never invent evidence you did not observe.",
+		"Record one claim about a contact — title, employer, a profile URL, seniority — together with the evidence for it. The evidence decides whether it is written to the record or offered to a rep as a suggestion. Never invent evidence you did not observe. An employer fact that applies also attaches the contact to the matching CRM company when one already exists — pass employerDomain so the match is by domain.",
 	inputSchema: z.object({
 		contactId: z.string(),
 		field: z
@@ -44,6 +44,12 @@ export default defineTool({
 			.string()
 			.optional()
 			.describe("The page a rep should open to check."),
+		employerDomain: z
+			.string()
+			.optional()
+			.describe(
+				"For field employer only: the employer's own web domain as the source lists it (e.g. the organisation.domain on a LinkedIn role). Lets the CRM link the contact to the company it already has.",
+			),
 	}),
 	async execute(input, ctx) {
 		assertResearchPurpose(ctx);
@@ -56,11 +62,13 @@ export default defineTool({
 			evidence: input.evidence as Evidence[],
 			method: input.method,
 			sourceUrl: input.sourceUrl,
+			employerDomain: input.employerDomain,
 		});
 
 		return {
 			stored: result.stored,
 			applied: result.applied,
+			linkedCompanyId: result.linkedCompanyId,
 			band: result.band,
 			score: Number(result.score.toFixed(2)),
 			rationale: result.rationale,
