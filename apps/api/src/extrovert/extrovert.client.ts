@@ -14,6 +14,12 @@ import {
 import { Injectable } from "@nestjs/common";
 import { EXTROVERT } from "./extrovert-config";
 
+class ExtrovertHttpError extends Error {
+	constructor(readonly status: number) {
+		super(`Extrovert request failed with status ${status}.`);
+	}
+}
+
 @Injectable()
 export class ExtrovertClient {
 	private lastRequestAt = 0;
@@ -51,17 +57,25 @@ export class ExtrovertClient {
 	): Promise<{ comments: ExtrovertCommentV2[]; total: number }> {
 		try {
 			const page = parseExtrovertCommentsPage(
-				await this.request(key, EXTROVERT.api.commentsPath, {
-					ownerId: input.ownerId,
-					campaignId: input.campaignId,
-					view: "Posted",
-					limit: String(EXTROVERT.engagement.pageSize),
-					offset: String(input.offset),
-				}),
+				await this.request(
+					key,
+					EXTROVERT.api.commentsPath,
+					{
+						ownerId: input.ownerId,
+						campaignId: input.campaignId,
+						view: "Posted",
+						limit: String(EXTROVERT.engagement.pageSize),
+						offset: String(input.offset),
+					},
+					{ tolerate: [403, 404] },
+				),
 			);
 			return { comments: page.comments, total: page.pagination.total };
 		} catch (error) {
-			if (error instanceof Error && error.message.includes("status 404")) {
+			if (
+				error instanceof ExtrovertHttpError &&
+				(error.status === 403 || error.status === 404)
+			) {
 				return { comments: [], total: 0 };
 			}
 			throw error;
@@ -72,18 +86,30 @@ export class ExtrovertClient {
 		key: string,
 		input: { ownerId: string; offset: number },
 	): Promise<{ conversations: ExtrovertConversationV2[]; total: number }> {
-		const page = parseExtrovertConversationsPage(
-			await this.request(key, EXTROVERT.api.conversationsPath, {
-				ownerId: input.ownerId,
-				view: "all",
-				limit: String(EXTROVERT.engagement.pageSize),
-				offset: String(input.offset),
-			}),
-		);
-		return {
-			conversations: page.conversations,
-			total: page.pagination.total,
-		};
+		try {
+			const page = parseExtrovertConversationsPage(
+				await this.request(
+					key,
+					EXTROVERT.api.conversationsPath,
+					{
+						ownerId: input.ownerId,
+						view: "all",
+						limit: String(EXTROVERT.engagement.pageSize),
+						offset: String(input.offset),
+					},
+					{ tolerate: [403] },
+				),
+			);
+			return {
+				conversations: page.conversations,
+				total: page.pagination.total,
+			};
+		} catch (error) {
+			if (error instanceof ExtrovertHttpError && error.status === 403) {
+				return { conversations: [], total: 0 };
+			}
+			throw error;
+		}
 	}
 
 	async getConversation(
@@ -107,6 +133,7 @@ export class ExtrovertClient {
 		key: string,
 		path: string,
 		query?: Record<string, string>,
+		options?: { tolerate?: number[] },
 	): Promise<unknown> {
 		const elapsed = Date.now() - this.lastRequestAt;
 		if (elapsed < EXTROVERT.sync.minRequestGapMs) {
@@ -123,6 +150,9 @@ export class ExtrovertClient {
 		});
 		this.lastRequestAt = Date.now();
 		if (!response.ok) {
+			if (options?.tolerate?.includes(response.status)) {
+				throw new ExtrovertHttpError(response.status);
+			}
 			if (response.status === 401 || response.status === 403) {
 				throw new Error("Extrovert API key is invalid.");
 			}

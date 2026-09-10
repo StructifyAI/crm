@@ -232,6 +232,38 @@ describe("Extrovert client", () => {
 			globalThis.fetch = originalFetch;
 		}
 	});
+
+	it("treats forbidden conversation feeds as empty pages", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response("forbidden", { status: 403 })) as unknown as typeof fetch;
+		try {
+			await expect(
+				new ExtrovertClient().listConversationsPage("valid-key", {
+					ownerId: "owner-1",
+					offset: 0,
+				}),
+			).resolves.toEqual({ conversations: [], total: 0 });
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it("keeps unauthorized conversation feeds as invalid-key errors", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response("unauthorized", { status: 401 })) as unknown as typeof fetch;
+		try {
+			await expect(
+				new ExtrovertClient().listConversationsPage("bad-key", {
+					ownerId: "owner-1",
+					offset: 0,
+				}),
+			).rejects.toThrow("Extrovert API key is invalid.");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
 });
 
 describe("Extrovert filing", () => {
@@ -1055,6 +1087,99 @@ describe("Extrovert engagement sync", () => {
 				},
 			}),
 		).toBe(1);
+	});
+
+	it("skips forbidden conversation owners and continues to the next owner", async () => {
+		const forbiddenOwnerId = `${memberId}-forbidden`;
+		const allowedOwnerId = `${memberId}-allowed`;
+		await db.extrovertMember.deleteMany({
+			where: { id: { startsWith: `extrovert-member-${suffix}` } },
+		});
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, extrovertApiKey: "test-key" },
+			update: {
+				extrovertApiKey: "test-key",
+				extrovertEngagementResume: Prisma.JsonNull,
+				extrovertEngagementSyncAt: null,
+			},
+		});
+		const requestedOwners: string[] = [];
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (input: string | URL) => {
+			const url = new URL(String(input));
+			if (url.pathname === EXTROVERT.api.campaignsPath) {
+				return new Response(
+					JSON.stringify({
+						status: "success",
+						data: [
+							{
+								id: `campaign-${suffix}-forbidden`,
+								name: "Forbidden Campaign",
+								isActive: true,
+								isDeleted: false,
+							},
+						],
+					}),
+				);
+			}
+			const owner = url.searchParams.get("ownerId");
+			if (owner) requestedOwners.push(owner);
+			if (
+				url.pathname === EXTROVERT.api.conversationsPath &&
+				owner === forbiddenOwnerId
+			) {
+				return new Response("forbidden", { status: 403 });
+			}
+			if (
+				url.pathname === EXTROVERT.api.commentsPath ||
+				url.pathname === EXTROVERT.api.conversationsPath
+			) {
+				const data =
+					url.pathname === EXTROVERT.api.commentsPath
+						? {
+								comments: [],
+								pagination: { limit: 50, offset: 0, total: 0 },
+							}
+						: {
+								conversations: [],
+								pagination: { limit: 50, offset: 0, total: 0 },
+							};
+				return new Response(JSON.stringify({ status: "success", data }));
+			}
+			throw new Error(`Unexpected Extrovert URL: ${url}`);
+		}) as unknown as typeof fetch;
+		try {
+			const client = new ExtrovertClient();
+			const memberLoader = {
+				loadMembers: async () =>
+					new Map([
+						[
+							forbiddenOwnerId,
+							{ id: forbiddenOwnerId, name: "Forbidden Owner", ownerId },
+						],
+						[
+							allowedOwnerId,
+							{ id: allowedOwnerId, name: "Allowed Owner", ownerId },
+						],
+					]),
+			} as unknown as ExtrovertSyncService;
+			const run = new ExtrovertEngagementSyncService(
+				db,
+				client,
+				memberLoader,
+				filing,
+				stamp,
+			);
+			await expect(run.run()).resolves.toMatchObject({
+				complete: true,
+				error: null,
+			});
+			expect(requestedOwners).toContain(forbiddenOwnerId);
+			expect(requestedOwners).toContain(allowedOwnerId);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 
 	it("resumes from saved state and clears it after completion", async () => {
