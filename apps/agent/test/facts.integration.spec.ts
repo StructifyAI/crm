@@ -317,16 +317,13 @@ describe("recordFact", () => {
 	});
 
 	it("links an applied employer fact by unique normalized company name", async () => {
-		const companyId = await newCompany(
-			`acme inc ${suffix}`,
-			`name-match-${suffix}.test`,
-		);
+		const companyId = await newCompany("Cummins", `name-match-${suffix}.test`);
 		const id = await newContact("Name");
 
 		const result = await recordFact({
 			contactId: id,
 			field: "employer",
-			value: `Acme, Inc. ${suffix}`,
+			value: "Cummins Inc.",
 			evidence: [seen("linkedin.employer-and-name")],
 			method: "linkedin.profile",
 		});

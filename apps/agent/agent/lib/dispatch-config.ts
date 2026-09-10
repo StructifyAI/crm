@@ -37,6 +37,10 @@ export const DISPATCH = {
 		retire: 100,
 	},
 
+	employerLinks: {
+		scan: 100,
+	},
+
 	sweep: {
 		timeoutMs: 4 * MINUTE_MS,
 		staleQueueMs: 5 * MINUTE_MS,

@@ -1,11 +1,30 @@
 import { describe, expect, it } from "bun:test";
 
 import {
+	companyKey,
 	looksLikeSameCompany,
 	nameMatchesLocalPart,
 	sameDomain,
 	searchTerms,
 } from "../agent/lib/names";
+
+describe("companyKey", () => {
+	it("strips trailing legal suffixes", () => {
+		expect(companyKey("Cummins Inc.")).toBe(companyKey("Cummins"));
+		expect(companyKey("Talon Precision, Inc.")).toBe(
+			companyKey("Talon Precision"),
+		);
+	});
+
+	it("keeps meaningful company names intact", () => {
+		expect(companyKey("Metal Fab Group / Stainless Works")).not.toBe(
+			companyKey("Stainless Works"),
+		);
+		expect(companyKey("Control Devices")).toBe("controldevices");
+		expect(companyKey("A & B Co")).toBe("aandb");
+		expect(companyKey("Co")).toBe("co");
+	});
+});
 
 describe("searchTerms", () => {
 	it("strips the initial off a run-together handle", () => {

@@ -122,6 +122,14 @@ to ration and nobody to scope it to.
   chain is not guaranteed to run at all. A cron in the agent is the only trigger here
   that is a fact rather than a hope.
 
+### Employer links are filled on the dispatch tick
+
+`sweepEmployerLinks` runs every minute as a database pass with no model, no credits and
+no session. It checks 100 applied employer facts per tick and records `linkCheckedAt`
+so each fact runs once. A company created later is not linked until a new employer fact
+lands. Matching uses a domain only from a live `record_fact`, then a unique `companyKey`
+name match.
+
 ### Stale rows are closed on the dispatch tick
 
 `reconcileStaleTasks` (`lib/stale-tasks.ts`) runs before `drainAll`, every minute. Like
@@ -207,8 +215,8 @@ wrong in the direction that looks useful.
   record with the answer sitting unread beneath it.
 - **An applied `employer` fact links the contact to an existing company** —
   `linkEmployer` in `lib/facts.ts` matches by domain when the fact carries one,
-  else by a unique exact-name match. It never creates a company or replaces an
-  existing `companyId`.
+  else by a unique `companyKey` name match. It never creates a company or replaces
+  an existing `companyId`.
 - **A new fact field goes in `FIELDS` (`lib/facts.ts`) *and* `FACT_COLUMNS`**
   (`apps/api/src/contacts/contacts.service.ts`).
 

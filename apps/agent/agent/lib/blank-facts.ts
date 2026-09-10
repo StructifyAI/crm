@@ -238,6 +238,10 @@ async function fill(
 
 		if (field === "employer") {
 			await linkEmployer(tx, contactId, { name: value, domain: null });
+			await tx.contactFact.update({
+				where: { id: factId },
+				data: { linkCheckedAt: new Date() },
+			});
 		}
 	});
 }
