@@ -5,6 +5,7 @@ import {
 	type FactSubject,
 	factColumn,
 	fillsBlank,
+	linkEmployer,
 } from "./facts";
 import { splitName } from "./names";
 
@@ -233,6 +234,10 @@ async function fill(
 					data: { firstName: split.firstName, lastName: split.lastName },
 				});
 			}
+		}
+
+		if (field === "employer") {
+			await linkEmployer(tx, contactId, { name: value, domain: null });
 		}
 	});
 }

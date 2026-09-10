@@ -205,6 +205,10 @@ wrong in the direction that looks useful.
   reached `VERIFIED` since the offer was made still lands, settles the suggestion it
   matches, and replaces the older value. Refusing it there left a weaker value on the
   record with the answer sitting unread beneath it.
+- **An applied `employer` fact links the contact to an existing company** —
+  `linkEmployer` in `lib/facts.ts` matches by domain when the fact carries one,
+  else by a unique exact-name match. It never creates a company or replaces an
+  existing `companyId`.
 - **A new fact field goes in `FIELDS` (`lib/facts.ts`) *and* `FACT_COLUMNS`**
   (`apps/api/src/contacts/contacts.service.ts`).
 

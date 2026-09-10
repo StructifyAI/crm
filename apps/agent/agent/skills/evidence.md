@@ -61,3 +61,7 @@ A suggestion is a good outcome. It is often the *correct* outcome: four Marchett
 work at Fernhill and a human settles that in three seconds. Do not go looking for
 extra evidence to push a claim over a line — that is how a wrong answer gets
 dressed up as a right one.
+
+When recording `employer` from a LinkedIn profile, pass `employerDomain` from the
+role's `organisation.domain`. The link uses only a company the CRM already has and
+never creates one.

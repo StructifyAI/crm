@@ -6,6 +6,7 @@ const suffix = process.env.TEST_RUN_ID ?? "blank-facts-spec";
 const email = `blank.subject.${suffix}@example.test`;
 
 let contactId: string;
+const companyIds: string[] = [];
 
 async function propose(input: {
 	field: string;
@@ -46,6 +47,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
 	await db.contact.deleteMany({ where: { email } });
+	await db.company.deleteMany({ where: { id: { in: companyIds } } });
 });
 
 describe("sweepBlankFacts", () => {
@@ -72,6 +74,27 @@ describe("sweepBlankFacts", () => {
 			select: { linkedinUrl: true },
 		});
 		expect(contact?.linkedinUrl).toBe("https://www.linkedin.com/in/subject");
+	});
+
+	it("links an applied employer suggestion to an existing company", async () => {
+		const company = await db.company.create({
+			data: {
+				name: "Blank Employer",
+				domain: "blank-employer.test",
+			},
+			select: { id: true },
+		});
+		companyIds.push(company.id);
+		await propose({ field: "employer", value: "Blank Employer", score: 0.61 });
+
+		const sweep = await sweepBlankFacts();
+
+		expect(sweep.filled).toBe(1);
+		const contact = await db.contact.findUnique({
+			where: { id: contactId },
+			select: { companyId: true },
+		});
+		expect(contact).toEqual({ companyId: company.id });
 	});
 
 	it("leaves a suggestion that disagrees with what is already there", async () => {
