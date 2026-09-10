@@ -1,7 +1,13 @@
 import {
 	type ExtrovertCampaign,
+	type ExtrovertCommentV2,
+	type ExtrovertConversationDetail,
+	type ExtrovertConversationV2,
 	type ExtrovertTeamMember,
 	parseExtrovertCampaignList,
+	parseExtrovertCommentsPage,
+	parseExtrovertConversationDetail,
+	parseExtrovertConversationsPage,
 	parseExtrovertProspectsV2,
 	parseExtrovertTeamMemberList,
 } from "@crm/validation/extrovert-api";
@@ -36,6 +42,64 @@ export class ExtrovertClient {
 				limit: String(input.limit),
 				offset: String(input.offset),
 			}),
+		);
+	}
+
+	async listPostedCommentsPage(
+		key: string,
+		input: { ownerId: string; campaignId: string; offset: number },
+	): Promise<{ comments: ExtrovertCommentV2[]; total: number }> {
+		try {
+			const page = parseExtrovertCommentsPage(
+				await this.request(key, EXTROVERT.api.commentsPath, {
+					ownerId: input.ownerId,
+					campaignId: input.campaignId,
+					view: "Posted",
+					limit: String(EXTROVERT.engagement.pageSize),
+					offset: String(input.offset),
+				}),
+			);
+			return { comments: page.comments, total: page.pagination.total };
+		} catch (error) {
+			if (error instanceof Error && error.message.includes("status 404")) {
+				return { comments: [], total: 0 };
+			}
+			throw error;
+		}
+	}
+
+	async listConversationsPage(
+		key: string,
+		input: { ownerId: string; offset: number },
+	): Promise<{ conversations: ExtrovertConversationV2[]; total: number }> {
+		const page = parseExtrovertConversationsPage(
+			await this.request(key, EXTROVERT.api.conversationsPath, {
+				ownerId: input.ownerId,
+				view: "all",
+				limit: String(EXTROVERT.engagement.pageSize),
+				offset: String(input.offset),
+			}),
+		);
+		return {
+			conversations: page.conversations,
+			total: page.pagination.total,
+		};
+	}
+
+	async getConversation(
+		key: string,
+		connectionId: string,
+	): Promise<ExtrovertConversationDetail> {
+		return parseExtrovertConversationDetail(
+			await this.request(
+				key,
+				`${EXTROVERT.api.conversationsPath}/${connectionId}`,
+				{
+					markAsRead: "false",
+					messageLimit: String(EXTROVERT.engagement.messageLimit),
+					messageOffset: "0",
+				},
+			),
 		);
 	}
 

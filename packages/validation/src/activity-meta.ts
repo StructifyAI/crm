@@ -22,3 +22,31 @@ export function parseGranolaActivityMeta(
 	const result = granolaActivityMeta.safeParse(meta?.granola);
 	return result.success ? result.data : null;
 }
+
+export const extrovertActivityMeta = z
+	.object({
+		automated: z.literal(true),
+		source: z.literal("extrovert"),
+		extrovert: z.discriminatedUnion("kind", [
+			z.object({
+				kind: z.literal("comment"),
+				key: z.string(),
+				updatedAt: z.string(),
+			}),
+			z.object({
+				kind: z.literal("dm"),
+				key: z.string(),
+				lastMessageAt: z.string(),
+			}),
+		]),
+	})
+	.passthrough();
+
+export type ExtrovertActivityMeta = z.infer<typeof extrovertActivityMeta>;
+
+export function parseExtrovertActivityMeta(
+	meta: unknown,
+): ExtrovertActivityMeta | null {
+	const result = extrovertActivityMeta.safeParse(meta);
+	return result.success ? result.data : null;
+}

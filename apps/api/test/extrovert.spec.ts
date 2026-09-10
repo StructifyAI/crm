@@ -19,6 +19,8 @@ import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { ExtrovertClient } from "../src/extrovert/extrovert.client";
 import { ExtrovertController } from "../src/extrovert/extrovert.controller";
 import { ExtrovertService } from "../src/extrovert/extrovert.service";
+import { EXTROVERT } from "../src/extrovert/extrovert-config";
+import { ExtrovertEngagementSyncService } from "../src/extrovert/extrovert-engagement-sync.service";
 import { ExtrovertFilingService } from "../src/extrovert/extrovert-filing.service";
 import { ExtrovertIngestService } from "../src/extrovert/extrovert-ingest.service";
 import { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
@@ -117,6 +119,8 @@ async function clean() {
 			extrovertLastSyncAt: null,
 			extrovertLastSyncError: null,
 			extrovertSyncResume: Prisma.JsonNull,
+			extrovertEngagementResume: Prisma.JsonNull,
+			extrovertEngagementSyncAt: null,
 			extrovertConnectionFieldId: null,
 		},
 	});
@@ -207,6 +211,23 @@ describe("Extrovert client", () => {
 					offset: 0,
 				}),
 			).rejects.toThrow("Extrovert API key is invalid.");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it("treats missing posted comments as an empty page", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response("not found", { status: 404 })) as unknown as typeof fetch;
+		try {
+			await expect(
+				new ExtrovertClient().listPostedCommentsPage("valid-key", {
+					ownerId: "owner-1",
+					campaignId: "campaign-1",
+					offset: 0,
+				}),
+			).resolves.toEqual({ comments: [], total: 0 });
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
@@ -816,5 +837,280 @@ describe("Extrovert webhook", () => {
 				},
 			}),
 		).toBe(1);
+	});
+});
+
+describe("Extrovert engagement sync", () => {
+	it("files and deduplicates comments, and updates DM activities in place", async () => {
+		const engagementMemberId = `${memberId}-engagement`;
+		const engagementUrl = `https://www.linkedin.com/in/engagement-${suffix}-engagement`;
+		const contact = await db.contact.create({
+			data: {
+				firstName: "Engagement",
+				lastName: "Contact",
+				linkedinUrl: engagementUrl,
+			},
+			select: { id: true },
+		});
+		await db.extrovertMember.upsert({
+			where: { id: engagementMemberId },
+			create: {
+				id: engagementMemberId,
+				name: "Mapped Member",
+				ownerId,
+				lastSeenAt: new Date(),
+			},
+			update: { name: "Mapped Member", ownerId },
+		});
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, extrovertApiKey: "test-key" },
+			update: {
+				extrovertApiKey: "test-key",
+				extrovertEngagementResume: Prisma.JsonNull,
+				extrovertEngagementSyncAt: null,
+			},
+		});
+		const comment = {
+			postId: `post-${suffix}`,
+			ownerId: engagementMemberId,
+			author: {
+				id: "author-1",
+				name: "Author Name",
+				linkedInUrl: "https://www.linkedin.com/in/author-name",
+			},
+			prospect: {
+				id: "prospect-1",
+				name: "Engagement Contact",
+				linkedInUrl: engagementUrl,
+			},
+			engagementRoute: "Direct",
+			campaign: { id: `campaign-${suffix}`, name: "Campaign" },
+			post: {
+				text: "A long post",
+				linkedInUrl: "https://www.linkedin.com/posts/post",
+				publishedAt: "2026-09-12T00:00:00.000Z",
+			},
+			draft: { text: "A posted comment" },
+			state: "Posted",
+			completedAt: "2026-09-12T01:00:00.000Z",
+			updatedAt: "2026-09-12T01:00:00.000Z",
+		};
+		const skippedComments = [
+			{
+				...comment,
+				postId: `topical-${suffix}`,
+				prospect: null,
+				engagementRoute: "Topical",
+			},
+			{
+				...comment,
+				postId: `unknown-${suffix}`,
+				prospect: {
+					...comment.prospect,
+					linkedInUrl: `https://www.linkedin.com/in/unknown-${suffix}`,
+				},
+			},
+		];
+		let lastMessageAt = "2026-09-12T02:00:00.000Z";
+		let messages: Array<{
+			dmId: string;
+			text: string;
+			author: "Owner" | "Prospect";
+			sentAt: string;
+		}> = [
+			{
+				dmId: "dm-1",
+				text: "Hello",
+				author: "Owner" as const,
+				sentAt: lastMessageAt,
+			},
+		];
+		let detailCalls = 0;
+		const client = {
+			listCampaigns: async () => [
+				{
+					id: `campaign-${suffix}`,
+					name: "Campaign",
+					isActive: true,
+					isDeleted: false,
+				},
+			],
+			listPostedCommentsPage: async (
+				_key: string,
+				input: { ownerId: string },
+			) =>
+				input.ownerId === engagementMemberId
+					? { comments: [comment, ...skippedComments], total: 3 }
+					: { comments: [], total: 0 },
+			listConversationsPage: async (
+				_key: string,
+				input: { ownerId: string },
+			) =>
+				input.ownerId === engagementMemberId
+					? {
+							conversations: [
+								{
+									connectionId: `connection-${suffix}-engagement`,
+									ownerId: engagementMemberId,
+									prospect: comment.prospect,
+									context: { campaign: comment.campaign },
+									connectedAt: "2026-09-10T00:00:00.000Z",
+									lastMessage: {
+										text: messages[messages.length - 1]?.text ?? "",
+										author: "Owner" as const,
+										sentAt: lastMessageAt,
+									},
+								},
+							],
+							total: 1,
+						}
+					: { conversations: [], total: 0 },
+			getConversation: async () => {
+				detailCalls += 1;
+				return {
+					connectionId: `connection-${suffix}-engagement`,
+					prospect: comment.prospect,
+					messages,
+					messagePagination: { limit: 30, offset: 0, total: messages.length },
+				};
+			},
+		} as unknown as ExtrovertClient;
+		const memberLoader = {
+			loadMembers: async () =>
+				new Map([
+					[
+						engagementMemberId,
+						{ id: engagementMemberId, name: "Mapped Member", ownerId },
+					],
+				]),
+		} as unknown as ExtrovertSyncService;
+		const run = new ExtrovertEngagementSyncService(
+			db,
+			client,
+			memberLoader,
+			filing,
+			stamp,
+		);
+
+		await expect(run.run()).resolves.toMatchObject({
+			complete: true,
+			comments: 1,
+			dms: 1,
+			skipped: 2,
+		});
+		expect(queued).toHaveLength(0);
+		const firstDm = await db.activity.findFirstOrThrow({
+			where: {
+				contactId: contact.id,
+				subject: "LinkedIn messages with Mapped Member",
+			},
+			select: { id: true, body: true },
+		});
+		expect(firstDm.body).toContain("Mapped Member");
+		await run.run();
+		expect(detailCalls).toBe(1);
+		lastMessageAt = "2026-09-12T03:00:00.000Z";
+		messages = [
+			...messages,
+			{
+				dmId: "dm-2",
+				text: "Follow up",
+				author: "Prospect" as const,
+				sentAt: lastMessageAt,
+			},
+		];
+		await run.run();
+		expect(detailCalls).toBe(2);
+		expect(
+			await db.activity.findUnique({
+				where: { id: firstDm.id },
+				select: { body: true },
+			}),
+		).toMatchObject({ body: expect.stringContaining("Follow up") });
+		expect(
+			await db.activity.count({
+				where: {
+					contactId: contact.id,
+					subject: "LinkedIn comment by Mapped Member",
+				},
+			}),
+		).toBe(1);
+	});
+
+	it("resumes from saved state and clears it after completion", async () => {
+		const budgetMemberId = `${memberId}-budget`;
+		await db.extrovertMember.upsert({
+			where: { id: budgetMemberId },
+			create: {
+				id: budgetMemberId,
+				name: "Budget Member",
+				ownerId,
+				lastSeenAt: new Date(),
+			},
+			update: { name: "Budget Member", ownerId },
+		});
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, extrovertApiKey: "test-key" },
+			update: {
+				extrovertApiKey: "test-key",
+				extrovertEngagementResume: Prisma.JsonNull,
+				extrovertEngagementSyncAt: null,
+			},
+		});
+		const client = {
+			listCampaigns: async () => [
+				{
+					id: `campaign-${suffix}-budget`,
+					name: "Budget Campaign",
+					isActive: true,
+					isDeleted: false,
+				},
+			],
+			listPostedCommentsPage: async () => ({ comments: [], total: 0 }),
+			listConversationsPage: async () => ({
+				conversations: [],
+				total: 0,
+			}),
+		} as unknown as ExtrovertClient;
+		const run = new ExtrovertEngagementSyncService(
+			db,
+			client,
+			{} as ExtrovertSyncService,
+			filing,
+			stamp,
+		);
+		const budget = EXTROVERT.engagement.tickBudgetMs;
+		Object.defineProperty(EXTROVERT.engagement, "tickBudgetMs", { value: 0 });
+		try {
+			await expect(run.run()).resolves.toMatchObject({ complete: false });
+			const paused = await db.appSetting.findUniqueOrThrow({
+				where: { id: SETTINGS_ID },
+				select: { extrovertEngagementResume: true },
+			});
+			expect(paused.extrovertEngagementResume).not.toBeNull();
+
+			Object.defineProperty(EXTROVERT.engagement, "tickBudgetMs", {
+				value: budget,
+			});
+			await expect(run.run()).resolves.toMatchObject({
+				complete: true,
+				resumed: true,
+			});
+			const completed = await db.appSetting.findUniqueOrThrow({
+				where: { id: SETTINGS_ID },
+				select: {
+					extrovertEngagementResume: true,
+					extrovertEngagementSyncAt: true,
+				},
+			});
+			expect(completed.extrovertEngagementResume).toBeNull();
+			expect(completed.extrovertEngagementSyncAt).not.toBeNull();
+		} finally {
+			Object.defineProperty(EXTROVERT.engagement, "tickBudgetMs", {
+				value: budget,
+			});
+		}
 	});
 });

@@ -23,6 +23,11 @@ type ResolvedContact = {
 	ownerId: string | null;
 };
 
+export type ContactMatch = {
+	id: string;
+	ownerId: string | null;
+};
+
 @Injectable()
 export class ExtrovertFilingService {
 	private readonly logger = new Logger(ExtrovertFilingService.name);
@@ -58,56 +63,13 @@ export class ExtrovertFilingService {
 		);
 		if (unique.size === 0) return new Map();
 
-		const slugs = [...unique.keys()]
-			.map(linkedinSlug)
-			.filter((slug): slug is string => slug !== null);
-		const existing = await this.db.contact.findMany({
-			where: {
-				archivedAt: null,
-				OR: [
-					{ linkedinUrl: { in: [...unique.keys()] } },
-					...slugs.flatMap((slug) => [
-						{
-							linkedinUrl: {
-								endsWith: `/in/${slug}`,
-								mode: "insensitive" as const,
-							},
-						},
-						{
-							linkedinUrl: {
-								endsWith: `/in/${slug}/`,
-								mode: "insensitive" as const,
-							},
-						},
-					]),
-				],
-			},
-			select: { id: true, ownerId: true, linkedinUrl: true },
-		});
-		const byNormalized = new Map<string, ResolvedContact>();
-		for (const row of existing) {
-			const normalized = row.linkedinUrl
-				? normalizeLinkedinUrl(row.linkedinUrl)
-				: null;
-			if (normalized && unique.has(normalized)) {
-				byNormalized.set(normalized, {
-					id: row.id,
-					created: false,
-					ownerId: row.ownerId,
-				});
-				continue;
-			}
-			const slug = row.linkedinUrl ? linkedinSlug(row.linkedinUrl) : null;
-			if (!slug) continue;
-			for (const input of unique.values()) {
-				if (linkedinSlug(input.normalized) !== slug) continue;
-				byNormalized.set(input.normalized, {
-					id: row.id,
-					created: false,
-					ownerId: row.ownerId,
-				});
-			}
-		}
+		const matches = await this.findContactsByLinkedin([...unique.keys()]);
+		const byNormalized = new Map<string, ResolvedContact>(
+			[...matches].map(([normalized, match]) => [
+				normalized,
+				{ ...match, created: false },
+			]),
+		);
 
 		for (const [normalized, input] of unique) {
 			const current = byNormalized.get(normalized);
@@ -151,15 +113,82 @@ export class ExtrovertFilingService {
 		return byNormalized;
 	}
 
+	async findContactsByLinkedin(
+		urls: string[],
+	): Promise<Map<string, ContactMatch>> {
+		const normalizedUrls = new Set(
+			urls
+				.map(normalizeLinkedinUrl)
+				.filter((url): url is string => url !== null),
+		);
+		if (normalizedUrls.size === 0) return new Map();
+		const slugs = [...normalizedUrls]
+			.map(linkedinSlug)
+			.filter((slug): slug is string => slug !== null);
+		const existing = await this.db.contact.findMany({
+			where: {
+				archivedAt: null,
+				OR: [
+					{ linkedinUrl: { in: [...normalizedUrls] } },
+					...slugs.flatMap((slug) => [
+						{
+							linkedinUrl: {
+								endsWith: `/in/${slug}`,
+								mode: "insensitive" as const,
+							},
+						},
+						{
+							linkedinUrl: {
+								endsWith: `/in/${slug}/`,
+								mode: "insensitive" as const,
+							},
+						},
+					]),
+				],
+			},
+			select: { id: true, ownerId: true, linkedinUrl: true },
+		});
+		const byNormalized = new Map<string, ContactMatch>();
+		for (const row of existing) {
+			const normalized = row.linkedinUrl
+				? normalizeLinkedinUrl(row.linkedinUrl)
+				: null;
+			if (normalized && normalizedUrls.has(normalized)) {
+				byNormalized.set(normalized, {
+					id: row.id,
+					ownerId: row.ownerId,
+				});
+				continue;
+			}
+			const slug = row.linkedinUrl ? linkedinSlug(row.linkedinUrl) : null;
+			if (!slug) continue;
+			for (const input of normalizedUrls) {
+				if (linkedinSlug(input) !== slug) continue;
+				byNormalized.set(input, { id: row.id, ownerId: row.ownerId });
+			}
+		}
+		return byNormalized;
+	}
+
+	async authorFor(
+		contactId: string,
+		preferred: string | null,
+	): Promise<string | null> {
+		if (preferred) return preferred;
+		const contact = await this.db.contact.findUnique({
+			where: { id: contactId },
+			select: { ownerId: true },
+		});
+		return (
+			contact?.ownerId ??
+			(await this.db.user.findFirst({ select: { id: true } }))?.id ??
+			null
+		);
+	}
+
 	async fileEngagementNote(contactId: string, text: string): Promise<void> {
 		try {
-			const contact = await this.db.contact.findUnique({
-				where: { id: contactId },
-				select: { ownerId: true },
-			});
-			const author =
-				contact?.ownerId ??
-				(await this.db.user.findFirst({ select: { id: true } }))?.id;
+			const author = await this.authorFor(contactId, null);
 			if (!author) return;
 			const activity = await this.db.activity.create({
 				data: {

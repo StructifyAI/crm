@@ -236,6 +236,11 @@ Only replies create a note.
 ## Extrovert
 
 Extrovert sends webhook events to `/api/extrovert/events/:secret`.
+
+Extrovert posted comments become contact notes. Extrovert DM threads become contact notes.
+One note exists for each comment. One note exists for each conversation and updates in place.
+The sync matches existing LinkedIn URLs only. The sync never creates contacts.
+Sync-created contacts are not enriched automatically. Webhook-created contacts are enriched.
 The webhook secret stays in the URL and rotates from the connection page.
 Disconnecting removes the webhook secret and API key.
 Malformed payloads return 204 to prevent repeated vendor retries.

@@ -35,6 +35,7 @@ type Status = {
 	hasApiKey: boolean;
 	lastEventAt: string | null;
 	lastSyncAt: string | null;
+	engagementSyncAt: string | null;
 	lastSyncError: string | null;
 	prospectCount: number;
 	memberCount: number;
@@ -45,6 +46,7 @@ type Status = {
 		type: "USER" | "SELECT" | "TEXT";
 	} | null;
 	syncInProgress: boolean;
+	engagementSyncInProgress: boolean;
 	syncProgress: { done: number; total: number | null } | null;
 };
 
@@ -236,6 +238,16 @@ export function ExtrovertConnection({
 									Last synced <LocalRelativeTime date={status.lastSyncAt} />
 								</p>
 							) : null}
+							<p className="text-muted-foreground text-sm">
+								Activity sync:{" "}
+								{status.engagementSyncInProgress ? (
+									"Syncing…"
+								) : status.engagementSyncAt ? (
+									<LocalRelativeTime date={status.engagementSyncAt} />
+								) : (
+									"—"
+								)}
+							</p>
 							<p className="text-muted-foreground text-sm">
 								{status.prospectCount} prospects
 							</p>
