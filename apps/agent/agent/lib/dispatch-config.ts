@@ -39,6 +39,7 @@ export const DISPATCH = {
 
 	employerLinks: {
 		scan: 100,
+		candidates: 500,
 	},
 
 	sweep: {

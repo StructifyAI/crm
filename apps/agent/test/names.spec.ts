@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import {
 	companyKey,
+	companyKeyTokens,
 	looksLikeSameCompany,
 	nameMatchesLocalPart,
 	sameDomain,
@@ -9,6 +10,10 @@ import {
 } from "../agent/lib/names";
 
 describe("companyKey", () => {
+	it("returns suffix-stripped tokens for candidate searches", () => {
+		expect(companyKeyTokens("G&W Electric Co.")).toEqual(["gandw", "electric"]);
+	});
+
 	it("strips trailing legal suffixes", () => {
 		expect(companyKey("Cummins Inc.")).toBe(companyKey("Cummins"));
 		expect(companyKey("Talon Precision, Inc.")).toBe(

@@ -57,14 +57,13 @@ const LEGAL_SUFFIXES = [
 	"lp",
 ] as const;
 
-export function companyKey(value: string): string {
+export function companyKeyTokens(value: string): string[] {
 	const tokens = value
 		.toLowerCase()
 		.replace(/&/g, "and")
 		.match(/[a-z0-9]+/g);
-	if (!tokens || tokens.length === 0) return "";
+	if (!tokens || tokens.length === 0) return [];
 
-	const unstripped = tokens.join("");
 	let end = tokens.length;
 	while (
 		end > 0 &&
@@ -73,7 +72,11 @@ export function companyKey(value: string): string {
 		end -= 1;
 	}
 
-	return tokens.slice(0, end).join("") || unstripped;
+	return tokens.slice(0, end).length > 0 ? tokens.slice(0, end) : tokens;
+}
+
+export function companyKey(value: string): string {
+	return companyKeyTokens(value).join("");
 }
 
 export function nameMatchesLocalPart(
