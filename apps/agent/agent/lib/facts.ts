@@ -277,26 +277,26 @@ export async function recordFact(
 			},
 		});
 
-		if (!applies) return;
-
-		if (column) {
-			await tx.contact.update({
-				where: { id: contactId },
-				data: { [column]: trimmed },
-			});
-		}
-
-		if (field === "name") {
-			const split = splitName(trimmed);
-			if (split) {
+		if (applies) {
+			if (column) {
 				await tx.contact.update({
 					where: { id: contactId },
-					data: { firstName: split.firstName, lastName: split.lastName },
+					data: { [column]: trimmed },
 				});
+			}
+
+			if (field === "name") {
+				const split = splitName(trimmed);
+				if (split) {
+					await tx.contact.update({
+						where: { id: contactId },
+						data: { firstName: split.firstName, lastName: split.lastName },
+					});
+				}
 			}
 		}
 
-		if (field === "employer") {
+		if (applies && field === "employer") {
 			linkedCompanyId = await linkEmployer(tx, contactId, {
 				name: trimmed,
 				domain: input.employerDomain ?? null,

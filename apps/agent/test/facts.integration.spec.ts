@@ -428,6 +428,36 @@ describe("recordFact", () => {
 		});
 		expect(contact).toEqual({ companyId: null });
 	});
+
+	it("does not link a proposed employer replacement", async () => {
+		const id = await newContact("Proposed");
+		await recordFact({
+			contactId: id,
+			field: "employer",
+			value: "Old Co",
+			evidence: [seen("linkedin.employer-and-name")],
+			method: "linkedin.profile",
+		});
+		await newCompany("Acme", `proposed-acme-${suffix}.test`);
+
+		const result = await recordFact({
+			contactId: id,
+			field: "employer",
+			value: "Acme",
+			employerDomain: `proposed-acme-${suffix}.test`,
+			evidence: [seen("handle.name-form"), seen("search.cites-profile")],
+			method: "linkedin.profile",
+		});
+
+		expect(result.applied).toBe(false);
+		expect(result.band).toBe("PROBABLE");
+		expect(result.linkedCompanyId).toBeNull();
+		const contact = await db.contact.findUnique({
+			where: { id },
+			select: { companyId: true },
+		});
+		expect(contact).toEqual({ companyId: null });
+	});
 });
 
 describe("writeBrief", () => {
