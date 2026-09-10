@@ -85,7 +85,11 @@ describe("sweepBlankFacts", () => {
 			select: { id: true },
 		});
 		companyIds.push(company.id);
-		await propose({ field: "employer", value: "Blank Employer", score: 0.61 });
+		const factId = await propose({
+			field: "employer",
+			value: "Blank Employer",
+			score: 0.61,
+		});
 
 		const sweep = await sweepBlankFacts();
 
@@ -95,6 +99,11 @@ describe("sweepBlankFacts", () => {
 			select: { companyId: true },
 		});
 		expect(contact).toEqual({ companyId: company.id });
+		const fact = await db.contactFact.findUnique({
+			where: { id: factId },
+			select: { linkCheckedAt: true },
+		});
+		expect(fact?.linkCheckedAt).not.toBeNull();
 	});
 
 	it("leaves a suggestion that disagrees with what is already there", async () => {

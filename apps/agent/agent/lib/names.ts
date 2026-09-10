@@ -38,6 +38,44 @@ export function looksLikeSameCompany(
 	);
 }
 
+const LEGAL_SUFFIXES = [
+	"inc",
+	"incorporated",
+	"llc",
+	"ltd",
+	"limited",
+	"corp",
+	"corporation",
+	"co",
+	"company",
+	"gmbh",
+	"plc",
+	"sa",
+	"ag",
+	"pty",
+	"llp",
+	"lp",
+] as const;
+
+export function companyKey(value: string): string {
+	const tokens = value
+		.toLowerCase()
+		.replace(/&/g, "and")
+		.match(/[a-z0-9]+/g);
+	if (!tokens || tokens.length === 0) return "";
+
+	const unstripped = tokens.join("");
+	let end = tokens.length;
+	while (
+		end > 0 &&
+		LEGAL_SUFFIXES.includes(tokens[end - 1] as (typeof LEGAL_SUFFIXES)[number])
+	) {
+		end -= 1;
+	}
+
+	return tokens.slice(0, end).join("") || unstripped;
+}
+
 export function nameMatchesLocalPart(
 	person: { firstName: string | null; lastName: string | null },
 	local: string,

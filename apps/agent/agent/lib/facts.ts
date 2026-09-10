@@ -1,7 +1,7 @@
 import { db, FactBand, FactStatus, type Prisma } from "@crm/db";
 import { type Evidence, scoreEvidence } from "./evidence";
 import { currentFocus } from "./focus";
-import { hostOf, isDerivedName, normalise, splitName } from "./names";
+import { companyKey, hostOf, isDerivedName, splitName } from "./names";
 
 const FIELDS = {
 	name: { column: null },
@@ -89,10 +89,10 @@ export async function linkEmployer(
 		}
 	}
 
-	const name = normalise(employer.name);
+	const name = companyKey(employer.name);
 	if (name.length < 3) return null;
 
-	const firstWord = normalise(employer.name.trim().split(/\s+/)[0] ?? "");
+	const firstWord = employer.name.toLowerCase().match(/[a-z0-9]+/)?.[0] ?? "";
 	if (!firstWord) return null;
 
 	const candidates = await tx.company.findMany({
@@ -104,7 +104,7 @@ export async function linkEmployer(
 		take: 50,
 	});
 	const matches = candidates.filter(
-		(candidate) => normalise(candidate.name) === name,
+		(candidate) => companyKey(candidate.name) === name,
 	);
 	if (matches.length !== 1) return null;
 
@@ -262,7 +262,7 @@ export async function recordFact(
 			});
 		}
 
-		await tx.contactFact.create({
+		const fact = await tx.contactFact.create({
 			data: {
 				contactId,
 				field,
@@ -300,6 +300,10 @@ export async function recordFact(
 			linkedCompanyId = await linkEmployer(tx, contactId, {
 				name: trimmed,
 				domain: input.employerDomain ?? null,
+			});
+			await tx.contactFact.update({
+				where: { id: fact.id },
+				data: { linkCheckedAt: new Date() },
 			});
 		}
 	});

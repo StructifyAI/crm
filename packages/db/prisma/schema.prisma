@@ -474,6 +474,7 @@ model ContactFact {
 
   observedAt   DateTime  @default(now())
   supersededAt DateTime?
+  linkCheckedAt DateTime?
 
   @@index([contactId, field, status])
   @@index([status, observedAt])

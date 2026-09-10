@@ -5,6 +5,7 @@ import { brandOutcome, runBrand } from "./brand";
 import { queueEventAgentRuns } from "./custom-agent-dispatch";
 import { settledWithin } from "./deadline";
 import { DISPATCH } from "./dispatch-config";
+import { employerLinkSweep } from "./employer-links";
 import { markRunning, settle } from "./enrichment";
 import { collapsing, runLimited } from "./pool";
 import { runPortrait } from "./portrait";
@@ -310,6 +311,7 @@ export function dispatchHealth() {
 		pendingItems,
 		unlinkedSessions,
 		staleTasks: staleTaskSweep(),
+		employerLinks: employerLinkSweep(),
 		lastError: lastSweepError,
 	};
 }
