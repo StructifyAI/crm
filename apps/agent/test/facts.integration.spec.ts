@@ -331,6 +331,27 @@ describe("recordFact", () => {
 		expect(result.linkedCompanyId).toBe(companyId);
 	});
 
+	it("uses the longest employer token to avoid candidate prefilter collisions", async () => {
+		for (let index = 1; index <= 60; index += 1) {
+			await newCompany(`Gadget ${index}`, `gadget-${index}-${suffix}.test`);
+		}
+		const companyId = await newCompany(
+			"G&W Electric",
+			`g-and-w-electric-${suffix}.test`,
+		);
+		const id = await newContact("Candidate");
+
+		const result = await recordFact({
+			contactId: id,
+			field: "employer",
+			value: "G&W Electric Co.",
+			evidence: [seen("linkedin.employer-and-name")],
+			method: "linkedin.profile",
+		});
+
+		expect(result.linkedCompanyId).toBe(companyId);
+	});
+
 	it("does not link when normalized company name is not unique", async () => {
 		await newCompany(`Twin Corp ${suffix}`, `twin-one-${suffix}.test`);
 		await newCompany(`Twin Corp ${suffix}`, `twin-two-${suffix}.test`);

@@ -1,7 +1,14 @@
 import { db, FactBand, FactStatus, type Prisma } from "@crm/db";
+import { DISPATCH } from "./dispatch-config";
 import { type Evidence, scoreEvidence } from "./evidence";
 import { currentFocus } from "./focus";
-import { companyKey, hostOf, isDerivedName, splitName } from "./names";
+import {
+	companyKey,
+	companyKeyTokens,
+	hostOf,
+	isDerivedName,
+	splitName,
+} from "./names";
 
 const FIELDS = {
 	name: { column: null },
@@ -92,16 +99,21 @@ export async function linkEmployer(
 	const name = companyKey(employer.name);
 	if (name.length < 3) return null;
 
-	const firstWord = employer.name.toLowerCase().match(/[a-z0-9]+/)?.[0] ?? "";
-	if (!firstWord) return null;
+	const tokens = companyKeyTokens(employer.name);
+	const longestToken = tokens.reduce(
+		(longest, token) => (token.length > longest.length ? token : longest),
+		"",
+	);
+	const needle = longestToken.length >= 3 ? longestToken : name;
+	if (!needle) return null;
 
 	const candidates = await tx.company.findMany({
 		where: {
 			archivedAt: null,
-			name: { contains: firstWord, mode: "insensitive" },
+			name: { contains: needle, mode: "insensitive" },
 		},
 		select: { id: true, name: true },
-		take: 50,
+		take: DISPATCH.employerLinks.candidates,
 	});
 	const matches = candidates.filter(
 		(candidate) => companyKey(candidate.name) === name,
