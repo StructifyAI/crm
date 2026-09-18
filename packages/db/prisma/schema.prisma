@@ -198,6 +198,7 @@ model RateLimit {
 }
 
 enum DealStage {
+  ENGAGED
   DEMO_BOOKED
   QUALIFIED_TO_BUY
   UNQUALIFIED_TO_BUY
