@@ -28,6 +28,9 @@ two commits that are submitted upstream and not yet released:
 - `fix(api): read function crons from vercel.json` — `build-func.mjs` emitted a
   hardcoded single cron, dropping rates, telemetry, retention and prune crons in
   production. Replaces the deleted `structify-crons` branch.
+- `feat(db,app): add an Engaged deal stage before Demo booked` — `ENGAGED` value on
+  `DealStage`, migration `deal_stage_engaged`; first open stage in the stepper, pipeline
+  chart and filters. New deals still default to `DEMO_BOOKED`.
 
 Rules for this branch:
 
