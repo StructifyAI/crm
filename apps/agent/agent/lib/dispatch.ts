@@ -1,4 +1,5 @@
 import { EnrichmentStatus } from "@crm/db";
+import { emailDealMatchPayload } from "@crm/validation/email-deal-match";
 import { fieldBackfillPayload } from "@crm/validation/field-backfill";
 import { APP_AUTH, type AppAuth } from "./app-auth";
 import { brandOutcome, runBrand } from "./brand";
@@ -418,6 +419,14 @@ function work(
 			const parsed = fieldBackfillPayload.safeParse(payload);
 			const keys = parsed.success ? parsed.data.keys.join(", ") : reason;
 			return `This record is missing a value for the custom field(s) ${keys}. Call list_fields for this record's type, read each field's brief, and call set_field_value only where you find real evidence — leave it blank rather than guess.`;
+		}
+		case "email-deal-match": {
+			const parsed = emailDealMatchPayload.safeParse(payload);
+			if (!parsed.success) return `Handle this: ${reason}`;
+			const deals = parsed.data.candidateDealIds
+				.map((id) => `\`${id}\``)
+				.join(", ");
+			return `A new email thread was synced onto this record (${reason}). It is activity \`${parsed.data.activityId}\` and could belong to any of these open deals: ${deals}. Read the thread in full with read_crm_history or read_company_history, then read_deal_history on each candidate, and call file_email_to_deal with the activity id once exactly one deal is clearly what the email is about — the subject, the people on it, or the product named. If it is not clear, file nothing and say why. Do not spend vendor calls on this.`;
 		}
 		default:
 			return `Handle this: ${reason}`;

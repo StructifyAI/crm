@@ -8,8 +8,10 @@ import {
 	RecordSource,
 } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
+import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
+import { DealFilingService } from "./deal-filing.service";
 import type { SyncSource } from "./mailbox.constants";
 import {
 	MailboxMatchService,
@@ -31,6 +33,14 @@ export type IncomingMessage = {
 	outlookWebLink?: string | null;
 };
 
+type Projection = {
+	activityId: string;
+	emailThreadId: string;
+	createdAt: Date;
+	dealId: string | null;
+	review: string[] | null;
+};
+
 @Injectable()
 export class ThreadWriterService {
 	private readonly logger = new Logger(ThreadWriterService.name);
@@ -39,6 +49,8 @@ export class ThreadWriterService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly match: MailboxMatchService,
 		private readonly stamp: ActivityStampService,
+		private readonly deals: DealFilingService,
+		private readonly agent: AgentTriggerService,
 	) {}
 
 	async context(): Promise<MatchContext> {
@@ -118,10 +130,10 @@ export class ThreadWriterService {
 			}
 		}
 
-		let occurredAt: Date;
+		let projected: Projection;
 
 		try {
-			occurredAt = await this.db.$transaction(async (tx) => {
+			projected = await this.db.$transaction(async (tx) => {
 				const record = existing
 					? { id: existing.threadId }
 					: await tx.emailThread.upsert({
@@ -196,7 +208,22 @@ export class ThreadWriterService {
 			throw error;
 		}
 
-		await this.touch({ companyId, contactId }, occurredAt, parsed.rfcMessageId);
+		await this.touch(
+			{ companyId, contactId, dealId: projected.dealId },
+			projected.createdAt,
+			parsed.rfcMessageId,
+		);
+
+		if (projected.review) {
+			await this.agent.emailNeedsDeal({
+				activityId: projected.activityId,
+				emailThreadId: projected.emailThreadId,
+				contactId,
+				companyId,
+				subject: parsed.subject,
+				candidateDealIds: projected.review,
+			});
+		}
 
 		return !repair;
 	}
@@ -219,7 +246,11 @@ export class ThreadWriterService {
 	}
 
 	private async touch(
-		target: { companyId: string | null; contactId: string | null },
+		target: {
+			companyId: string | null;
+			contactId: string | null;
+			dealId: string | null;
+		},
 		at: Date,
 		rfcMessageId: string,
 	): Promise<void> {
@@ -264,7 +295,25 @@ export class ThreadWriterService {
 			contactId: string | null;
 			origin: SyncSource;
 		},
-	): Promise<Date> {
+	): Promise<Projection> {
+		const before = await tx.activity.findUnique({
+			where: { emailThreadId },
+			select: { dealId: true },
+		});
+
+		const filing = before
+			? null
+			: await this.deals.resolve(
+					{ companyId: summary.companyId, contactId: summary.contactId },
+					tx,
+				);
+
+		const dealId = before
+			? before.dealId
+			: filing?.kind === "one"
+				? filing.dealId
+				: null;
+
 		const activity = await tx.activity.upsert({
 			where: { emailThreadId },
 			create: {
@@ -274,6 +323,7 @@ export class ThreadWriterService {
 				occurredAt: summary.lastMessageAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
+				dealId,
 				createdById: userId,
 				emailThreadId,
 				meta: { synced: true, source: summary.origin },
@@ -282,9 +332,15 @@ export class ThreadWriterService {
 				body: summary.snippet,
 				occurredAt: summary.lastMessageAt,
 			},
-			select: { createdAt: true },
+			select: { id: true, createdAt: true },
 		});
 
-		return activity.createdAt;
+		return {
+			activityId: activity.id,
+			emailThreadId,
+			createdAt: activity.createdAt,
+			dealId,
+			review: filing?.kind === "many" ? filing.dealIds : null,
+		};
 	}
 }

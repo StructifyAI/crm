@@ -57,8 +57,18 @@ behind sixty LLM runs for 25 minutes (`test/lanes.integration.spec.ts`). **The r
 what the work is; the lane only says whether it needs a conversation.**
 
 **Priority**: `brand` 900 · `portrait` 800 · `workspace` 500 · `requested` 300 ·
-`meeting` 200 · `identify` 100 · `sweep` 50 · `companyProfile` 40 · `recheck` 0. The
-top two are what a rep reads *before* deciding what to open.
+`meeting` 200 · `identify` 100 · `emailDealMatch` 60 · `sweep` 50 · `companyProfile` 40
+· `recheck` 0. The top two are what a rep reads *before* deciding what to open.
+
+**`email-deal-match` is the one research kind the mailbox queues.** The API files a
+synced email to a deal itself when the contact (or, failing that, the company) has
+exactly one open deal (`docs/api.md`, *A synced email lands on a deal only when the
+answer is obvious*). When there are several, it writes this row with the activity id,
+the thread id and the candidate deal ids in `payload`
+(`@crm/validation/email-deal-match`), one open row per thread. The session reads the
+thread and each candidate with the free CRM reads and calls `file_email_to_deal`, which
+refuses a filed email, an archived deal, and a deal at another company, and is
+idempotent. Budget 1: nothing here is worth a vendor call. It owns no enrichment status.
 
 **`claimDue` sorts what it claims** — Postgres does not order `UPDATE … RETURNING` by
 its sub-select's `ORDER BY`.

@@ -12,6 +12,7 @@ const STEPS = {
 	"company-profile": "Reading the company website",
 	"workspace-profile": "Reading your own website",
 	"field-backfill": "Filling in the blank details",
+	"email-deal-match": "Filing an email to a deal",
 	"slack-people-match": "Matching people in Slack",
 	"slack-channel-join": "Joining a Slack channel",
 	"agent-event": "Reacting to a change",

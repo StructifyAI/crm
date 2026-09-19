@@ -2,6 +2,7 @@ import { syncError } from "@crm/telemetry";
 import { Injectable, Logger } from "@nestjs/common";
 import { GoogleConnectionService } from "../google/google-connection.service";
 import { GoogleSyncService } from "../google/google-sync.service";
+import { DealFilingService } from "../mailbox/deal-filing.service";
 import {
 	isGoogleSyncSource,
 	isMicrosoftSyncSource,
@@ -18,6 +19,7 @@ export type TickSummary = {
 	skipped: number;
 	rateLimited: number;
 	failed: number;
+	filed: number;
 	durationMs: number;
 };
 
@@ -31,6 +33,7 @@ export class MailboxSyncService {
 		private readonly microsoft: MicrosoftSyncService,
 		private readonly googleConnections: GoogleConnectionService,
 		private readonly microsoftConnections: MicrosoftConnectionService,
+		private readonly filing: DealFilingService,
 	) {}
 
 	async runDue(): Promise<TickSummary> {
@@ -41,6 +44,7 @@ export class MailboxSyncService {
 			skipped: 0,
 			rateLimited: 0,
 			failed: 0,
+			filed: 0,
 			durationMs: 0,
 		};
 
@@ -97,6 +101,7 @@ export class MailboxSyncService {
 			}
 		}
 
+		summary.filed = (await this.filing.sweep()).filed;
 		summary.durationMs = Date.now() - startedAt;
 
 		this.logger.log({
@@ -106,6 +111,7 @@ export class MailboxSyncService {
 			skipped: summary.skipped,
 			rateLimited: summary.rateLimited,
 			failed: summary.failed,
+			filed: summary.filed,
 			durationMs: summary.durationMs,
 		});
 
