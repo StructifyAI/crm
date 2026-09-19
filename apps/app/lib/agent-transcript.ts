@@ -77,6 +77,7 @@ const VERBS: ToolVerbs = {
 	schedule_recheck: "Decided when to look again",
 	record_job_change: "Raised a job change",
 	list_deals: "Reviewed the deal pipeline",
+	file_email_to_deal: "Filed an email to a deal",
 	list_outstanding_work: "Looked for outstanding work",
 	set_chat_title: "Named this chat",
 	list_fields: "Read what this workspace tracks",

@@ -5,6 +5,7 @@ import {
 } from "@crm/db";
 import type { GoogleConnectionService } from "../src/google/google-connection.service";
 import type { GoogleSyncService } from "../src/google/google-sync.service";
+import type { DealFilingService } from "../src/mailbox/deal-filing.service";
 import {
 	SYNC_LEASE_MS,
 	type SyncStateService,
@@ -111,6 +112,10 @@ const noConnections = {
 	reconcileAll: async () => undefined,
 };
 
+const noFiling = {
+	sweep: async () => ({ scanned: 0, filed: 0 }),
+} as unknown as DealFilingService;
+
 function build(
 	state: FakeState,
 	runOne: (userId: string, source: string) => Promise<Outcome | null>,
@@ -123,6 +128,7 @@ function build(
 		provider as unknown as MicrosoftSyncService,
 		noConnections as unknown as GoogleConnectionService,
 		noConnections as unknown as MicrosoftConnectionService,
+		noFiling,
 	);
 }
 

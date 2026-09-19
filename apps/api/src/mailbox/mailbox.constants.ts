@@ -48,3 +48,8 @@ export const PROVIDER_FOR_SOURCE = {
 	gmail: GOOGLE_PROVIDER_ID,
 	outlook: MICROSOFT_PROVIDER_ID,
 } satisfies Record<SyncSource, MailboxProviderId>;
+
+export const DEAL_FILING = {
+	candidateLimit: 8,
+	sweepBatch: 500,
+} as const;

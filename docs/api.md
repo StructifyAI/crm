@@ -176,6 +176,18 @@ Two rules follow for the serverless build:
   to one `IncomingMessage` and hand it over; matching, threading, counting and
   stamping happen once. A second copy of that is how a rule like *reply before you
   create a company* comes to be true in one inbox and not the other.
+- **A synced email lands on a deal only when the answer is obvious.** The deal
+  timeline filters on `dealId` alone, so an `EMAIL` activity with only a `contactId`
+  is on the contact and the company and on no deal. `DealFilingService.resolve`
+  picks the contact's open deals (`DealContact`), and only when there are none the
+  company's open deals; exactly one candidate is written as `dealId` in the same
+  transaction as the activity, and the deal is stamped. Two or more become an
+  `email-deal-match` task with the candidate ids in the payload
+  (`@crm/validation/email-deal-match`) and the agent picks with
+  `file_email_to_deal` — the API never guesses. None stays unfiled. A thread already
+  on a deal is never moved by a later message. `DealFilingService.sweep` runs at
+  the end of every mailbox sync tick and files older unfiled emails the same way,
+  unambiguous ones only, `DEAL_FILING.sweepBatch` a pass.
 - **A thread is keyed by RFC message id, not by the provider's thread id.** Root comes
   from `References` → `In-Reply-To` → own `Message-ID`, so a rep on Gmail and a rep on
   Outlook land on the same `EmailThread` for the same conversation. Graph only returns

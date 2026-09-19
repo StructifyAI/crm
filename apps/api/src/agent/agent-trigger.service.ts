@@ -3,6 +3,7 @@ import { PRIORITY } from "@crm/db/agent-tasks";
 import { CRM_EVENT_CATALOG, type CrmEventType } from "@crm/db/crm-events";
 import { RECORD_ID_COLUMNS } from "@crm/db/fields";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
+import type { EmailDealMatchPayload } from "@crm/validation/email-deal-match";
 import { fieldBackfillPayload } from "@crm/validation/field-backfill";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -324,6 +325,29 @@ export class AgentTriggerService {
 			reason: `Meeting on ${when.toDateString()} with someone we know nothing about`,
 			priority: PRIORITY.meeting,
 			budget: 10,
+		});
+	}
+
+	async emailNeedsDeal(
+		input: EmailDealMatchPayload & {
+			contactId: string | null;
+			companyId: string | null;
+			subject: string | null;
+		},
+	): Promise<void> {
+		await this.enqueue({
+			contactId: input.contactId ?? undefined,
+			companyId: input.companyId ?? undefined,
+			kind: "email-deal-match",
+			reason: `"${input.subject ?? "(no subject)"}" could belong to ${input.candidateDealIds.length} open deals`,
+			priority: PRIORITY.emailDealMatch,
+			budget: 1,
+			subject: { path: ["emailThreadId"], value: input.emailThreadId },
+			payload: {
+				activityId: input.activityId,
+				emailThreadId: input.emailThreadId,
+				candidateDealIds: input.candidateDealIds,
+			},
 		});
 	}
 
