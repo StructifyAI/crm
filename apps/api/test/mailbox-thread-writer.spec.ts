@@ -5,6 +5,7 @@ import { CompanyDirectoryService } from "../src/companies/company-directory.serv
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
 import { deadlineIn } from "../src/mailbox/deadline";
+import type { DealLinkService } from "../src/mailbox/deal-link.service";
 import type { EmailTriageService } from "../src/mailbox/email-triage.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import {
@@ -35,7 +36,14 @@ const match = new MailboxMatchService(db, directory, agent, log);
 const triage = {
 	assess: async () => ({ verdict: "unknown", reason: "not asked" }),
 } as unknown as EmailTriageService;
-const threads = new ThreadWriterService(db, match, stamp, triage);
+const linkAsked: Parameters<DealLinkService["attach"]>[] = [];
+const dealLink = {
+	attach: async (...args: Parameters<DealLinkService["attach"]>) => {
+		linkAsked.push(args);
+		return null;
+	},
+} as unknown as DealLinkService;
+const threads = new ThreadWriterService(db, match, stamp, triage, dealLink);
 
 let row: MailboxSync;
 
@@ -113,6 +121,34 @@ describe("storing a synced email", () => {
 
 		expect(thread?.messageCount).toBe(1);
 		expect(thread?.activity).not.toBeNull();
+	});
+
+	it("asks the deal linker about every stored email with the records it resolved", async () => {
+		linkAsked.length = 0;
+		const deadline = deadlineIn(60_000);
+		const root = `<link-${suffix}@mail.test>`;
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(root, new Date("2026-01-01T10:05:00Z"), root),
+			await threads.context(deadline),
+		);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: root },
+			select: { id: true, companyId: true, contactId: true },
+		});
+		await db.emailThread.delete({ where: { id: thread.id } });
+
+		expect(thread.companyId).not.toBeNull();
+		expect(linkAsked).toEqual([
+			[
+				thread.id,
+				{ companyId: thread.companyId, contactId: thread.contactId },
+				deadline,
+			],
+		]);
 	});
 
 	it("repairs a thread whose projection was lost rather than skipping it forever", async () => {

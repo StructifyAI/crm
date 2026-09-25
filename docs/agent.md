@@ -119,6 +119,24 @@ Request and answer are `@crm/validation/email-triage`.
   a `400` from an unreadable body. The API treats `unknown` as *create as before*, so a
   triage outage costs spam rows, not missed deals.
 
+### `POST /internal/crm/link-deal`
+
+Answers *which of these open deals is this thread about?* for the mailbox sync
+(`lib/deal-link.ts`), the same way: one `generateText` with `Output.object`, no session,
+no task row. Request and answer are `@crm/validation/deal-link`; the API sends the
+candidate list, so the agent never queries the database.
+
+- **It picks one deal or none.** The people on the thread and what they discuss must
+  both point at the deal. Two deals that fit equally, or a thread that says too little,
+  is `none`: an unfiled email is found later, a misfiled one misleads the team.
+- **An id that was not offered is `none`**, whatever the model says (`judge`). The API
+  checks the same thing, so neither side alone can file a thread on a closed deal.
+- **The model sees the latest `DEAL_LINK.messagesShown` messages, each cut to
+  `messageChars`**, and each deal's name, stage, company, a bounded description and
+  `contactsShown` addresses (`lib/deal-link-config.ts`). The thread is data, not
+  instructions.
+- **Every failure is `unknown`, never a throw.** The API leaves the thread unlinked.
+
 ### Blank fields are filled on the dispatch tick
 
 `sweepBlankFacts` (`lib/blank-facts.ts`) applies every pending suggestion whose field is

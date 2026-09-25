@@ -11,6 +11,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import type { Deadline } from "./deadline";
+import { DealLinkService, type DealLinkTarget } from "./deal-link.service";
 import { EmailTriageService } from "./email-triage.service";
 import type { SyncSource } from "./mailbox.constants";
 import { MAILBOX_TRIAGE } from "./mailbox-config";
@@ -48,6 +49,7 @@ export class ThreadWriterService {
 		private readonly match: MailboxMatchService,
 		private readonly stamp: ActivityStampService,
 		private readonly triage: EmailTriageService,
+		private readonly deals: DealLinkService,
 	) {}
 
 	async context(deadline: Deadline): Promise<WriteContext> {
@@ -130,10 +132,10 @@ export class ThreadWriterService {
 			}
 		}
 
-		let occurredAt: Date;
+		let stored: { threadId: string; occurredAt: Date };
 
 		try {
-			occurredAt = await this.db.$transaction(async (tx) => {
+			stored = await this.db.$transaction(async (tx) => {
 				const record = existing
 					? { id: existing.threadId }
 					: await tx.emailThread.upsert({
@@ -194,7 +196,7 @@ export class ThreadWriterService {
 
 				await tx.emailThread.update({ where: { id: record.id }, data });
 
-				return this.project(tx, record.id, row.userId, {
+				const occurredAt = await this.project(tx, record.id, row.userId, {
 					subject: parsed.subject ?? "(no subject)",
 					snippet: snippetOf(parsed.body),
 					lastMessageAt,
@@ -202,15 +204,41 @@ export class ThreadWriterService {
 					contactId,
 					origin: options.origin,
 				});
+
+				return { threadId: record.id, occurredAt };
 			});
 		} catch (error) {
 			if (await this.storedElsewhere(error, parsed.rfcMessageId)) return false;
 			throw error;
 		}
 
-		await this.touch({ companyId, contactId }, occurredAt, parsed.rfcMessageId);
+		await this.touch(
+			{ companyId, contactId },
+			stored.occurredAt,
+			parsed.rfcMessageId,
+		);
+		await this.attachDeal(stored.threadId, { companyId, contactId }, context);
 
 		return !repair;
+	}
+
+	private async attachDeal(
+		threadId: string,
+		target: DealLinkTarget,
+		context: WriteContext,
+	): Promise<void> {
+		try {
+			await this.deals.attach(threadId, target, context.deadline);
+		} catch (error) {
+			this.logger.error(
+				{
+					message: "An email was stored but could not be linked to a deal",
+					threadId,
+					...target,
+				},
+				error instanceof Error ? error.stack : String(error),
+			);
+		}
 	}
 
 	private async storedElsewhere(
