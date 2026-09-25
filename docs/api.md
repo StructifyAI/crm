@@ -187,6 +187,12 @@ and `ThreadWriterService`.
   one place that dispatches. One cron, one budget:
   `POST /internal/sync/mailboxes` (`/google` is kept as an alias so an existing
   deployment's cron keeps working).
+- **One tick shares one `Deadline` (`mailbox/deadline.ts`, `SYNC_TICK.budgetMs`).**
+  The Vercel function dies at 60 seconds, so `runDue` hands every provider the same
+  35-second deadline. Calendar checks it between events and pages and stores the
+  page token it stopped at; Gmail and Outlook stop between messages and leave the
+  cursor where it was. A paused run is `synced`, never `failed`, and `due` orders by
+  `lastSyncedAt`, so the row that gave up its turn goes first next tick.
 - **Gmail is forward-only from a `historyId`, Outlook from a timestamp.** Graph has no
   mailbox-wide delta, so the Outlook cursor is the last `receivedDateTime` seen,
   re-read with a one-second overlap; `rfcMessageId` is unique, so the overlap costs a

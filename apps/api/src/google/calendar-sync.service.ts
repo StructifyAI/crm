@@ -14,6 +14,7 @@ import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { singleOpenDealId } from "../crm/single-open-deal";
 import { InjectDatabase } from "../database/database.constants";
+import { type Deadline, overdue } from "../mailbox/deadline";
 import {
 	MailboxMatchService,
 	type MatchContext,
@@ -52,7 +53,7 @@ export class CalendarSyncService {
 		private readonly agent: AgentTriggerService,
 	) {}
 
-	async sync(row: MailboxSync): Promise<SyncOutcome> {
+	async sync(row: MailboxSync, deadline: Deadline): Promise<SyncOutcome> {
 		const token = await this.tokens.accessTokenFor(row.userId, "calendar");
 
 		if (token.outcome === "not-connected") {
@@ -90,22 +91,20 @@ export class CalendarSyncService {
 			suppressedEmails,
 		};
 
-		let pageToken: string | undefined =
-			resume && !row.cursor ? resume.pageToken : undefined;
+		let pageToken = resume?.pageToken;
 		let syncToken = row.cursor ?? undefined;
-		const timeMin =
-			resume && !row.cursor ? resume.timeMin : new Date().toISOString();
-		const timeMax =
-			resume && !row.cursor ? resume.timeMax : this.horizon().toISOString();
-		let written = 0;
-		let removed = 0;
+		const range = {
+			timeMin: resume?.timeMin ?? new Date().toISOString(),
+			timeMax: resume?.timeMax ?? this.horizon().toISOString(),
+		};
+		const progress = { written: 0, removed: 0 };
 
 		for (let page = 0; page < CALENDAR_SYNC.maxPagesPerTick; page += 1) {
 			const result = await this.calendar.listEvents(token.accessToken, {
 				syncToken,
 				pageToken,
-				timeMin,
-				timeMax,
+				maxResults: CALENDAR_SYNC.pageSize,
+				...range,
 			});
 
 			if (result.outcome === "cursor-invalid") {
@@ -114,8 +113,8 @@ export class CalendarSyncService {
 					source: "calendar",
 					userId: row.userId,
 					status: "synced",
-					eventsWritten: written,
-					eventsRemoved: removed,
+					eventsWritten: progress.written,
+					eventsRemoved: progress.removed,
 					reason: "Cursor reset; the next tick re-runs the window.",
 				};
 			}
@@ -151,9 +150,18 @@ export class CalendarSyncService {
 			}
 
 			for (const event of result.data.items ?? []) {
+				if (overdue(deadline)) {
+					return this.pause(
+						row,
+						pageToken ? { pageToken, ...range } : null,
+						progress,
+						"Time budget reached; this page re-runs next tick.",
+					);
+				}
+
 				const applied = await this.apply(event, row, context);
-				if (applied === "written") written += 1;
-				if (applied === "removed") removed += 1;
+				if (applied === "written") progress.written += 1;
+				if (applied === "removed") progress.removed += 1;
 			}
 
 			pageToken = result.data.nextPageToken;
@@ -169,35 +177,55 @@ export class CalendarSyncService {
 				this.logger.log({
 					message: "Calendar sync complete",
 					userId: row.userId,
-					eventsWritten: written,
-					eventsRemoved: removed,
+					eventsWritten: progress.written,
+					eventsRemoved: progress.removed,
 				});
 
 				return {
 					source: "calendar",
 					userId: row.userId,
 					status: "synced",
-					eventsWritten: written,
-					eventsRemoved: removed,
+					eventsWritten: progress.written,
+					eventsRemoved: progress.removed,
 				};
+			}
+
+			if (overdue(deadline)) {
+				return this.pause(
+					row,
+					{ pageToken, ...range },
+					progress,
+					"Time budget reached; continuing next tick.",
+				);
 			}
 		}
 
-		const nextResume: CalendarSyncResume | null =
-			syncToken || !pageToken ? null : { pageToken, timeMin, timeMax };
+		return this.pause(
+			row,
+			pageToken ? { pageToken, ...range } : null,
+			progress,
+			"Page budget reached; continuing next tick.",
+		);
+	}
 
+	private async pause(
+		row: MailboxSync,
+		resume: CalendarSyncResume | null,
+		progress: { written: number; removed: number },
+		reason: string,
+	): Promise<SyncOutcome> {
 		await this.state.settle(row.id, {
 			status: GoogleSyncStatus.IDLE,
-			resume: nextResume,
+			resume,
 		});
 
 		return {
 			source: "calendar",
 			userId: row.userId,
 			status: "synced",
-			eventsWritten: written,
-			eventsRemoved: removed,
-			reason: "Page budget reached; continuing next tick.",
+			eventsWritten: progress.written,
+			eventsRemoved: progress.removed,
+			reason,
 		};
 	}
 

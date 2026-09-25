@@ -1,4 +1,6 @@
 import { Injectable } from "@nestjs/common";
+import { type Deadline, deadlineIn } from "../mailbox/deadline";
+import { SYNC_TICK } from "../mailbox/mailbox-config";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import {
 	MICROSOFT_SYNC_SOURCES,
@@ -13,16 +15,22 @@ export class MicrosoftSyncService {
 		private readonly outlook: OutlookSyncService,
 	) {}
 
-	async runOne(userId: string, source: MicrosoftSyncSource) {
+	async runOne(
+		userId: string,
+		source: MicrosoftSyncSource,
+		deadline: Deadline,
+	) {
 		const row = await this.state.get(userId, source);
 		if (!row) return null;
 
-		return this.outlook.sync(row);
+		return this.outlook.sync(row, deadline);
 	}
 
 	async runForUser(userId: string): Promise<void> {
+		const deadline = deadlineIn(SYNC_TICK.budgetMs);
+
 		for (const source of MICROSOFT_SYNC_SOURCES) {
-			await this.runOne(userId, source);
+			await this.runOne(userId, source, deadline);
 		}
 	}
 }
