@@ -6,7 +6,7 @@ import {
 	expect,
 	it,
 } from "bun:test";
-import { db, Prisma } from "@crm/db";
+import { db, type FieldEntity, Prisma } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
 import type {
 	ExtrovertProspectV2,
@@ -24,6 +24,7 @@ import { ExtrovertEngagementSyncService } from "../src/extrovert/extrovert-engag
 import { ExtrovertFilingService } from "../src/extrovert/extrovert-filing.service";
 import { ExtrovertIngestService } from "../src/extrovert/extrovert-ingest.service";
 import { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
+import type { FieldsService } from "../src/fields/fields.service";
 import { withDiscardedCrmEvents } from "./agent-trigger.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "extrovert-spec";
@@ -73,13 +74,14 @@ function prospect(
 	} satisfies ExtrovertProspectV2;
 }
 
-const appliedValues: Array<Record<string, unknown>> = [];
+type AppliedValues = Parameters<FieldsService["applyValues"]>[3];
+const appliedValues: AppliedValues[] = [];
 const fields = {
 	applyValues: async (
-		_tx: unknown,
-		_entity: string,
+		_tx: Prisma.TransactionClient,
+		_entity: FieldEntity,
 		_recordId: string,
-		values: Record<string, unknown>,
+		values: AppliedValues,
 	) => {
 		appliedValues.push(values);
 	},

@@ -238,10 +238,14 @@ export function parseExtrovertTeamMemberList(
 	return extrovertEnvelope(z.array(extrovertTeamMember)).parse(value).data;
 }
 
-export function parseExtrovertProspectsV2(value: unknown): {
+export type ExtrovertProspectsV2Page = {
 	prospects: ExtrovertProspectV2[];
 	total: number;
-} {
+};
+
+export function parseExtrovertProspectsV2(
+	value: unknown,
+): ExtrovertProspectsV2Page {
 	const parsed = extrovertProspectsV2Response.parse(value).data;
 	return { prospects: parsed.users, total: parsed.pagination.total };
 }
