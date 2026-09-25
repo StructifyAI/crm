@@ -168,8 +168,8 @@ Two rules follow for the serverless build:
 `apps/api/src/mailbox` is everything neither Google nor Microsoft owns:
 `MailboxApiClient` (bearer GET, and the one place a status code becomes an outcome),
 `SyncStateService` (the `MailboxSync` row), `MailboxTokenService`,
-`MailboxMatchService`, `participants.ts`, `message-text.ts`, and
-`ThreadWriterService`.
+`MailboxMatchService`, `EmailTriageService`, `participants.ts`, `message-text.ts`,
+and `ThreadWriterService`.
 
 - **`ThreadWriterService.store` is the only writer of `EmailThread`, `EmailMessage`
   and the `EMAIL` activity.** Gmail and Outlook each parse their own wire format down
@@ -201,6 +201,18 @@ Two rules follow for the serverless build:
 - **Microsoft has no token-revocation endpoint.** `revoke` clears the columns and the
   UI says the consent itself is removed in the user's Microsoft account. Google's still
   posts to `oauth2.googleapis.com/revoke` and refuses to clear if that fails.
+- **The agent decides whether a new counterparty is a deal before the sync files
+  it.** When a thread would create a company nobody knows, `ThreadWriterService`
+  posts the message to `POST /internal/crm/triage-email` through `EmailTriageService`
+  and the agent answers `deal`, `spam` or `unknown` (`@crm/validation/email-triage`).
+  `spam` writes nothing and, when the thread has one external domain, upserts a
+  `SuppressedDomain` so the next rotating throwaway from the same vendor is barred
+  before it reaches the matcher. `unknown` — no `AGENT_BRIDGE_SECRET`, the agent is
+  down, the model timed out — creates as before: a vendor filed by mistake is
+  archived in a click; a buyer never filed is a deal nobody sees. The API sends
+  `IncomingMessage.transcript` (the body *with* quoted history), because the message
+  that opens a thread is usually the rep's reply and the pitch it answers sits below
+  the quote line. An existing contact or company is never triaged.
 
 ## Not every address on a thread is a person
 

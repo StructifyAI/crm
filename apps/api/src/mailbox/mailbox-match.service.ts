@@ -22,13 +22,14 @@ export type SyncRecordSource =
 export type MatchResult = {
 	companyId: string | null;
 	contactId: string | null;
+	domain: string | null;
 	external: Participant[];
 };
 
 export type MatchContext = {
 	ourAddresses: ReadonlySet<string>;
 	ourDomains: ReadonlySet<string>;
-	suppressedDomains: ReadonlySet<string>;
+	suppressedDomains: Set<string>;
 	suppressedEmails: ReadonlySet<string>;
 };
 
@@ -84,6 +85,24 @@ export class MailboxMatchService {
 		return new Set(rows.map((row) => row.email.toLowerCase()));
 	}
 
+	async suppress(
+		domain: string,
+		reason: string,
+		context: MatchContext,
+	): Promise<void> {
+		await this.db.suppressedDomain.upsert({
+			where: { domain },
+			create: { domain, reason },
+			update: {},
+		});
+		context.suppressedDomains.add(domain);
+
+		this.logger.log({
+			message: "Domain suppressed by inbox triage",
+			domain,
+		});
+	}
+
 	async resolve(
 		request: MatchRequest,
 		context: MatchContext,
@@ -96,18 +115,19 @@ export class MailboxMatchService {
 		});
 
 		if (external.length === 0) {
-			return { companyId: null, contactId: null, external };
+			return { companyId: null, contactId: null, domain: null, external };
 		}
 
 		const contact = await this.db.contact.findFirst({
 			where: { email: { in: external.map((person) => person.email) } },
-			select: { id: true, companyId: true },
+			select: { id: true, companyId: true, email: true },
 		});
 
 		if (contact) {
 			return {
 				companyId: contact.companyId,
 				contactId: contact.id,
+				domain: contact.email ? workDomain(contact.email) : null,
 				external,
 			};
 		}
@@ -132,7 +152,9 @@ export class MailboxMatchService {
 		);
 
 		const domain = dominantDomain(external, knownDomains);
-		if (!domain) return { companyId: null, contactId: null, external };
+		if (!domain) {
+			return { companyId: null, contactId: null, domain: null, external };
+		}
 
 		const existing = known.find((company) => company.domain === domain);
 		if (existing) {
@@ -141,12 +163,13 @@ export class MailboxMatchService {
 				contactId: request.allowCreate
 					? await this.createContact(external, domain, existing.id, request)
 					: null,
+				domain,
 				external,
 			};
 		}
 
 		if (!request.allowCreate) {
-			return { companyId: null, contactId: null, external };
+			return { companyId: null, contactId: null, domain, external };
 		}
 
 		return this.create(external, domain, request);
@@ -161,13 +184,13 @@ export class MailboxMatchService {
 			external.find((person) => workDomain(person.email) === domain) ??
 			external[0];
 
-		if (!lead) return { companyId: null, contactId: null, external };
+		if (!lead) return { companyId: null, contactId: null, domain, external };
 
 		const companyId = await this.companies.companyForEmail(lead.email, {
 			ownerId: request.ownerId,
 		});
 		if (!companyId) {
-			return { companyId: null, contactId: null, external };
+			return { companyId: null, contactId: null, domain, external };
 		}
 
 		await this.db.company.update({
@@ -198,7 +221,7 @@ export class MailboxMatchService {
 			source: request.source,
 		});
 
-		return { companyId, contactId, external };
+		return { companyId, contactId, domain, external };
 	}
 
 	private async createContact(

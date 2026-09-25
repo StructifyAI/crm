@@ -257,7 +257,7 @@ export class GmailSyncService {
 			kind: "cc" as const,
 		}));
 
-		const body = stripQuotedHistory(plainTextBody(message.payload));
+		const transcript = plainTextBody(message.payload);
 
 		return {
 			rfcMessageId: normaliseMessageId(rawMessageId),
@@ -265,7 +265,8 @@ export class GmailSyncService {
 			subject: header(headers, "subject"),
 			from,
 			recipients: [...to, ...cc],
-			body,
+			body: stripQuotedHistory(transcript),
+			transcript,
 			sentAt,
 			gmailMessageId: message.id ?? null,
 		};

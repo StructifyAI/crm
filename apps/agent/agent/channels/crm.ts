@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { EnrichmentStatus, Prisma } from "@crm/db";
 import { MAX_ATTEMPTS } from "@crm/db/agent-tasks";
 import { schemas } from "@crm/validation";
+import { emailTriageRequest } from "@crm/validation/email-triage";
 import { eveTurnFailure } from "@crm/validation/eve-stream";
 import { defineChannel, GET, POST } from "eve/channels";
 import { z } from "zod";
@@ -27,6 +28,7 @@ import {
 	taskAuth,
 } from "../lib/dispatch";
 import { DISPATCH } from "../lib/dispatch-config";
+import { triageEmail } from "../lib/email-triage";
 import { settle } from "../lib/enrichment";
 import { finishRun, runResultOf } from "../lib/run-runtime";
 import { attribute } from "../lib/session-purpose";
@@ -236,6 +238,25 @@ export default defineChannel({
 			}
 
 			return Response.json(await verifyKey(apiKey));
+		}),
+
+		POST("/internal/crm/triage-email", async (request) => {
+			if (!authorised(request)) {
+				return new Response("Unauthorized", { status: 401 });
+			}
+
+			const parsed = emailTriageRequest.safeParse(
+				await request.json().catch(() => null),
+			);
+
+			if (!parsed.success) {
+				return Response.json(
+					{ verdict: "unknown", reason: "The email was not readable." },
+					{ status: 400 },
+				);
+			}
+
+			return Response.json(await triageEmail(parsed.data));
 		}),
 	],
 
