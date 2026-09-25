@@ -10,13 +10,17 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
+import { EmailTriageService } from "./email-triage.service";
 import type { SyncSource } from "./mailbox.constants";
+import { MAILBOX_TRIAGE } from "./mailbox-config";
 import {
 	MailboxMatchService,
 	type MatchContext,
+	type MatchRequest,
+	type MatchResult,
 } from "./mailbox-match.service";
 import { snippetOf } from "./message-text";
-import type { Participant } from "./participants";
+import { type Participant, workDomain } from "./participants";
 
 export type IncomingMessage = {
 	rfcMessageId: string;
@@ -25,6 +29,7 @@ export type IncomingMessage = {
 	from: Participant;
 	recipients: { email: string; name: string | null; kind: "to" | "cc" }[];
 	body: string;
+	transcript: string;
 	sentAt: Date;
 	gmailMessageId?: string | null;
 	outlookMessageId?: string | null;
@@ -39,6 +44,7 @@ export class ThreadWriterService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly match: MailboxMatchService,
 		private readonly stamp: ActivityStampService,
+		private readonly triage: EmailTriageService,
 	) {}
 
 	async context(): Promise<MatchContext> {
@@ -100,7 +106,7 @@ export class ThreadWriterService {
 				outbound ||
 				(await this.hasOutboundInThread(parsed.rootId, options.mailbox));
 
-			const match = await this.match.resolve(
+			const match = await this.resolve(
 				{
 					participants,
 					allowCreate: row.autoCreate && repliedTo,
@@ -108,6 +114,8 @@ export class ThreadWriterService {
 					ownerId: row.userId,
 				},
 				context,
+				parsed,
+				outbound,
 			);
 
 			companyId = match.companyId;
@@ -235,6 +243,58 @@ export class ThreadWriterService {
 				error instanceof Error ? error.stack : String(error),
 			);
 		}
+	}
+
+	private async resolve(
+		request: MatchRequest,
+		context: MatchContext,
+		parsed: IncomingMessage,
+		outbound: boolean,
+	): Promise<MatchResult> {
+		const known = await this.match.resolve(
+			{ ...request, allowCreate: false },
+			context,
+		);
+
+		if (!request.allowCreate || known.contactId) return known;
+		if (known.companyId) return this.match.resolve(request, context);
+		if (!known.domain) return known;
+
+		const answer = await this.triage.assess({
+			direction: outbound ? "outbound" : "inbound",
+			subject: parsed.subject,
+			from: parsed.from,
+			recipients: parsed.recipients.map((person) => ({
+				email: person.email,
+				name: person.name,
+			})),
+			body: parsed.transcript,
+		});
+
+		if (answer.verdict !== "spam") {
+			return this.match.resolve(request, context);
+		}
+
+		const externalDomains = new Set(
+			known.external.map((person) => workDomain(person.email)),
+		);
+
+		if (externalDomains.size === 1) {
+			await this.match.suppress(
+				known.domain,
+				`${MAILBOX_TRIAGE.suppressionReasonPrefix}: ${answer.category}. ${answer.reason}`,
+				context,
+			);
+		}
+
+		this.logger.log({
+			message:
+				"Mailbox sync skipped a message whose counterparty is not a deal",
+			category: answer.category,
+			outbound,
+		});
+
+		return { ...known, companyId: null, contactId: null };
 	}
 
 	private async hasOutboundInThread(

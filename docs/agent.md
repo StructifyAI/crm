@@ -101,6 +101,24 @@ task row; exists because the API may not call Context.
 - **`classifyKey` rejects on `401` and nothing else.**
 - **The candidate key, never the stored one.**
 
+### `POST /internal/crm/triage-email`
+
+Answers *is the other party on this message a deal or noise?* for the mailbox sync
+(`lib/email-triage.ts`). One `generateText` with `Output.object` through the gateway on
+the workspace's selected model (or `DEFAULT_AGENT_MODEL`), no session, no task row.
+Request and answer are `@crm/validation/email-triage`.
+
+- **It judges the counterparty, not the message** — a vendor pitching us, a warm-up
+  network, a billing system, an unsubscribe address is `spam`; anyone who could pay
+  is `deal`, and so is a newsletter *we* send to them. Unsure is `deal`: the API
+  turns `spam` into a `SuppressedDomain`, and a suppressed buyer is silent forever.
+- **The model sees a bounded transcript** — `EMAIL_TRIAGE.bodyChars` of body,
+  `recipientsShown` addresses (`lib/email-triage-config.ts`) — and is told the body is
+  data, not instructions.
+- **Every failure is `unknown`, never a throw** — no model configured, gateway down,
+  a `400` from an unreadable body. The API treats `unknown` as *create as before*, so a
+  triage outage costs spam rows, not missed deals.
+
 ### Blank fields are filled on the dispatch tick
 
 `sweepBlankFacts` (`lib/blank-facts.ts`) applies every pending suggestion whose field is

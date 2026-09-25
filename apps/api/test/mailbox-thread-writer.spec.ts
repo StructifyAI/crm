@@ -4,6 +4,7 @@ import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
+import type { EmailTriageService } from "../src/mailbox/email-triage.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import {
 	type IncomingMessage,
@@ -30,7 +31,10 @@ const stamp = new ActivityStampService(db);
 const directory = new CompanyDirectoryService(agent);
 const log = new EnrichmentLogService(db, stamp);
 const match = new MailboxMatchService(db, directory, agent, log);
-const threads = new ThreadWriterService(db, match, stamp);
+const triage = {
+	assess: async () => ({ verdict: "unknown", reason: "not asked" }),
+} as unknown as EmailTriageService;
+const threads = new ThreadWriterService(db, match, stamp, triage);
 
 let row: MailboxSync;
 
@@ -42,6 +46,7 @@ function message(id: string, sentAt: Date, root = rootId): IncomingMessage {
 		from: { email: mailbox, name: "Test Rep" },
 		recipients: [{ email: person, name: "A Buyer", kind: "to" }],
 		body: "The numbers you asked for.",
+		transcript: "The numbers you asked for.",
 		sentAt,
 		gmailMessageId: null,
 		outlookMessageId: null,

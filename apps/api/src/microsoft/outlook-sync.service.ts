@@ -280,6 +280,7 @@ export class OutlookSyncService {
 			from,
 			recipients: [...to, ...cc],
 			body: stripQuotedHistory(text),
+			transcript: text,
 			sentAt,
 			outlookMessageId: message.id ?? null,
 			outlookWebLink: message.webLink ?? null,
