@@ -31,6 +31,20 @@ two commits that are submitted upstream and not yet released:
 - `feat(db,app): add an Engaged deal stage before Demo booked` — `ENGAGED` value on
   `DealStage`, migration `deal_stage_engaged`; first open stage in the stepper, pipeline
   chart and filters. New deals still default to `DEMO_BOOKED`.
+- `feat: triage inbox counterparties through the agent before the sync files them` —
+  agent route `/internal/crm/triage-email`; a `spam` verdict creates no company or
+  contact and writes a `suppressedDomain` row. Needs `AGENT_URL` and
+  `AGENT_BRIDGE_SECRET` on the API.
+- `fix(api): share one tick deadline so a slow calendar cannot starve the mailbox sync` —
+  `SYNC_TICK` deadline flows from `runDue` into calendar, Gmail, Outlook and triage.
+- `fix(api): file Instantly replies without a campaign id and make the pre-push gates
+  pass`.
+- `feat: file every synced email on the open deal the agent says it belongs to` —
+  agent route `/internal/crm/link-deal`; the API sets `Activity.dealId` only to an id it
+  offered. Backfill: `GET /internal/sync/deal-links?cursor=…` with the cron secret.
+- `feat: show the agent who each synced email was sent to when it files the thread on a
+  deal` — `@crm/validation/email-recipients` parses stored recipients once for the
+  conversation view and the deal-link request.
 
 Rules for this branch:
 
