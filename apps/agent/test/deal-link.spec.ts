@@ -8,6 +8,10 @@ const request = dealLinkRequest.parse({
 	messages: Array.from({ length: DEAL_LINK.messagesShown + 2 }, (_, index) => ({
 		direction: index % 2 === 0 ? "inbound" : "outbound",
 		from: { email: `Person${index}@Buyer.test`, name: null },
+		recipients: Array.from(
+			{ length: DEAL_LINK.recipientsShown + 2 },
+			(_, i) => ({ email: `To${i}@Seller.test`, name: i === 0 ? "Rep" : null }),
+		),
 		sentAt: `2026-01-0${(index % 9) + 1}T10:00:00.000Z`,
 		body: `message ${index} ${"x".repeat(DEAL_LINK.messageChars + 100)}`,
 	})),
@@ -55,8 +59,38 @@ describe("describeThread", () => {
 		expect(text).not.toContain("message 1 ");
 		expect(text).toContain("message 2 ");
 		expect(text).toContain(`message ${DEAL_LINK.messagesShown + 1} `);
-		expect(text).toContain("inbound from person2@buyer.test at 2026-01-03");
+		expect(text).toContain(
+			"inbound from person2@buyer.test to Rep <to0@seller.test>",
+		);
+		expect(text).toContain(" at 2026-01-03");
 		expect(text).not.toContain("x".repeat(DEAL_LINK.messageChars + 1));
+	});
+
+	it("lists a bounded recipient list on every message", () => {
+		const text = describeThread(request);
+
+		expect(text).toContain(`to${DEAL_LINK.recipientsShown - 1}@seller.test`);
+		expect(text).not.toContain(`to${DEAL_LINK.recipientsShown}@seller.test`);
+		expect(text).toContain("and 2 more at");
+	});
+
+	it("names a message with no recipients and reads them without the field", () => {
+		const parsed = dealLinkRequest.parse({
+			...request,
+			messages: [
+				{
+					direction: "outbound",
+					from: { email: "rep@seller.test", name: null },
+					sentAt: "2026-01-01T10:00:00.000Z",
+					body: "Thanks, talk soon.",
+				},
+			],
+		});
+
+		expect(parsed.messages[0]?.recipients).toEqual([]);
+		expect(describeThread(parsed)).toContain(
+			"outbound from rep@seller.test to (unknown) at",
+		);
 	});
 
 	it("names a missing subject and an empty body", () => {

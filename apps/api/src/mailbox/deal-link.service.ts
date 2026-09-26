@@ -6,6 +6,7 @@ import {
 	type DealLinkRequest,
 	dealLinkAnswer,
 } from "@crm/validation/deal-link";
+import { parseStoredRecipients } from "@crm/validation/email-recipients";
 import { Injectable, Logger } from "@nestjs/common";
 import { bridge } from "../agent/bridge";
 import { ActivityStampService } from "../crm/activity-stamp.service";
@@ -225,6 +226,7 @@ export class DealLinkService {
 						direction: true,
 						fromEmail: true,
 						fromName: true,
+						recipients: true,
 						sentAt: true,
 						body: true,
 						snippet: true,
@@ -242,6 +244,9 @@ export class DealLinkService {
 						? "outbound"
 						: "inbound",
 				from: { email: message.fromEmail, name: message.fromName },
+				recipients: parseStoredRecipients(message.recipients)
+					.slice(0, MAILBOX_DEAL_LINK.recipientsShown)
+					.map((person) => ({ email: person.email, name: person.name })),
 				sentAt: message.sentAt.toISOString(),
 				body: (message.body ?? message.snippet ?? "").slice(
 					0,

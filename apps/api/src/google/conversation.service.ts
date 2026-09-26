@@ -1,17 +1,7 @@
-import type { Db, Prisma } from "@crm/db";
+import type { Db } from "@crm/db";
+import { parseStoredRecipients } from "@crm/validation/email-recipients";
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { z } from "zod";
 import { InjectDatabase } from "../database/database.constants";
-
-const storedRecipient = z.object({
-	email: z.string(),
-	name: z.string().nullable().catch(null),
-	kind: z.string().catch("to"),
-});
-
-type StoredRecipient = z.infer<typeof storedRecipient>;
-
-const storedRecipients = z.array(z.json()).catch([]);
 
 @Injectable()
 export class ConversationService {
@@ -62,7 +52,7 @@ export class ConversationService {
 			messages: thread.messages.map((message) => ({
 				...message,
 				sentAt: message.sentAt.toISOString(),
-				recipients: recipientsOf(message.recipients),
+				recipients: parseStoredRecipients(message.recipients),
 				fromImageUrl: faces.get(message.fromEmail.toLowerCase()) ?? null,
 				mailboxUrl: message.gmailMessageId
 					? `https://mail.google.com/mail/u/0/#all/${message.gmailMessageId}`
@@ -151,11 +141,4 @@ export class ConversationService {
 			})),
 		};
 	}
-}
-
-function recipientsOf(value: Prisma.JsonValue): StoredRecipient[] {
-	return storedRecipients.parse(value).flatMap((entry) => {
-		const parsed = storedRecipient.safeParse(entry);
-		return parsed.success ? [parsed.data] : [];
-	});
 }
