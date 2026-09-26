@@ -168,8 +168,8 @@ Two rules follow for the serverless build:
 `apps/api/src/mailbox` is everything neither Google nor Microsoft owns:
 `MailboxApiClient` (bearer GET, and the one place a status code becomes an outcome),
 `SyncStateService` (the `MailboxSync` row), `MailboxTokenService`,
-`MailboxMatchService`, `EmailTriageService`, `participants.ts`, `message-text.ts`,
-and `ThreadWriterService`.
+`MailboxMatchService`, `EmailTriageService`, `DealLinkService`, `participants.ts`,
+`message-text.ts`, and `ThreadWriterService`.
 
 - **`ThreadWriterService.store` is the only writer of `EmailThread`, `EmailMessage`
   and the `EMAIL` activity.** Gmail and Outlook each parse their own wire format down
@@ -219,6 +219,24 @@ and `ThreadWriterService`.
   `IncomingMessage.transcript` (the body *with* quoted history), because the message
   that opens a thread is usually the rep's reply and the pitch it answers sits below
   the quote line. An existing contact or company is never triaged.
+- **The agent files every stored email on the open deal it belongs to.** After the
+  `EMAIL` activity exists, `ThreadWriterService` hands the thread to `DealLinkService`,
+  which lists the open, unarchived deals of the thread's company and contact
+  (`OPEN_DEAL_STAGES`, at most `MAILBOX_DEAL_LINK.candidates`) and posts the latest
+  messages plus that list to `POST /internal/crm/link-deal`
+  (`@crm/validation/deal-link`). `linked` sets `Activity.dealId` and stamps the deal's
+  `lastActivityAt`; `none` and `unknown` leave it unlinked. The API accepts only an id
+  it offered, so a closed deal is never linked, and it never overwrites a `dealId` a
+  rep already set. No candidate, no call: a thread with no open deal costs nothing.
+  The call shares the tick `Deadline`, so a slow model cannot stall the mailbox sync.
+- **Emails stored before that shipped are backfilled by hand.**
+  `GET /internal/sync/deal-links` (`Bearer <CRON_SECRET>`) runs `DealLinkService.backfill`
+  over one page of `EMAIL` activities with no `dealId` whose company or contact has an
+  open deal, newest first, `MAILBOX_DEAL_LINK.backfillPage` at a time, through the same
+  `attach` path. It stops at the tick `Deadline` and returns `{ examined, linked, next }`;
+  call it again with `?cursor=<next>` until `next` is null. A linked activity leaves the
+  query, so a run that starts over is idempotent. Without `AGENT_BRIDGE_SECRET` it does
+  nothing and hands the cursor back. It is not a cron: run it once per deploy that needs it.
 
 ## Not every address on a thread is a person
 

@@ -9,6 +9,7 @@ import { CompanyDirectoryService } from "../src/companies/company-directory.serv
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
 import { deadlineIn } from "../src/mailbox/deadline";
+import type { DealLinkService } from "../src/mailbox/deal-link.service";
 import type { EmailTriageService } from "../src/mailbox/email-triage.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import {
@@ -55,7 +56,8 @@ const stamp = new ActivityStampService(db);
 const directory = new CompanyDirectoryService(agent);
 const log = new EnrichmentLogService(db, stamp);
 const match = new MailboxMatchService(db, directory, agent, log);
-const threads = new ThreadWriterService(db, match, stamp, triage);
+const dealLink = { attach: async () => null } as unknown as DealLinkService;
+const threads = new ThreadWriterService(db, match, stamp, triage, dealLink);
 
 let row: MailboxSync;
 

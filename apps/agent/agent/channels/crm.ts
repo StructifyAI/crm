@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { EnrichmentStatus, Prisma } from "@crm/db";
 import { MAX_ATTEMPTS } from "@crm/db/agent-tasks";
 import { schemas } from "@crm/validation";
+import { dealLinkRequest } from "@crm/validation/deal-link";
 import { emailTriageRequest } from "@crm/validation/email-triage";
 import { eveTurnFailure } from "@crm/validation/eve-stream";
 import { defineChannel, GET, POST } from "eve/channels";
@@ -20,6 +21,7 @@ import {
 	runIdFromToken,
 	runToken,
 } from "../lib/custom-agent-dispatch";
+import { linkDeal } from "../lib/deal-link";
 import {
 	brief,
 	DRAIN_TIMEOUT_MS,
@@ -257,6 +259,25 @@ export default defineChannel({
 			}
 
 			return Response.json(await triageEmail(parsed.data));
+		}),
+
+		POST("/internal/crm/link-deal", async (request) => {
+			if (!authorised(request)) {
+				return new Response("Unauthorized", { status: 401 });
+			}
+
+			const parsed = dealLinkRequest.safeParse(
+				await request.json().catch(() => null),
+			);
+
+			if (!parsed.success) {
+				return Response.json(
+					{ verdict: "unknown", reason: "The thread was not readable." },
+					{ status: 400 },
+				);
+			}
+
+			return Response.json(await linkDeal(parsed.data));
 		}),
 	],
 

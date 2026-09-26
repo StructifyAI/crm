@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AgentModule } from "../agent/agent.module";
 import { CompaniesModule } from "../companies/companies.module";
+import { DealLinkService } from "./deal-link.service";
 import { EmailTriageService } from "./email-triage.service";
 import { MailboxApiClient } from "./mailbox-api.client";
 import { MailboxMatchService } from "./mailbox-match.service";
@@ -11,6 +12,7 @@ import { ThreadWriterService } from "./thread-writer.service";
 @Module({
 	imports: [AgentModule, CompaniesModule],
 	providers: [
+		DealLinkService,
 		EmailTriageService,
 		MailboxApiClient,
 		MailboxTokenService,
@@ -19,6 +21,7 @@ import { ThreadWriterService } from "./thread-writer.service";
 		ThreadWriterService,
 	],
 	exports: [
+		DealLinkService,
 		MailboxApiClient,
 		MailboxTokenService,
 		MailboxMatchService,
