@@ -24,16 +24,14 @@ export async function writeGranolaSyncState(
 		granolaSyncResume?: Prisma.InputJsonValue | null;
 	},
 ): Promise<void> {
-	const data = {
-		...(update.granolaSyncedAt
-			? { granolaSyncedAt: update.granolaSyncedAt }
-			: {}),
-		...(update.granolaSyncResume !== undefined
-			? {
-					granolaSyncResume: update.granolaSyncResume ?? Prisma.JsonNull,
-				}
-			: {}),
-	};
+	const data: Pick<
+		Prisma.AppSettingUncheckedCreateInput,
+		"granolaSyncedAt" | "granolaSyncResume"
+	> = {};
+	if (update.granolaSyncedAt) data.granolaSyncedAt = update.granolaSyncedAt;
+	if (update.granolaSyncResume !== undefined) {
+		data.granolaSyncResume = update.granolaSyncResume ?? Prisma.JsonNull;
+	}
 
 	await db.appSetting.upsert({
 		where: { id: SETTINGS_ID },

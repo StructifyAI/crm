@@ -57,8 +57,9 @@ function build(options: {
 	const creates: Prisma.ActivityCreateInput[] = [];
 	const stamps: ActivityTarget[] = [];
 	const saved: Date[] = [];
-	const resumes: unknown[] = [];
-	const stateUpdates: unknown[] = [];
+	const resumes: Prisma.AppSettingUncheckedUpdateInput["granolaSyncResume"][] =
+		[];
+	const stateUpdates: Prisma.AppSettingUncheckedUpdateInput[] = [];
 	const requests: { updatedAfter: string; cursor?: string }[] = [];
 	const pages = options.pages ?? [
 		{ notes: [summary()], hasMore: false, cursor: null },
@@ -72,7 +73,11 @@ function build(options: {
 				granolaSyncedAt: options.syncedAt ?? null,
 				granolaSyncResume: options.resume ?? null,
 			}),
-			upsert: async ({ update }: { update: Record<string, unknown> }) => {
+			upsert: async ({
+				update,
+			}: {
+				update: Prisma.AppSettingUncheckedUpdateInput;
+			}) => {
 				stateUpdates.push(update);
 				if (update.granolaSyncedAt instanceof Date) {
 					saved.push(update.granolaSyncedAt);

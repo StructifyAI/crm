@@ -95,11 +95,15 @@ export class InstantlyFilingService {
 				mailbox: event.email_account,
 				reason: "Replied to an Instantly campaign",
 			});
-			if (!resolved || !event.campaign_id) return;
+			if (!resolved) return;
 			if (event.event_type === "reply_received") {
 				await this.attachReply(resolved.id, event);
+			}
+			if (!event.campaign_id) return;
+			const lead = { contactId: resolved.id, campaignId: event.campaign_id };
+			if (event.event_type === "reply_received") {
 				await this.db.instantlyCampaignLead.updateMany({
-					where: { contactId: resolved.id, campaignId: event.campaign_id },
+					where: lead,
 					data: { replyCount: { increment: 1 } },
 				});
 				return;
@@ -107,7 +111,7 @@ export class InstantlyFilingService {
 			const interestStatus = interestStatusFor(event.event_type);
 			if (interestStatus === undefined) return;
 			await this.db.instantlyCampaignLead.updateMany({
-				where: { contactId: resolved.id, campaignId: event.campaign_id },
+				where: lead,
 				data: { interestStatus },
 			});
 		} catch (error) {

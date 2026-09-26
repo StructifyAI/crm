@@ -23,6 +23,7 @@ import { withDiscardedCrmEvents } from "./agent-trigger.stub";
 const suffix = process.env.TEST_RUN_ID ?? "instantly-spec";
 const domain = `instantly-${suffix}.test`;
 const existingOwnerId = `instantly-existing-owner-${suffix}`;
+const mappedOwnerId = `instantly-mapped-owner-${suffix}`;
 const queued: string[] = [];
 
 const agent = {
@@ -63,10 +64,21 @@ async function clean() {
 		where: { emailAccount: { endsWith: `@example.test` } },
 	});
 	await db.company.deleteMany({ where: { domain } });
-	await db.user.deleteMany({ where: { id: existingOwnerId } });
+	await db.user.deleteMany({
+		where: { id: { in: [existingOwnerId, mappedOwnerId] } },
+	});
 }
 
-beforeAll(clean);
+beforeAll(async () => {
+	await clean();
+	await db.user.create({
+		data: {
+			id: mappedOwnerId,
+			name: "Mapped Owner",
+			email: `${mappedOwnerId}@example.test`,
+		},
+	});
+});
 beforeEach(async () => {
 	queued.length = 0;
 	await db.instantlyMailbox.deleteMany({
@@ -80,9 +92,11 @@ afterAll(async () => {
 
 describe("Instantly filing", () => {
 	it("assigns a mapped mailbox owner", async () => {
-		const user = await db.user.findFirstOrThrow({ select: { id: true } });
 		await db.instantlyMailbox.create({
-			data: { emailAccount: `sender-${suffix}@example.test`, ownerId: user.id },
+			data: {
+				emailAccount: `sender-${suffix}@example.test`,
+				ownerId: mappedOwnerId,
+			},
 		});
 
 		await filing.file(event(`mapped@${domain}`));
@@ -91,7 +105,7 @@ describe("Instantly filing", () => {
 			where: { email: `mapped@${domain}` },
 			select: { ownerId: true, source: true },
 		});
-		expect(contact).toEqual({ ownerId: user.id, source: "INSTANTLY" });
+		expect(contact).toEqual({ ownerId: mappedOwnerId, source: "INSTANTLY" });
 	});
 
 	it("leaves an unmapped mailbox ownerless", async () => {
@@ -148,11 +162,10 @@ describe("Instantly filing", () => {
 	});
 
 	it("syncs campaign leads and removes leads missing from a later run", async () => {
-		const user = await db.user.findFirstOrThrow({ select: { id: true } });
 		const mappedMailbox = `mapped-${suffix}@example.test`;
 		const secondMailbox = `second-${suffix}@example.test`;
 		await db.instantlyMailbox.create({
-			data: { emailAccount: mappedMailbox, ownerId: user.id },
+			data: { emailAccount: mappedMailbox, ownerId: mappedOwnerId },
 		});
 		await db.appSetting.upsert({
 			where: { id: SETTINGS_ID },
@@ -217,7 +230,7 @@ describe("Instantly filing", () => {
 				where: { id: stored?.contactId },
 				select: { ownerId: true },
 			}),
-		).toEqual({ ownerId: user.id });
+		).toEqual({ ownerId: mappedOwnerId });
 		expect(
 			await db.contact.findUnique({
 				where: { email: secondLead.email },
@@ -238,9 +251,6 @@ describe("Instantly filing", () => {
 	});
 
 	it("backfills unowned contacts and preserves existing owners", async () => {
-		const mappedOwner = await db.user.findFirstOrThrow({
-			select: { id: true },
-		});
 		await db.user.upsert({
 			where: { id: existingOwnerId },
 			create: {
@@ -252,7 +262,7 @@ describe("Instantly filing", () => {
 		});
 		const mappedMailbox = `backfill-${suffix}@example.test`;
 		await db.instantlyMailbox.create({
-			data: { emailAccount: mappedMailbox, ownerId: mappedOwner.id },
+			data: { emailAccount: mappedMailbox, ownerId: mappedOwnerId },
 		});
 		const unowned = await db.contact.create({
 			data: {
@@ -328,7 +338,7 @@ describe("Instantly filing", () => {
 				where: { id: unowned.id },
 				select: { ownerId: true },
 			}),
-		).toEqual({ ownerId: mappedOwner.id });
+		).toEqual({ ownerId: mappedOwnerId });
 		expect(
 			await db.contact.findUnique({
 				where: { id: owned.id },
