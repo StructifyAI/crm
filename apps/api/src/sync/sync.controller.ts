@@ -1,10 +1,12 @@
 import {
+	BadRequestException,
 	Controller,
 	ForbiddenException,
 	Get,
 	Headers,
 	Logger,
 	Post,
+	Query,
 	ServiceUnavailableException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -14,6 +16,7 @@ import {
 	ApiHeader,
 	ApiOkResponse,
 	ApiOperation,
+	ApiQuery,
 	ApiServiceUnavailableResponse,
 	ApiTags,
 } from "@nestjs/swagger";
@@ -22,7 +25,9 @@ import type { EnvironmentVariables } from "../config/env.validation";
 import { ExtrovertEngagementSyncService } from "../extrovert/extrovert-engagement-sync.service";
 import { ExtrovertSyncService } from "../extrovert/extrovert-sync.service";
 import { InstantlySyncService } from "../instantly/instantly-sync.service";
+import { DealLinkService } from "../mailbox/deal-link.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
+import { dealLinkBackfillCursor } from "./sync.contracts";
 
 @ApiTags("Internal — Cron")
 @ApiHeader({
@@ -42,6 +47,7 @@ export class SyncController {
 		private readonly instantly: InstantlySyncService,
 		private readonly extrovert: ExtrovertSyncService,
 		private readonly extrovertEngagement: ExtrovertEngagementSyncService,
+		private readonly dealLinks: DealLinkService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -125,6 +131,38 @@ export class SyncController {
 		return this.runExtrovertEngagement(authorization);
 	}
 
+	@Get("deal-links")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary:
+			"Backfill one page of stored emails onto the open deal the agent picks",
+	})
+	@ApiQuery({
+		name: "cursor",
+		required: false,
+		description: "The `next` value from the previous page; omit to start over.",
+	})
+	@ApiOkResponse({
+		description:
+			"`examined`, `linked` and `next`; call again with `next` until it is null.",
+	})
+	async dealLinksViaGet(
+		@Headers("authorization") authorization?: string,
+		@Query("cursor") cursor?: string,
+	) {
+		return this.runDealLinks(authorization, cursor);
+	}
+
+	@Post("deal-links")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async dealLinksViaPost(
+		@Headers("authorization") authorization?: string,
+		@Query("cursor") cursor?: string,
+	) {
+		return this.runDealLinks(authorization, cursor);
+	}
+
 	private async run(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.sync.runDue();
@@ -143,6 +181,15 @@ export class SyncController {
 	private async runExtrovertEngagement(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.extrovertEngagement.run();
+	}
+
+	private async runDealLinks(authorization?: string, cursor?: string) {
+		this.assertSecret(authorization);
+		const parsed = dealLinkBackfillCursor.safeParse(cursor);
+		if (!parsed.success) {
+			throw new BadRequestException("cursor must be a short non-empty string.");
+		}
+		return this.dealLinks.backfill(parsed.data ?? null);
 	}
 
 	private assertSecret(authorization?: string) {

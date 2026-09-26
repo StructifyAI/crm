@@ -1,4 +1,4 @@
-import { type Db, EmailDirection } from "@crm/db";
+import { ActivityType, type Db, EmailDirection, type Prisma } from "@crm/db";
 import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import {
 	type DealLinkAnswer,
@@ -10,12 +10,23 @@ import { Injectable, Logger } from "@nestjs/common";
 import { bridge } from "../agent/bridge";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
-import { type Deadline, remainingMs } from "./deadline";
-import { MAILBOX_DEAL_LINK } from "./mailbox-config";
+import { type Deadline, deadlineIn, overdue, remainingMs } from "./deadline";
+import { MAILBOX_DEAL_LINK, SYNC_TICK } from "./mailbox-config";
 
 export type DealLinkTarget = {
 	companyId: string | null;
 	contactId: string | null;
+};
+
+export type DealLinkBackfill = {
+	examined: number;
+	linked: number;
+	next: string | null;
+};
+
+const OPEN_DEAL: Prisma.DealWhereInput = {
+	archivedAt: null,
+	stage: { in: [...OPEN_DEAL_STAGES] },
 };
 
 @Injectable()
@@ -78,6 +89,71 @@ export class DealLinkService {
 		return answer.dealId;
 	}
 
+	async backfill(cursor: string | null): Promise<DealLinkBackfill> {
+		const deadline = deadlineIn(SYNC_TICK.budgetMs);
+
+		if (!bridge()) {
+			this.logger.warn({
+				message:
+					"No AGENT_BRIDGE_SECRET, so the deal-link backfill did nothing",
+			});
+			return { examined: 0, linked: 0, next: cursor };
+		}
+
+		const page = await this.db.activity.findMany({
+			where: {
+				type: ActivityType.EMAIL,
+				dealId: null,
+				emailThreadId: { not: null },
+				id: cursor ? { lt: cursor } : undefined,
+				OR: [
+					{ company: { deals: { some: OPEN_DEAL } } },
+					{ contact: { deals: { some: { deal: OPEN_DEAL } } } },
+					{ contact: { company: { deals: { some: OPEN_DEAL } } } },
+				],
+			},
+			orderBy: { id: "desc" },
+			take: MAILBOX_DEAL_LINK.backfillPage,
+			select: {
+				id: true,
+				emailThreadId: true,
+				companyId: true,
+				contactId: true,
+			},
+		});
+
+		let examined = 0;
+		let linked = 0;
+		let last = cursor;
+
+		for (const activity of page) {
+			if (overdue(deadline)) {
+				return { examined, linked, next: last };
+			}
+
+			last = activity.id;
+			if (!activity.emailThreadId) continue;
+
+			examined += 1;
+			const dealId = await this.attach(
+				activity.emailThreadId,
+				{ companyId: activity.companyId, contactId: activity.contactId },
+				deadline,
+			);
+			if (dealId) linked += 1;
+		}
+
+		const result = {
+			examined,
+			linked,
+			next: page.length < MAILBOX_DEAL_LINK.backfillPage ? null : last,
+		};
+
+		this.logger.log({ message: "Deal-link backfill pass finished", ...result });
+
+		return result;
+	}
+
 	private async candidates(
 		target: DealLinkTarget,
 	): Promise<DealLinkCandidate[]> {
@@ -94,11 +170,7 @@ export class DealLinkService {
 		];
 
 		const deals = await this.db.deal.findMany({
-			where: {
-				archivedAt: null,
-				stage: { in: [...OPEN_DEAL_STAGES] },
-				OR: scope,
-			},
+			where: { ...OPEN_DEAL, OR: scope },
 			orderBy: [{ lastActivityAt: "desc" }, { createdAt: "desc" }],
 			take: MAILBOX_DEAL_LINK.candidates,
 			select: {

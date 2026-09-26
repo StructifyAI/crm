@@ -229,6 +229,14 @@ Two rules follow for the serverless build:
   it offered, so a closed deal is never linked, and it never overwrites a `dealId` a
   rep already set. No candidate, no call: a thread with no open deal costs nothing.
   The call shares the tick `Deadline`, so a slow model cannot stall the mailbox sync.
+- **Emails stored before that shipped are backfilled by hand.**
+  `GET /internal/sync/deal-links` (`Bearer <CRON_SECRET>`) runs `DealLinkService.backfill`
+  over one page of `EMAIL` activities with no `dealId` whose company or contact has an
+  open deal, newest first, `MAILBOX_DEAL_LINK.backfillPage` at a time, through the same
+  `attach` path. It stops at the tick `Deadline` and returns `{ examined, linked, next }`;
+  call it again with `?cursor=<next>` until `next` is null. A linked activity leaves the
+  query, so a run that starts over is idempotent. Without `AGENT_BRIDGE_SECRET` it does
+  nothing and hands the cursor back. It is not a cron: run it once per deploy that needs it.
 
 ## Not every address on a thread is a person
 

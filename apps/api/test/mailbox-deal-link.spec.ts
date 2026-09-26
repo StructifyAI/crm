@@ -12,9 +12,11 @@ import type { DealLinkRequest } from "@crm/validation/deal-link";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { deadlineIn } from "../src/mailbox/deadline";
 import {
+	type DealLinkBackfill,
 	DealLinkService,
 	type DealLinkTarget,
 } from "../src/mailbox/deal-link.service";
+import { MAILBOX_DEAL_LINK } from "../src/mailbox/mailbox-config";
 
 const suffix = process.env.TEST_RUN_ID ?? "deal-link-spec";
 const domain = `deal-link-${suffix}.test`;
@@ -383,6 +385,130 @@ describe("linking a synced thread to an open deal", () => {
 				deadlineIn(60_000),
 			),
 		).toBeNull();
+		expect(asked).toHaveLength(0);
+	});
+});
+
+describe("backfilling stored emails onto open deals", () => {
+	const pageSize = MAILBOX_DEAL_LINK.backfillPage;
+
+	async function drain(): Promise<{ examined: number; passes: number }> {
+		let cursor: string | null = null;
+		let examined = 0;
+		let passes = 0;
+		do {
+			const page: DealLinkBackfill = await service.backfill(cursor);
+			examined += page.examined;
+			passes += 1;
+			cursor = page.next;
+		} while (cursor && passes < 50);
+		expect(cursor).toBeNull();
+
+		return { examined, passes };
+	}
+
+	function askedAboutOurDeals(): number {
+		return asked.filter((request) =>
+			request.deals.some((deal) => deal.id === openDealId),
+		).length;
+	}
+
+	beforeEach(async () => {
+		await db.emailThread.deleteMany({
+			where: { rootMessageId: { startsWith: `<deal-link-${suffix}` } },
+		});
+	});
+
+	it("walks every unlinked email in pages and files the ones the agent picks", async () => {
+		const total = pageSize + 2;
+		const threadIds: string[] = [];
+		for (let index = 0; index < total; index += 1) {
+			threadIds.push(await thread(`hist-${index}`));
+		}
+		const kept = await thread("hist-kept");
+		await db.activity.update({
+			where: { emailThreadId: kept },
+			data: { dealId: secondOpenDealId },
+		});
+		agentAnswers(
+			200,
+			JSON.stringify({
+				verdict: "linked",
+				dealId: openDealId,
+				reason: "Seats and a quote.",
+			}),
+		);
+
+		const first = await service.backfill(null);
+		expect(first.examined).toBe(pageSize);
+		expect(first.next).not.toBeNull();
+
+		asked = [];
+		const rest = await drain();
+		expect(rest.passes).toBeGreaterThanOrEqual(1);
+		expect(askedAboutOurDeals()).toBe(total - pageSize);
+
+		for (const threadId of threadIds) {
+			expect(await dealOf(threadId)).toBe(openDealId);
+		}
+		expect(await dealOf(kept)).toBe(secondOpenDealId);
+
+		asked = [];
+		await drain();
+		expect(askedAboutOurDeals()).toBe(0);
+	});
+
+	it("leaves emails alone when the agent says none or names a closed deal", async () => {
+		const noneId = await thread("hist-none");
+		agentAnswers(
+			200,
+			JSON.stringify({ verdict: "none", reason: "Chit-chat." }),
+		);
+		await drain();
+		expect(await dealOf(noneId)).toBeNull();
+
+		agentAnswers(
+			200,
+			JSON.stringify({ verdict: "linked", dealId: closedDealId, reason: "x" }),
+		);
+		await drain();
+		expect(await dealOf(noneId)).toBeNull();
+	});
+
+	it("does not examine emails whose company and contact have no open deal", async () => {
+		const lonely = await db.company.create({
+			data: { name: "Lonely Co", domain: `lonely-${domain}` },
+			select: { id: true },
+		});
+		const threadId = await thread("hist-lonely", {
+			companyId: lonely.id,
+			contactId: null,
+		});
+		agentAnswers(
+			200,
+			JSON.stringify({ verdict: "linked", dealId: openDealId, reason: "x" }),
+		);
+
+		await drain();
+		expect(await dealOf(threadId)).toBeNull();
+		expect(askedAboutOurDeals()).toBe(0);
+		await db.emailThread.delete({ where: { id: threadId } });
+		await db.company.delete({ where: { id: lonely.id } });
+	});
+
+	it("does nothing without a bridge and hands the cursor back", async () => {
+		await thread("hist-no-bridge");
+		delete process.env.AGENT_BRIDGE_SECRET;
+		agentAnswers(
+			200,
+			JSON.stringify({ verdict: "linked", dealId: openDealId, reason: "x" }),
+		);
+
+		expect(await service.backfill("some-cursor")).toEqual({
+			examined: 0,
+			linked: 0,
+			next: "some-cursor",
+		});
 		expect(asked).toHaveLength(0);
 	});
 });

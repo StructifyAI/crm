@@ -16,4 +16,5 @@ export const MAILBOX_DEAL_LINK = {
 	candidates: 20,
 	messagesShown: 6,
 	messageChars: 2_000,
+	backfillPage: 25,
 } as const;

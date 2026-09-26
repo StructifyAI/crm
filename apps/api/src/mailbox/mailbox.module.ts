@@ -21,6 +21,7 @@ import { ThreadWriterService } from "./thread-writer.service";
 		ThreadWriterService,
 	],
 	exports: [
+		DealLinkService,
 		MailboxApiClient,
 		MailboxTokenService,
 		MailboxMatchService,
