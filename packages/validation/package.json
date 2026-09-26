@@ -10,6 +10,7 @@
 		"./agent-manifest": "./src/agent-manifest.ts",
 		"./calendar-sync-resume": "./src/calendar-sync-resume.ts",
 		"./deal-link": "./src/deal-link.ts",
+		"./email-recipients": "./src/email-recipients.ts",
 		"./email-triage": "./src/email-triage.ts",
 		"./builder-question": "./src/builder-question.ts",
 		"./enrichment-queue": "./src/enrichment-queue.ts",

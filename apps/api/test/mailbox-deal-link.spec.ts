@@ -88,7 +88,11 @@ async function thread(
 					direction: EmailDirection.INBOUND,
 					fromEmail: buyer,
 					fromName: "A Buyer",
-					recipients: [],
+					recipients: [
+						{ kind: "to", name: "Deal Rep", email: "rep@seller.test" },
+						{ kind: "cc", name: null, email: "ops@seller.test" },
+						"not-a-recipient",
+					],
 					subject: "Pricing for the rollout",
 					body: "Can you send the quote for 40 seats?",
 					sentAt,
@@ -219,6 +223,10 @@ describe("linking a synced thread to an open deal", () => {
 			asked[0]?.deals.find((deal) => deal.id === openDealId)?.contacts,
 		).toEqual([{ email: buyer, name: "A Buyer" }]);
 		expect(asked[0]?.messages[0]?.body).toContain("40 seats");
+		expect(asked[0]?.messages[0]?.recipients).toEqual([
+			{ email: "rep@seller.test", name: "Deal Rep" },
+			{ email: "ops@seller.test", name: null },
+		]);
 		expect(await dealOf(threadId)).toBe(openDealId);
 
 		const deal = await db.deal.findUniqueOrThrow({

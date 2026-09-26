@@ -7,5 +7,6 @@ export const DEAL_LINK = {
 	messageChars: 2_000,
 	descriptionChars: 400,
 	contactsShown: 6,
+	recipientsShown: 8,
 	reasonChars: 200,
 } as const;

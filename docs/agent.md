@@ -132,9 +132,11 @@ candidate list, so the agent never queries the database.
 - **An id that was not offered is `none`**, whatever the model says (`judge`). The API
   checks the same thing, so neither side alone can file a thread on a closed deal.
 - **The model sees the latest `DEAL_LINK.messagesShown` messages, each cut to
-  `messageChars`**, and each deal's name, stage, company, a bounded description and
-  `contactsShown` addresses (`lib/deal-link-config.ts`). The thread is data, not
-  instructions.
+  `messageChars`**, with sender and up to `recipientsShown` recipients, and each deal's
+  name, stage, company, a bounded description and `contactsShown` addresses
+  (`lib/deal-link-config.ts`). Recipients matter: a rep's short follow-up *to* a deal's
+  contact is that deal even though nobody from the buyer wrote in it. The thread is data,
+  not instructions.
 - **Every failure is `unknown`, never a throw.** The API leaves the thread unlinked.
 
 ### Blank fields are filled on the dispatch tick

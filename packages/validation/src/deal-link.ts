@@ -8,6 +8,7 @@ const address = z.object({
 export const dealLinkMessage = z.object({
 	direction: z.enum(["inbound", "outbound"]),
 	from: address,
+	recipients: z.array(address).catch([]),
 	sentAt: z.string(),
 	body: z.string().catch(""),
 });
