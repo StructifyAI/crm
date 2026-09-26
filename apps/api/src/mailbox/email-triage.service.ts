@@ -5,13 +5,17 @@ import {
 } from "@crm/validation/email-triage";
 import { Injectable, Logger } from "@nestjs/common";
 import { bridge } from "../agent/bridge";
+import { type Deadline, remainingMs } from "./deadline";
 import { MAILBOX_TRIAGE } from "./mailbox-config";
 
 @Injectable()
 export class EmailTriageService {
 	private readonly logger = new Logger(EmailTriageService.name);
 
-	async assess(request: EmailTriageRequest): Promise<EmailTriageAnswer> {
+	async assess(
+		request: EmailTriageRequest,
+		deadline: Deadline,
+	): Promise<EmailTriageAnswer> {
 		const agent = bridge();
 
 		if (!agent) {
@@ -30,7 +34,9 @@ export class EmailTriageService {
 					"content-type": "application/json",
 				},
 				body: JSON.stringify(request),
-				signal: AbortSignal.timeout(MAILBOX_TRIAGE.timeoutMs),
+				signal: AbortSignal.timeout(
+					Math.min(MAILBOX_TRIAGE.timeoutMs, remainingMs(deadline)),
+				),
 			});
 
 			if (!response.ok) {

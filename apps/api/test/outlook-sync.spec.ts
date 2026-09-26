@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { MailboxSyncModel as MailboxSync } from "@crm/db";
+import { deadlineIn } from "../src/mailbox/deadline";
 import type { SyncSource } from "../src/mailbox/mailbox.constants";
 import type { MailboxTokenService } from "../src/mailbox/mailbox-token.service";
 import type { SyncStateService } from "../src/mailbox/sync-state.service";
@@ -48,6 +49,7 @@ function harness(options: {
 	folder?: (name: string) => Ok<{ id?: string }> | NotOk;
 	pages?: GraphMessage[][];
 	meDelayMs?: number;
+	onStore?: (count: number) => void;
 }): Harness {
 	const stored: IncomingMessage[] = [];
 	const settled: { cursor?: string | null }[] = [];
@@ -122,6 +124,7 @@ function harness(options: {
 			parsed: IncomingMessage,
 		) {
 			stored.push(parsed);
+			options.onStore?.(stored.length);
 			return true;
 		},
 	} as unknown as ThreadWriterService;
@@ -182,7 +185,7 @@ describe("OutlookSyncService threading", () => {
 			],
 		});
 
-		await kit.service.sync(row);
+		await kit.service.sync(row, deadlineIn(60_000));
 
 		expect(kit.stored.map((parsed) => parsed.rootId)).toEqual([
 			"outlook-conversation:conv-1",
@@ -207,7 +210,7 @@ describe("OutlookSyncService threading", () => {
 			],
 		});
 
-		await kit.service.sync(row);
+		await kit.service.sync(row, deadlineIn(60_000));
 
 		expect(kit.stored[0]?.rootId).toBe("root@acme.com");
 	});
@@ -228,7 +231,7 @@ describe("OutlookSyncService threading", () => {
 			],
 		});
 
-		await kit.service.sync(row);
+		await kit.service.sync(row, deadlineIn(60_000));
 
 		expect(kit.stored[0]?.rootId).toBe("root@acme.com");
 	});
@@ -238,7 +241,7 @@ describe("OutlookSyncService threading", () => {
 			pages: [[message({ conversationId: undefined })]],
 		});
 
-		await kit.service.sync(row);
+		await kit.service.sync(row, deadlineIn(60_000));
 
 		expect(kit.stored[0]?.rootId).toBe("msg-1@acme.com");
 	});
@@ -255,7 +258,7 @@ describe("OutlookSyncService excluded folders", () => {
 			pages: [[message()]],
 		});
 
-		const outcome = await kit.service.sync(row);
+		const outcome = await kit.service.sync(row, deadlineIn(60_000));
 
 		expect(outcome.status).toBe("rate-limited");
 		expect(kit.rateLimited).toEqual([30_000]);
@@ -269,7 +272,7 @@ describe("OutlookSyncService excluded folders", () => {
 			pages: [[message()]],
 		});
 
-		const outcome = await kit.service.sync(row);
+		const outcome = await kit.service.sync(row, deadlineIn(60_000));
 
 		expect(outcome.status).toBe("reconnect");
 		expect(kit.reconnected).toEqual(["Invalid token"]);
@@ -294,7 +297,7 @@ describe("OutlookSyncService excluded folders", () => {
 			],
 		});
 
-		const outcome = await kit.service.sync(row);
+		const outcome = await kit.service.sync(row, deadlineIn(60_000));
 
 		expect(outcome.status).toBe("synced");
 		expect(kit.stored).toHaveLength(1);
@@ -323,7 +326,7 @@ describe("OutlookSyncService budget", () => {
 			pages: [bulk(50, 0), bulk(50, 50), bulk(50, 100)],
 		});
 
-		await kit.service.sync(row);
+		await kit.service.sync(row, deadlineIn(60_000));
 
 		expect(kit.stored).toHaveLength(120);
 	});
@@ -333,7 +336,7 @@ describe("OutlookSyncService budget", () => {
 			pages: [bulk(50, 0), bulk(50, 50), bulk(50, 100)],
 		});
 
-		await kit.service.sync(row);
+		await kit.service.sync(row, deadlineIn(60_000));
 
 		const lastProcessed = new Date(
 			Date.UTC(2025, 7, 1, 9, 0, 0) + 119 * 60_000,
@@ -342,13 +345,33 @@ describe("OutlookSyncService budget", () => {
 		expect(kit.stored[119]?.rfcMessageId).toBe("m-119@acme.com");
 		expect(kit.settled.at(-1)?.cursor).toBe(lastProcessed);
 	});
+
+	it("stops at the deadline and leaves the cursor on the last stored message", async () => {
+		const deadline = { at: Number.MAX_SAFE_INTEGER };
+		const kit = harness({
+			pages: [bulk(50, 0), bulk(50, 50), bulk(50, 100)],
+			onStore: (count) => {
+				if (count === 10) deadline.at = 0;
+			},
+		});
+
+		const outcome = await kit.service.sync(row, deadline);
+
+		const lastProcessed = new Date(
+			Date.UTC(2025, 7, 1, 9, 0, 0) + 9 * 60_000,
+		).toISOString();
+
+		expect(outcome.status).toBe("synced");
+		expect(kit.stored).toHaveLength(10);
+		expect(kit.settled.at(-1)?.cursor).toBe(lastProcessed);
+	});
 });
 
 describe("OutlookSyncService first run", () => {
 	it("watermarks setup before the first round trip, not after", async () => {
 		const kit = harness({ meDelayMs: 30 });
 
-		await kit.service.sync(rowWith(null));
+		await kit.service.sync(rowWith(null), deadlineIn(60_000));
 
 		const cursor = kit.settled.at(-1)?.cursor;
 		expect(cursor).toBeTruthy();

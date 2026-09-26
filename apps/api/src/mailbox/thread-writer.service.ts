@@ -10,6 +10,7 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
+import type { Deadline } from "./deadline";
 import { EmailTriageService } from "./email-triage.service";
 import type { SyncSource } from "./mailbox.constants";
 import { MAILBOX_TRIAGE } from "./mailbox-config";
@@ -36,6 +37,8 @@ export type IncomingMessage = {
 	outlookWebLink?: string | null;
 };
 
+export type WriteContext = MatchContext & { deadline: Deadline };
+
 @Injectable()
 export class ThreadWriterService {
 	private readonly logger = new Logger(ThreadWriterService.name);
@@ -47,7 +50,7 @@ export class ThreadWriterService {
 		private readonly triage: EmailTriageService,
 	) {}
 
-	async context(): Promise<MatchContext> {
+	async context(deadline: Deadline): Promise<WriteContext> {
 		const [internal, suppressedDomains, suppressedEmails] = await Promise.all([
 			this.match.internalIdentity(),
 			this.match.suppressedDomains(),
@@ -59,6 +62,7 @@ export class ThreadWriterService {
 			ourDomains: internal.domains,
 			suppressedDomains,
 			suppressedEmails,
+			deadline,
 		};
 	}
 
@@ -66,7 +70,7 @@ export class ThreadWriterService {
 		row: MailboxSync,
 		options: { mailbox: string; origin: SyncSource },
 		parsed: IncomingMessage,
-		context: MatchContext,
+		context: WriteContext,
 	): Promise<boolean> {
 		const existing = await this.db.emailMessage.findUnique({
 			where: { rfcMessageId: parsed.rfcMessageId },
@@ -247,7 +251,7 @@ export class ThreadWriterService {
 
 	private async resolve(
 		request: MatchRequest,
-		context: MatchContext,
+		context: WriteContext,
 		parsed: IncomingMessage,
 		outbound: boolean,
 	): Promise<MatchResult> {
@@ -260,16 +264,19 @@ export class ThreadWriterService {
 		if (known.companyId) return this.match.resolve(request, context);
 		if (!known.domain) return known;
 
-		const answer = await this.triage.assess({
-			direction: outbound ? "outbound" : "inbound",
-			subject: parsed.subject,
-			from: parsed.from,
-			recipients: parsed.recipients.map((person) => ({
-				email: person.email,
-				name: person.name,
-			})),
-			body: parsed.transcript,
-		});
+		const answer = await this.triage.assess(
+			{
+				direction: outbound ? "outbound" : "inbound",
+				subject: parsed.subject,
+				from: parsed.from,
+				recipients: parsed.recipients.map((person) => ({
+					email: person.email,
+					name: person.name,
+				})),
+				body: parsed.transcript,
+			},
+			context.deadline,
+		);
 
 		if (answer.verdict !== "spam") {
 			return this.match.resolve(request, context);

@@ -8,6 +8,7 @@ import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
+import { deadlineIn } from "../src/mailbox/deadline";
 import type { EmailTriageService } from "../src/mailbox/email-triage.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import {
@@ -124,7 +125,7 @@ describe("triage before the sync creates a company", () => {
 			row,
 			{ mailbox, origin: "gmail" },
 			inbound(`brian@${quietDomain}`, "quiet"),
-			await threads.context(),
+			await threads.context(deadlineIn(60_000)),
 		);
 
 		expect(stored).toBe(false);
@@ -135,7 +136,7 @@ describe("triage before the sync creates a company", () => {
 	it("skips spam, blocks the one external domain and creates nothing", async () => {
 		asked.length = 0;
 		nextAnswer = spam("warmup");
-		const context = await threads.context();
+		const context = await threads.context(deadlineIn(60_000));
 		const vendor = `brian@${vendorDomain}`;
 
 		const stored = await threads.store(
@@ -167,7 +168,7 @@ describe("triage before the sync creates a company", () => {
 			row,
 			{ mailbox, origin: "gmail" },
 			reply([`brian@${vendorDomain}`], "vendor-two"),
-			await threads.context(),
+			await threads.context(deadlineIn(60_000)),
 		);
 
 		expect(stored).toBe(false);
@@ -186,7 +187,7 @@ describe("triage before the sync creates a company", () => {
 				listDomains.map((domain) => `brian@${domain}`),
 				"list",
 			),
-			await threads.context(),
+			await threads.context(deadlineIn(60_000)),
 		);
 
 		expect(stored).toBe(false);
@@ -210,7 +211,7 @@ describe("triage before the sync creates a company", () => {
 			row,
 			{ mailbox, origin: "gmail" },
 			reply([buyer], "buyer"),
-			await threads.context(),
+			await threads.context(deadlineIn(60_000)),
 		);
 
 		expect(stored).toBe(true);
@@ -227,7 +228,7 @@ describe("triage before the sync creates a company", () => {
 			row,
 			{ mailbox, origin: "gmail" },
 			reply([`brian@${quietDomain}`], "quiet"),
-			await threads.context(),
+			await threads.context(deadlineIn(60_000)),
 		);
 
 		expect(stored).toBe(true);
@@ -247,7 +248,7 @@ describe("triage before the sync creates a company", () => {
 			row,
 			{ mailbox, origin: "gmail" },
 			reply([known], "known"),
-			await threads.context(),
+			await threads.context(deadlineIn(60_000)),
 		);
 
 		expect(stored).toBe(true);

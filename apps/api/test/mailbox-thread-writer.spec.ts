@@ -4,6 +4,7 @@ import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
+import { deadlineIn } from "../src/mailbox/deadline";
 import type { EmailTriageService } from "../src/mailbox/email-triage.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import {
@@ -96,7 +97,7 @@ describe("storing a synced email", () => {
 			row,
 			{ mailbox, origin: "gmail" },
 			message(`<one-${suffix}@mail.test>`, new Date("2026-01-01T10:00:00Z")),
-			await threads.context(),
+			await threads.context(deadlineIn(60_000)),
 		);
 
 		expect(stored).toBe(true);
@@ -131,7 +132,7 @@ describe("storing a synced email", () => {
 			row,
 			{ mailbox, origin: "gmail" },
 			message(`<one-${suffix}@mail.test>`, new Date("2026-01-01T10:00:00Z")),
-			await threads.context(),
+			await threads.context(deadlineIn(60_000)),
 		);
 
 		expect(stored).toBe(false);
@@ -150,7 +151,7 @@ describe("storing a synced email", () => {
 			`<race-${suffix}@mail.test>`,
 			new Date("2026-01-02T10:00:00Z"),
 		);
-		const context = await threads.context();
+		const context = await threads.context(deadlineIn(60_000));
 
 		const results = await Promise.all([
 			threads.store(row, { mailbox, origin: "gmail" }, parsed, context),
@@ -194,7 +195,7 @@ describe("storing a synced email", () => {
 				new Date("2026-01-02T10:00:00Z"),
 				movedRoot,
 			),
-			await threads.context(),
+			await threads.context(deadlineIn(60_000)),
 		);
 
 		expect(stored).toBe(false);

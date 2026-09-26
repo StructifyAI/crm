@@ -13,6 +13,7 @@ import {
 } from "../src/crm/activity-stamp.service";
 import { CalendarClient } from "../src/google/calendar.client";
 import { CalendarSyncService } from "../src/google/calendar-sync.service";
+import { deadlineIn } from "../src/mailbox/deadline";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import { MailboxTokenService } from "../src/mailbox/mailbox-token.service";
 import { SyncStateService } from "../src/mailbox/sync-state.service";
@@ -87,19 +88,22 @@ describe("calendar meeting deal link", () => {
 			{} as unknown as AgentTriggerService,
 		);
 
-		await service.sync({
-			id: "sync-1",
-			userId: "user-1",
-			source: "google",
-			status: GoogleSyncStatus.IDLE,
-			cursor: null,
-			lastSyncedAt: null,
-			lastError: null,
-			retryAfter: null,
-			autoCreate: false,
-			createdAt: new Date(0),
-			updatedAt: new Date(0),
-		} as MailboxSync);
+		await service.sync(
+			{
+				id: "sync-1",
+				userId: "user-1",
+				source: "google",
+				status: GoogleSyncStatus.IDLE,
+				cursor: null,
+				lastSyncedAt: null,
+				lastError: null,
+				retryAfter: null,
+				autoCreate: false,
+				createdAt: new Date(0),
+				updatedAt: new Date(0),
+			} as MailboxSync,
+			deadlineIn(60_000),
+		);
 
 		expect(dealQueries).toEqual([
 			{

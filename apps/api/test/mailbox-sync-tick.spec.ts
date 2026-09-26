@@ -5,6 +5,7 @@ import {
 } from "@crm/db";
 import type { GoogleConnectionService } from "../src/google/google-connection.service";
 import type { GoogleSyncService } from "../src/google/google-sync.service";
+import type { Deadline } from "../src/mailbox/deadline";
 import {
 	SYNC_LEASE_MS,
 	type SyncStateService,
@@ -114,7 +115,11 @@ const noConnections = {
 
 function build(
 	state: FakeState,
-	runOne: (userId: string, source: string) => Promise<Outcome | null>,
+	runOne: (
+		userId: string,
+		source: string,
+		deadline: Deadline,
+	) => Promise<Outcome | null>,
 ): MailboxSyncService {
 	const provider = { runOne } as unknown as GoogleSyncService;
 
@@ -198,6 +203,24 @@ describe("runDue claims a mailbox before it syncs", () => {
 		}));
 
 		expect((await service.runDue()).attempted).toBe(0);
+	});
+
+	it("stops claiming rows once the tick deadline has passed", async () => {
+		state.add("a", "calendar");
+		state.add("b", "gmail");
+
+		const calls: string[] = [];
+		const service = build(state, async (userId, source, deadline) => {
+			calls.push(`${userId}:${source}`);
+			(deadline as { at: number }).at = 0;
+			return { source, userId, status: "synced" };
+		});
+
+		const summary = await service.runDue();
+
+		expect(calls).toEqual(["user-a:calendar"]);
+		expect(summary.attempted).toBe(1);
+		expect(state.rows.get("b")?.retryAfter).toBeNull();
 	});
 });
 
