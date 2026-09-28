@@ -1,3 +1,5 @@
+const SECOND_MS = 1_000;
+
 export const INSTANTLY = {
 	webhook: {
 		maxBodyBytes: 64 * 1024,
@@ -9,6 +11,11 @@ export const INSTANTLY = {
 	sync: {
 		pageSize: 100,
 		dayMs: 86_400_000,
+	},
+	emails: {
+		pageSize: 100,
+		tickBudgetMs: 40 * SECOND_MS,
+		minRequestGapMs: 3 * SECOND_MS,
 	},
 	filing: {
 		sendEvents: ["email_sent", "email_bounced", "lead_unsubscribed"],

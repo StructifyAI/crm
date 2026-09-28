@@ -17,6 +17,7 @@ import type {
 	InstantlyStatus,
 } from "./instantly.contracts";
 import { INSTANTLY } from "./instantly-config";
+import { InstantlyEmailSyncService } from "./instantly-email-sync.service";
 import { InstantlySyncService } from "./instantly-sync.service";
 
 @Injectable()
@@ -25,6 +26,7 @@ export class InstantlyService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly access: AgentAccessService,
 		private readonly syncService: InstantlySyncService,
+		private readonly emailSync: InstantlyEmailSyncService,
 	) {}
 
 	async status(userId: string): Promise<InstantlyStatus> {
@@ -38,6 +40,7 @@ export class InstantlyService {
 					instantlyApiKey: true,
 					instantlyLastSyncAt: true,
 					instantlySyncError: true,
+					instantlyEmailCursor: true,
 				},
 			}),
 			this.db.instantlyMailbox.count(),
@@ -58,6 +61,7 @@ export class InstantlyService {
 			lastSyncAt: setting?.instantlyLastSyncAt?.toISOString() ?? null,
 			syncError: setting?.instantlySyncError ?? null,
 			leads: leadCount,
+			emailsSyncedThrough: setting?.instantlyEmailCursor?.toISOString() ?? null,
 		};
 	}
 
@@ -83,7 +87,13 @@ export class InstantlyService {
 
 	async sync(userId: string) {
 		await this.assertCanManage(userId);
-		return this.syncService.run();
+		const leads = await this.syncService.run();
+		const emails = await this.emailSync.run();
+		return {
+			...leads,
+			emails: emails.filed,
+			error: leads.error ?? emails.error,
+		};
 	}
 
 	async connect(userId: string): Promise<InstantlyStatus> {

@@ -6,6 +6,7 @@ import { InstantlyClient } from "./instantly.client";
 import { InstantlyController } from "./instantly.controller";
 import { InstantlyRouter } from "./instantly.router";
 import { InstantlyService } from "./instantly.service";
+import { InstantlyEmailSyncService } from "./instantly-email-sync.service";
 import { InstantlyFilingService } from "./instantly-filing.service";
 import { InstantlyIngestService } from "./instantly-ingest.service";
 import { InstantlySyncService } from "./instantly-sync.service";
@@ -18,9 +19,10 @@ import { InstantlySyncService } from "./instantly-sync.service";
 		InstantlyClient,
 		InstantlyIngestService,
 		InstantlySyncService,
+		InstantlyEmailSyncService,
 		InstantlyRouter,
 		InstantlyService,
 	],
-	exports: [InstantlySyncService],
+	exports: [InstantlySyncService, InstantlyEmailSyncService],
 })
 export class InstantlyModule {}

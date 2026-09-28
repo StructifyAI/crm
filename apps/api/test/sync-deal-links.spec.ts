@@ -8,6 +8,7 @@ import type { ConfigService } from "@nestjs/config";
 import type { EnvironmentVariables } from "../src/config/env.validation";
 import type { ExtrovertEngagementSyncService } from "../src/extrovert/extrovert-engagement-sync.service";
 import type { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
+import type { InstantlyEmailSyncService } from "../src/instantly/instantly-email-sync.service";
 import type { InstantlySyncService } from "../src/instantly/instantly-sync.service";
 import type {
 	DealLinkBackfill,
@@ -29,6 +30,7 @@ const dealLinks = {
 
 const unused = {} as unknown as MailboxSyncService &
 	InstantlySyncService &
+	InstantlyEmailSyncService &
 	ExtrovertSyncService &
 	ExtrovertEngagementSyncService;
 
@@ -37,7 +39,15 @@ function controller(secret: string | undefined): SyncController {
 		get: () => secret,
 	} as unknown as ConfigService<EnvironmentVariables, true>;
 
-	return new SyncController(unused, unused, unused, unused, dealLinks, config);
+	return new SyncController(
+		unused,
+		unused,
+		unused,
+		unused,
+		unused,
+		dealLinks,
+		config,
+	);
 }
 
 beforeEach(() => {

@@ -26,6 +26,32 @@ type ResolveContactInput = {
 
 type SendEventType = (typeof INSTANTLY.filing.sendEvents)[number];
 
+export type InstantlySend = {
+	leadEmail: string;
+	firstName: string | null;
+	lastName: string | null;
+	mailbox: string | null;
+	campaignId: string | null;
+	campaignName: string | null;
+	emailId: string | null;
+	subject: string | null;
+	text: string;
+	occurredAt: Date;
+};
+
+type TimelineEntry = {
+	type: ActivityType;
+	subject: string;
+	body: string;
+	eventType: string;
+	campaignId: string | null;
+	emailId: string | null;
+	mailbox: string | null;
+	occurredAt: Date;
+};
+
+export type FilingOutcome = "filed" | "duplicate" | "skipped";
+
 const OPEN_DEAL: Prisma.DealWhereInput = {
 	archivedAt: null,
 	stage: { in: [...OPEN_DEAL_STAGES] },
@@ -140,32 +166,26 @@ export class InstantlyFilingService {
 	async record(event: InstantlyWebhookEvent): Promise<void> {
 		if (!isSendEvent(event.event_type) || !event.lead_email) return;
 		try {
-			const sent = event.event_type === "email_sent";
-			const resolved = sent
-				? await this.resolveContact({
-						email: event.lead_email,
-						firstName: event.firstName,
-						lastName: event.lastName,
-						mailbox: event.email_account,
-						reason: "Emailed from an Instantly campaign",
-					})
-				: await this.existingContact(event.lead_email);
+			if (event.event_type === "email_sent") {
+				await this.fileSend(sendFromEvent(event, event.lead_email));
+				return;
+			}
+			const resolved = await this.existingContact(event.lead_email);
 			if (!resolved) return;
-
 			if (event.campaign_id) {
-				const leadStatus = leadStatusFor(event.event_type);
 				await this.db.instantlyCampaignLead.updateMany({
 					where: { contactId: resolved.id, campaignId: event.campaign_id },
-					data: sent
-						? {
-								lastContactAt: new Date(event.timestamp),
-								sendingMailbox: event.email_account ?? null,
-							}
-						: { status: leadStatus },
+					data: { status: leadStatusFor(event.event_type) },
 				});
 			}
-
-			await this.attachSend(resolved.id, event);
+			await this.attach(resolved.id, {
+				...describeFailure(event),
+				eventType: event.event_type,
+				campaignId: event.campaign_id ?? null,
+				emailId: event.email_id ?? null,
+				mailbox: event.email_account ?? null,
+				occurredAt: new Date(event.timestamp),
+			});
 		} catch (error) {
 			this.logger.error({
 				message: "Instantly send event was not filed",
@@ -174,6 +194,46 @@ export class InstantlyFilingService {
 				error: error instanceof Error ? error.message : String(error),
 			});
 		}
+	}
+
+	async fileSend(send: InstantlySend): Promise<FilingOutcome> {
+		const resolved = await this.resolveContact({
+			email: send.leadEmail,
+			firstName: send.firstName,
+			lastName: send.lastName,
+			mailbox: send.mailbox,
+			reason: "Emailed from an Instantly campaign",
+		});
+		if (!resolved) return "skipped";
+
+		if (send.campaignId) {
+			await this.db.instantlyCampaignLead.updateMany({
+				where: {
+					contactId: resolved.id,
+					campaignId: send.campaignId,
+					OR: [
+						{ lastContactAt: null },
+						{ lastContactAt: { lt: send.occurredAt } },
+					],
+				},
+				data: {
+					lastContactAt: send.occurredAt,
+					sendingMailbox: send.mailbox,
+				},
+			});
+		}
+
+		const campaign = `"${send.campaignName ?? "campaign"}"`;
+		return this.attach(resolved.id, {
+			type: ActivityType.EMAIL,
+			subject: send.subject || `Sent ${campaign} on Instantly`,
+			body: send.text,
+			eventType: "email_sent",
+			campaignId: send.campaignId,
+			emailId: send.emailId,
+			mailbox: send.mailbox,
+			occurredAt: send.occurredAt,
+		});
 	}
 
 	private async existingContact(email: string): Promise<{ id: string } | null> {
@@ -185,33 +245,32 @@ export class InstantlyFilingService {
 		});
 	}
 
-	private async attachSend(
+	private async attach(
 		contactId: string,
-		event: InstantlyWebhookEvent,
-	): Promise<void> {
-		const occurredAt = new Date(event.timestamp);
+		entry: TimelineEntry,
+	): Promise<FilingOutcome> {
 		const duplicate = await this.db.activity.findFirst({
 			where: {
 				contactId,
 				AND: [
-					{ meta: { path: ["eventType"], equals: event.event_type } },
-					event.email_id
-						? { meta: { path: ["emailId"], equals: event.email_id } }
-						: { occurredAt },
+					{ meta: { path: ["eventType"], equals: entry.eventType } },
+					entry.emailId
+						? { meta: { path: ["emailId"], equals: entry.emailId } }
+						: { occurredAt: entry.occurredAt },
 				],
 			},
 			select: { id: true },
 		});
-		if (duplicate) return;
+		if (duplicate) return "duplicate";
 
 		const contact = await this.db.contact.findUnique({
 			where: { id: contactId },
 			select: { companyId: true, ownerId: true },
 		});
-		if (!contact) return;
-		const mailbox = event.email_account
+		if (!contact) return "skipped";
+		const mailbox = entry.mailbox
 			? await this.db.instantlyMailbox.findUnique({
-					where: { emailAccount: event.email_account.trim().toLowerCase() },
+					where: { emailAccount: entry.mailbox.trim().toLowerCase() },
 					select: { ownerId: true },
 				})
 			: null;
@@ -219,24 +278,26 @@ export class InstantlyFilingService {
 			mailbox?.ownerId ??
 			contact.ownerId ??
 			(await this.db.user.findFirst({ select: { id: true } }))?.id;
-		if (!author) return;
+		if (!author) return "skipped";
 		const deal = await this.openDealFor(contactId, contact.companyId);
 
 		await this.db.activity.create({
 			data: {
-				...describeSend(event),
+				type: entry.type,
+				subject: entry.subject,
+				body: entry.body,
 				contactId,
 				companyId: contact.companyId,
 				dealId: deal?.id ?? null,
-				occurredAt,
+				occurredAt: entry.occurredAt,
 				createdById: author,
 				meta: {
 					automated: true,
 					source: "instantly",
-					eventType: event.event_type,
-					campaignId: event.campaign_id ?? null,
-					emailId: event.email_id ?? null,
-					sendingMailbox: event.email_account ?? null,
+					eventType: entry.eventType,
+					campaignId: entry.campaignId,
+					emailId: entry.emailId,
+					sendingMailbox: entry.mailbox,
 				},
 			},
 			select: { id: true },
@@ -244,8 +305,9 @@ export class InstantlyFilingService {
 
 		await this.stamp.touch(
 			{ contactId, companyId: contact.companyId, dealId: deal?.id ?? null },
-			occurredAt,
+			entry.occurredAt,
 		);
+		return "filed";
 	}
 
 	private async openDealFor(
@@ -313,15 +375,26 @@ export class InstantlyFilingService {
 	}
 }
 
-function describeSend(event: InstantlyWebhookEvent) {
+export function sendFromEvent(
+	event: InstantlyWebhookEvent,
+	leadEmail: string,
+): InstantlySend {
+	return {
+		leadEmail,
+		firstName: event.firstName ?? null,
+		lastName: event.lastName ?? null,
+		mailbox: event.email_account ?? null,
+		campaignId: event.campaign_id ?? null,
+		campaignName: event.campaign_name ?? null,
+		emailId: event.email_id ?? null,
+		subject: event.email_subject ?? null,
+		text: event.email_text ?? "",
+		occurredAt: new Date(event.timestamp),
+	};
+}
+
+function describeFailure(event: InstantlyWebhookEvent) {
 	const campaign = `"${event.campaign_name ?? "campaign"}"`;
-	if (event.event_type === "email_sent") {
-		return {
-			type: ActivityType.EMAIL,
-			subject: event.email_subject || `Sent ${campaign} on Instantly`,
-			body: event.email_text ?? "",
-		};
-	}
 	if (event.event_type === "email_bounced") {
 		return {
 			type: ActivityType.NOTE,
@@ -336,8 +409,8 @@ function describeSend(event: InstantlyWebhookEvent) {
 	};
 }
 
-function leadStatusFor(eventType: string): number | undefined {
-	return { email_bounced: -1, lead_unsubscribed: -2 }[eventType];
+function leadStatusFor(eventType: string): number {
+	return eventType === "email_bounced" ? -1 : -2;
 }
 
 export function interestStatusFor(eventType: string): number | undefined {

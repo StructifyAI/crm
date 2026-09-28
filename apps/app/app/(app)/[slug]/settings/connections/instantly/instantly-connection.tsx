@@ -41,6 +41,7 @@ type Status = {
 	lastSyncAt: string | null;
 	syncError: string | null;
 	leads: number;
+	emailsSyncedThrough: string | null;
 };
 
 type Mailbox = {
@@ -158,7 +159,7 @@ export function InstantlyConnection({
 				if (result.error) toast.error(result.error);
 				else
 					toast.success(
-						`Synced ${result.leads} leads from ${result.campaigns} campaigns`,
+						`Synced ${result.leads} leads from ${result.campaigns} campaigns and filed ${result.emails} new emails`,
 					);
 				router.refresh();
 			},
@@ -227,7 +228,8 @@ export function InstantlyConnection({
 				<div>
 					<h2 className="font-medium text-sm">Lead sync</h2>
 					<p className="mt-1 text-muted-foreground text-xs">
-						Import campaign leads and show their next email on each contact.
+						Import campaign leads, show their next email on each contact, and
+						file every sent email on the timeline.
 					</p>
 				</div>
 				{status.apiKeyConfigured ? (
@@ -242,6 +244,12 @@ export function InstantlyConnection({
 							<p className="text-muted-foreground text-sm">
 								{status.leads} leads
 							</p>
+							{status.emailsSyncedThrough ? (
+								<p className="text-muted-foreground text-sm">
+									Emails filed through{" "}
+									<LocalRelativeTime date={status.emailsSyncedThrough} />
+								</p>
+							) : null}
 							{status.syncError ? (
 								<StatusIndicator tone="error" label={status.syncError} />
 							) : null}

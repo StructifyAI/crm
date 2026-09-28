@@ -24,6 +24,7 @@ import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { EnvironmentVariables } from "../config/env.validation";
 import { ExtrovertEngagementSyncService } from "../extrovert/extrovert-engagement-sync.service";
 import { ExtrovertSyncService } from "../extrovert/extrovert-sync.service";
+import { InstantlyEmailSyncService } from "../instantly/instantly-email-sync.service";
 import { InstantlySyncService } from "../instantly/instantly-sync.service";
 import { DealLinkService } from "../mailbox/deal-link.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
@@ -45,6 +46,7 @@ export class SyncController {
 	constructor(
 		private readonly sync: MailboxSyncService,
 		private readonly instantly: InstantlySyncService,
+		private readonly instantlyEmails: InstantlyEmailSyncService,
 		private readonly extrovert: ExtrovertSyncService,
 		private readonly extrovertEngagement: ExtrovertEngagementSyncService,
 		private readonly dealLinks: DealLinkService,
@@ -97,6 +99,24 @@ export class SyncController {
 	@ApiExcludeEndpoint()
 	async instantlyViaPost(@Headers("authorization") authorization?: string) {
 		return this.runInstantly(authorization);
+	}
+
+	@Get("instantly-emails")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "File Instantly sent emails on the timeline" })
+	async instantlyEmailsViaGet(
+		@Headers("authorization") authorization?: string,
+	) {
+		return this.runInstantlyEmails(authorization);
+	}
+
+	@Post("instantly-emails")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async instantlyEmailsViaPost(
+		@Headers("authorization") authorization?: string,
+	) {
+		return this.runInstantlyEmails(authorization);
 	}
 
 	@Get("extrovert")
@@ -171,6 +191,11 @@ export class SyncController {
 	private async runInstantly(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.instantly.run();
+	}
+
+	private async runInstantlyEmails(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.instantlyEmails.run();
 	}
 
 	private async runExtrovert(authorization?: string) {
