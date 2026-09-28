@@ -1,6 +1,7 @@
 import {
 	type InstantlyCampaign,
 	type InstantlyEmail,
+	type InstantlyEmailType,
 	type InstantlyLead,
 	parseInstantlyCampaignPage,
 	parseInstantlyEmailPage,
@@ -9,7 +10,8 @@ import {
 import { Injectable } from "@nestjs/common";
 import { INSTANTLY } from "./instantly-config";
 
-export type SentEmailQuery = {
+export type EmailQuery = {
+	type: InstantlyEmailType;
 	since: Date | null;
 	cursor?: string;
 };
@@ -50,12 +52,12 @@ export class InstantlyClient {
 		}
 	}
 
-	async listSentEmails(
+	async listEmails(
 		key: string,
-		query: SentEmailQuery,
+		query: EmailQuery,
 	): Promise<{ items: InstantlyEmail[]; cursor: string | null }> {
 		const url = new URL(`${INSTANTLY.api.baseUrl}/emails`);
-		url.searchParams.set("email_type", "sent");
+		url.searchParams.set("email_type", query.type);
 		url.searchParams.set("sort_order", "asc");
 		url.searchParams.set("limit", String(INSTANTLY.emails.pageSize));
 		if (query.since) {

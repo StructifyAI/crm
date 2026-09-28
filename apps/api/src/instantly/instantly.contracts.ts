@@ -14,6 +14,7 @@ export const instantlyStatusOutput = z.object({
 	syncError: z.string().nullable(),
 	leads: z.number(),
 	emailsSyncedThrough: z.string().nullable(),
+	repliesSyncedThrough: z.string().nullable(),
 });
 
 export const instantlyApiKeyInput = z.object({
@@ -25,6 +26,7 @@ export const instantlySyncOutput = z.object({
 	leads: z.number(),
 	created: z.number(),
 	emails: z.number(),
+	replies: z.number(),
 	error: z.string().nullable(),
 });
 

@@ -13,8 +13,8 @@ import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import {
+	type EmailQuery,
 	InstantlyClient,
-	type SentEmailQuery,
 } from "../src/instantly/instantly.client";
 import { InstantlyController } from "../src/instantly/instantly.controller";
 import { InstantlyEmailSyncService } from "../src/instantly/instantly-email-sync.service";
@@ -236,12 +236,18 @@ describe("Instantly filing", () => {
 			}),
 		).toEqual({ lastContactAt: new Date(sentAt), sendingMailbox: mailbox });
 	});
+});
 
+describe("Instantly email polling", () => {
 	it("files sent emails from the API, skips webhook duplicates, and resumes from the cursor", async () => {
 		await db.appSetting.upsert({
 			where: { id: SETTINGS_ID },
 			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
-			update: { instantlyApiKey: "test-key", instantlyEmailCursor: null },
+			update: {
+				instantlyApiKey: "test-key",
+				instantlyEmailCursor: null,
+				instantlyReplyCursor: null,
+			},
 		});
 		const mailbox = `polling-${suffix}@example.test`;
 		await db.instantlyMailbox.create({
@@ -312,7 +318,7 @@ describe("Instantly filing", () => {
 			campaign_id: lead ? campaignId : null,
 			lead,
 		});
-		const queries: SentEmailQuery[] = [];
+		const queries: EmailQuery[] = [];
 		let pages = [
 			{
 				items: [
@@ -347,7 +353,7 @@ describe("Instantly filing", () => {
 			listCampaigns: async () => [
 				{ id: campaignId, name: "Spring campaign", status: 1, email_list: [] },
 			],
-			listSentEmails: async (_key: string, query: SentEmailQuery) => {
+			listEmails: async (_key: string, query: EmailQuery) => {
 				queries.push(query);
 				return pages.shift() ?? { items: [], cursor: null };
 			},
@@ -357,12 +363,15 @@ describe("Instantly filing", () => {
 		expect(await sync.run()).toEqual({
 			emails: 3,
 			filed: 2,
+			replies: 0,
+			repliesFiled: 0,
 			complete: true,
 			error: null,
 		});
 		expect(queries).toEqual([
-			{ since: null, cursor: undefined },
-			{ since: null, cursor: "page-2" },
+			{ type: "sent", since: null, cursor: undefined },
+			{ type: "sent", since: null, cursor: "page-2" },
+			{ type: "received", since: null, cursor: undefined },
 		]);
 		const activities = await db.activity.findMany({
 			where: { contactId: contact.id },
@@ -407,8 +416,199 @@ describe("Instantly filing", () => {
 		pages = [];
 		expect(await sync.run()).toMatchObject({ emails: 0, complete: true });
 		expect(queries).toEqual([
-			{ since: new Date(cursor.getTime() - 1_000), cursor: undefined },
+			{
+				type: "sent",
+				since: new Date(cursor.getTime() - 1_000),
+				cursor: undefined,
+			},
+			{ type: "received", since: null, cursor: undefined },
 		]);
+	});
+
+	it("polls received emails and files replies once across the webhook and the API", async () => {
+		const mailbox = `sender-${suffix}@example.test`;
+		const campaignId = `campaign-replies-${suffix}`;
+		const threadId = `thread-${suffix}`;
+		const company = await db.company.upsert({
+			where: { domain },
+			create: { name: "Instantly Replies", domain },
+			update: {},
+			select: { id: true },
+		});
+		const contact = await db.contact.create({
+			data: {
+				email: `replier@${domain}`,
+				firstName: "Replier",
+				companyId: company.id,
+			},
+			select: { id: true },
+		});
+		const deal = await db.deal.create({
+			data: {
+				name: "Reply deal",
+				companyId: company.id,
+				ownerId: mappedOwnerId,
+				stage: "ENGAGED",
+			},
+			select: { id: true },
+		});
+		await db.instantlyCampaignLead.create({
+			data: {
+				leadId: `lead-replies-${suffix}`,
+				contactId: contact.id,
+				campaignId,
+				campaignName: "Spring campaign",
+				status: 1,
+			},
+		});
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: {
+				id: SETTINGS_ID,
+				instantlyApiKey: "test-key",
+				instantlyEmailCursor: null,
+				instantlyReplyCursor: null,
+			},
+			update: {
+				instantlyApiKey: "test-key",
+				instantlyEmailCursor: null,
+				instantlyReplyCursor: null,
+			},
+		});
+		await ingest.accept(
+			event(`replier@${domain}`, {
+				timestamp: "2026-09-25T14:10:00.000Z",
+				campaign_id: campaignId,
+				email_account: mailbox,
+				unibox_url: `https://app.instantly.ai/app/unibox?thread_search=thread:${threadId}&selected_wks=w`,
+				reply_subject: "Re: First touch",
+				reply_text:
+					"Thanks Alex!\n\nOn Thu, Sep 25, 2026 alex wrote:\n> Hi there.",
+			}),
+		);
+
+		const received = (
+			id: string,
+			from: string,
+			at: string,
+			text: string,
+			extra: Record<string, number> = {},
+		) => ({
+			id,
+			timestamp_created: at,
+			timestamp_email: at,
+			subject: "Re: First touch",
+			to_address_email_list: mailbox,
+			from_address_email: from,
+			body: { text },
+			eaccount: mailbox,
+			campaign_id: campaignId,
+			lead: `replier@${domain}`,
+			thread_id: threadId,
+			...extra,
+		});
+		const queries: EmailQuery[] = [];
+		const pages = {
+			sent: [],
+			received: [
+				{
+					items: [
+						received(
+							`reply-webhook-${suffix}`,
+							`replier@${domain}`,
+							"2026-09-25T14:09:40.000Z",
+							"Thanks Alex!\n\nOn Thu, Sep 25, 2026 alex wrote:\n> Hi there.",
+						),
+						received(
+							`reply-own-${suffix}`,
+							`${mappedOwnerId}@example.test`,
+							"2026-09-25T15:00:00.000Z",
+							"Great, talk soon.",
+						),
+						received(
+							`reply-auto-${suffix}`,
+							`replier@${domain}`,
+							"2026-09-25T15:01:00.000Z",
+							"I am out of office.",
+							{ is_auto_reply: 1 },
+						),
+						received(
+							`reply-second-${suffix}`,
+							`replier@${domain}`,
+							"2026-09-25T17:30:00.000Z",
+							"Sounds good.\n\nOn Thu, Sep 25, 2026 alex wrote:\n> Talk soon?",
+						),
+					],
+					cursor: null,
+				},
+			],
+		};
+		const client = {
+			listCampaigns: async () => [
+				{ id: campaignId, name: "Spring campaign", status: 1, email_list: [] },
+			],
+			listEmails: async (_key: string, query: EmailQuery) => {
+				queries.push(query);
+				return pages[query.type]?.shift() ?? { items: [], cursor: null };
+			},
+		} as unknown as InstantlyClient;
+		const sync = new InstantlyEmailSyncService(db, client, filing);
+
+		expect(await sync.run()).toEqual({
+			emails: 0,
+			filed: 0,
+			replies: 4,
+			repliesFiled: 1,
+			complete: true,
+			error: null,
+		});
+		expect(
+			await db.activity.findMany({
+				where: { contactId: contact.id },
+				orderBy: { occurredAt: "asc" },
+				select: {
+					type: true,
+					subject: true,
+					body: true,
+					dealId: true,
+					occurredAt: true,
+				},
+			}),
+		).toEqual([
+			{
+				type: "EMAIL",
+				subject: "Re: First touch",
+				body: "Thanks Alex!",
+				dealId: deal.id,
+				occurredAt: new Date("2026-09-25T14:10:00.000Z"),
+			},
+			{
+				type: "EMAIL",
+				subject: "Re: First touch",
+				body: "Sounds good.",
+				dealId: deal.id,
+				occurredAt: new Date("2026-09-25T17:30:00.000Z"),
+			},
+		]);
+		expect(
+			await db.instantlyCampaignLead.findUnique({
+				where: { leadId: `lead-replies-${suffix}` },
+				select: { replyCount: true },
+			}),
+		).toEqual({ replyCount: 2 });
+		expect(
+			await db.contact.count({
+				where: { email: `${mappedOwnerId}@example.test` },
+			}),
+		).toBe(0);
+		expect(
+			await db.appSetting.findUnique({
+				where: { id: SETTINGS_ID },
+				select: { instantlyReplyCursor: true },
+			}),
+		).toEqual({
+			instantlyReplyCursor: new Date("2026-09-25T17:30:00.000Z"),
+		});
 	});
 
 	it("skips a tick while another run holds the lease", async () => {
@@ -428,7 +628,7 @@ describe("Instantly filing", () => {
 				calls += 1;
 				return [];
 			},
-			listSentEmails: async () => {
+			listEmails: async () => {
 				calls += 1;
 				return { items: [], cursor: null };
 			},
@@ -438,6 +638,8 @@ describe("Instantly filing", () => {
 		expect(await sync.run()).toEqual({
 			emails: 0,
 			filed: 0,
+			replies: 0,
+			repliesFiled: 0,
 			complete: false,
 			error: null,
 		});
@@ -448,7 +650,7 @@ describe("Instantly filing", () => {
 			data: { instantlyEmailLeaseUntil: new Date(Date.now() - 1_000) },
 		});
 		expect(await sync.run()).toMatchObject({ complete: true });
-		expect(calls).toBe(2);
+		expect(calls).toBe(3);
 		expect(
 			await db.appSetting.findUnique({
 				where: { id: SETTINGS_ID },
@@ -456,7 +658,9 @@ describe("Instantly filing", () => {
 			}),
 		).toEqual({ instantlyEmailLeaseUntil: null });
 	});
+});
 
+describe("Instantly campaign leads", () => {
 	it("marks a bounce on the campaign lead and notes it without creating contacts", async () => {
 		const contact = await db.contact.create({
 			data: { email: `bounced@${domain}`, firstName: "Bounced" },

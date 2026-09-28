@@ -103,7 +103,9 @@ export class SyncController {
 
 	@Get("instantly-emails")
 	@AllowAnonymous()
-	@ApiOperation({ summary: "File Instantly sent emails on the timeline" })
+	@ApiOperation({
+		summary: "File Instantly sent emails and replies on the timeline",
+	})
 	async instantlyEmailsViaGet(
 		@Headers("authorization") authorization?: string,
 	) {
