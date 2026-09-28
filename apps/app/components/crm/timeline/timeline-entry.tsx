@@ -73,7 +73,9 @@ export function TimelineEntry({
 		? entry.emailThread
 			? "via Gmail"
 			: "via Calendar"
-		: entry.createdBy.name;
+		: entry.meta?.source === "instantly"
+			? "via Instantly"
+			: entry.createdBy.name;
 
 	const headline = change
 		? `${dealStageLabel(change.from)} → ${dealStageLabel(change.to)}`

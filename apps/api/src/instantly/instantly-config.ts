@@ -11,6 +11,7 @@ export const INSTANTLY = {
 		dayMs: 86_400_000,
 	},
 	filing: {
+		sendEvents: ["email_sent", "email_bounced", "lead_unsubscribed"],
 		leadEvents: [
 			"reply_received",
 			"lead_interested",

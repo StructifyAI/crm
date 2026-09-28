@@ -17,7 +17,9 @@ export const instantlyWebhookEvent = z.looseObject({
 	reply_subject: z.string().optional(),
 	reply_text_snippet: z.string().optional(),
 	reply_text: z.string().optional(),
+	email_id: z.string().optional(),
 	email_subject: z.string().optional(),
+	email_text: z.string().optional(),
 });
 
 export type InstantlyWebhookEvent = z.infer<typeof instantlyWebhookEvent>;
