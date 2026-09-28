@@ -1,4 +1,5 @@
 const SECOND_MS = 1_000;
+const MINUTE_MS = 60 * SECOND_MS;
 
 export const INSTANTLY = {
 	webhook: {
@@ -13,8 +14,9 @@ export const INSTANTLY = {
 		dayMs: 86_400_000,
 	},
 	emails: {
-		pageSize: 100,
-		tickBudgetMs: 40 * SECOND_MS,
+		pageSize: 25,
+		tickBudgetMs: 30 * SECOND_MS,
+		leaseMs: 2 * MINUTE_MS,
 		minRequestGapMs: 3 * SECOND_MS,
 	},
 	filing: {

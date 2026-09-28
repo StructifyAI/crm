@@ -44,12 +44,26 @@ export class InstantlyEmailSyncService {
 			error: null,
 		};
 		if (!key) return { ...result, complete: true };
+		if (!(await this.acquireLease())) return result;
+		try {
+			return await this.walk(
+				key,
+				setting?.instantlyEmailCursor ?? null,
+				result,
+			);
+		} finally {
+			await this.releaseLease();
+		}
+	}
 
+	private async walk(
+		key: string,
+		start: Date | null,
+		result: InstantlyEmailSyncResult,
+	): Promise<InstantlyEmailSyncResult> {
 		const deadline = deadlineIn(INSTANTLY.emails.tickBudgetMs);
-		const since = setting?.instantlyEmailCursor
-			? new Date(setting.instantlyEmailCursor.getTime() - CURSOR_OVERLAP_MS)
-			: null;
-		let newest = setting?.instantlyEmailCursor ?? null;
+		const since = start ? new Date(start.getTime() - CURSOR_OVERLAP_MS) : null;
+		let newest = start;
 		let cursor: string | undefined;
 
 		try {
@@ -62,6 +76,10 @@ export class InstantlyEmailSyncService {
 			while (true) {
 				const page = await this.client.listSentEmails(key, { since, cursor });
 				for (const email of page.items) {
+					if (overdue(deadline)) {
+						await this.saveCursor(newest);
+						return result;
+					}
 					result.emails += 1;
 					const send = sendFromEmail(email, campaigns);
 					if (send && (await this.filing.fileSend(send)) === "filed") {
@@ -91,6 +109,32 @@ export class InstantlyEmailSyncService {
 			});
 			return { ...result, error: message };
 		}
+	}
+
+	private async acquireLease(): Promise<boolean> {
+		const now = new Date();
+		const { count } = await this.db.appSetting.updateMany({
+			where: {
+				id: SETTINGS_ID,
+				OR: [
+					{ instantlyEmailLeaseUntil: null },
+					{ instantlyEmailLeaseUntil: { lt: now } },
+				],
+			},
+			data: {
+				instantlyEmailLeaseUntil: new Date(
+					now.getTime() + INSTANTLY.emails.leaseMs,
+				),
+			},
+		});
+		return count === 1;
+	}
+
+	private async releaseLease(): Promise<void> {
+		await this.db.appSetting.updateMany({
+			where: { id: SETTINGS_ID },
+			data: { instantlyEmailLeaseUntil: null },
+		});
 	}
 
 	private async saveCursor(cursor: Date | null): Promise<void> {
