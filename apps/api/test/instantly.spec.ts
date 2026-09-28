@@ -303,7 +303,11 @@ describe("Instantly filing", () => {
 			timestamp_email: at,
 			subject,
 			to_address_email_list: lead ?? `manual@${domain}`,
-			body: { text: `${subject} body` },
+			body: lead
+				? { text: `${subject} body` }
+				: {
+						html: `<div>Hi Chris,</div><div><br /></div><div>${subject} body</div>`,
+					},
 			eaccount: mailbox,
 			campaign_id: lead ? campaignId : null,
 			lead,
@@ -377,11 +381,12 @@ describe("Instantly filing", () => {
 		expect(
 			await db.activity.findFirst({
 				where: { contact: { email: `manual@${domain}` } },
-				select: { type: true, subject: true, occurredAt: true },
+				select: { type: true, subject: true, body: true, occurredAt: true },
 			}),
 		).toEqual({
 			type: "EMAIL",
 			subject: "Manual note",
+			body: "Hi Chris,\n\nManual note body",
 			occurredAt: new Date("2026-09-25T09:00:00.000Z"),
 		});
 		expect(

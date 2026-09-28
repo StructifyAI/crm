@@ -4,6 +4,7 @@ import type { InstantlyEmail } from "@crm/validation/instantly-api";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { deadlineIn, overdue } from "../mailbox/deadline";
+import { stripHtml } from "../mailbox/message-text";
 import { InstantlyClient } from "./instantly.client";
 import { INSTANTLY } from "./instantly-config";
 import {
@@ -124,7 +125,8 @@ export function sendFromEmail(
 			: null,
 		emailId: email.id,
 		subject: email.subject ?? null,
-		text: email.body?.text ?? "",
+		text:
+			email.body?.text || (email.body?.html ? stripHtml(email.body.html) : ""),
 		occurredAt: new Date(email.timestamp_email),
 	};
 }
