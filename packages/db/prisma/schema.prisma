@@ -959,7 +959,7 @@ model Deal {
   ownerId       String
   owner         User                @relation("DealOwner", fields: [ownerId], references: [id])
 
-  stage             DealStage @default(DEMO_BOOKED)
+  stage             DealStage @default(ENGAGED)
   stageChangedAt    DateTime  @default(now())
   amount            Decimal?  @db.Decimal(14, 2)
   currency          String    @default("USD")
