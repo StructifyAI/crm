@@ -6,6 +6,7 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { type Deadline, overdue } from "../mailbox/deadline";
+import { GMAIL_BACKFILL } from "../mailbox/mailbox-config";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import {
 	normaliseMessageId,
@@ -27,6 +28,37 @@ import {
 } from "./gmail-mime";
 
 const MAX_MESSAGES_PER_TICK = 120;
+
+const BACKFILL_CURSOR_PREFIX = "backfill:";
+
+type BackfillCursor = {
+	historyId: string;
+	before: Date;
+	pageToken: string | null;
+};
+
+export function encodeBackfillCursor(cursor: BackfillCursor): string {
+	return [
+		BACKFILL_CURSOR_PREFIX + cursor.historyId,
+		cursor.before.getTime(),
+		cursor.pageToken ?? "",
+	].join(":");
+}
+
+export function decodeBackfillCursor(
+	cursor: string | null,
+): BackfillCursor | null {
+	if (!cursor?.startsWith(BACKFILL_CURSOR_PREFIX)) return null;
+
+	const [historyId, before, ...rest] = cursor
+		.slice(BACKFILL_CURSOR_PREFIX.length)
+		.split(":");
+	const at = new Date(Number(before));
+	if (!historyId || Number.isNaN(at.getTime())) return null;
+
+	const pageToken = rest.join(":");
+	return { historyId, before: at, pageToken: pageToken || null };
+}
 
 export type GmailSyncOutcome = {
 	source: "gmail";
@@ -98,15 +130,39 @@ export class GmailSyncService {
 		}
 
 		if (!row.cursor) {
-			return this.start(row, profile.data.historyId ?? null);
+			return this.start(
+				row,
+				session,
+				mailbox,
+				profile.data.historyId ?? null,
+				deadline,
+			);
 		}
 
-		return this.incremental(row, session, mailbox, row.cursor, deadline);
+		if (!row.cursor.startsWith(BACKFILL_CURSOR_PREFIX)) {
+			return this.incremental(row, session, mailbox, row.cursor, deadline);
+		}
+
+		const backfill = decodeBackfillCursor(row.cursor);
+		if (!backfill) {
+			await this.state.clearCursor(row.id, "Backfill cursor was malformed.");
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "synced",
+				reason: "Cursor reset; restarting backfill.",
+			};
+		}
+
+		return this.backfill(row, session, mailbox, backfill, deadline);
 	}
 
 	private async start(
 		row: MailboxSync,
+		session: TokenSession,
+		mailbox: string,
 		historyId: string | null,
+		deadline: Deadline,
 	): Promise<GmailSyncOutcome> {
 		if (!historyId) {
 			await this.state.markFailed(row.id, "Gmail returned no historyId.");
@@ -118,17 +174,94 @@ export class GmailSyncService {
 			};
 		}
 
+		const cursor: BackfillCursor = {
+			historyId,
+			before: new Date(),
+			pageToken: null,
+		};
+
 		await this.state.settle(row.id, {
-			cursor: historyId,
+			cursor: encodeBackfillCursor(cursor),
 			status: GoogleSyncStatus.RUNNING,
 		});
 
 		this.logger.log({
-			message: "Gmail sync started — watching for new mail",
+			message: "Gmail sync started — backfilling recent mail",
 			userId: row.userId,
+			windowDays: GMAIL_BACKFILL.windowDays,
 		});
 
-		return { source: "gmail", userId: row.userId, status: "synced" };
+		return this.backfill(row, session, mailbox, cursor, deadline);
+	}
+
+	private async backfill(
+		row: MailboxSync,
+		session: TokenSession,
+		mailbox: string,
+		cursor: BackfillCursor,
+		deadline: Deadline,
+	): Promise<GmailSyncOutcome> {
+		const page = await session.call((accessToken) =>
+			this.gmail.listMessages(accessToken, {
+				after: new Date(cursor.before.getTime() - GMAIL_BACKFILL.windowMs),
+				before: cursor.before,
+				pageToken: cursor.pageToken ?? undefined,
+				maxResults: GMAIL_BACKFILL.pageSize,
+			}),
+		);
+
+		if (page.outcome !== "ok") {
+			return this.handleFailure(row, page);
+		}
+
+		const ids = (page.data.messages ?? [])
+			.map((message) => message.id)
+			.filter((id): id is string => Boolean(id));
+
+		const { written, remaining, unauthorized } = await this.ingest(
+			row,
+			session,
+			mailbox,
+			ids,
+			deadline,
+		);
+
+		if (unauthorized) {
+			return this.handleFailure(row, {
+				outcome: "unauthorized",
+				reason: unauthorized,
+			});
+		}
+
+		const nextPageToken = page.data.nextPageToken ?? null;
+		const done = remaining === 0 && !nextPageToken;
+
+		await this.state.settle(row.id, {
+			cursor: done
+				? cursor.historyId
+				: encodeBackfillCursor({
+						...cursor,
+						pageToken: remaining > 0 ? cursor.pageToken : nextPageToken,
+					}),
+			status: GoogleSyncStatus.RUNNING,
+		});
+
+		this.logger.log({
+			message: done
+				? "Gmail backfill complete — watching for new mail"
+				: "Gmail backfill page",
+			userId: row.userId,
+			messagesWritten: written,
+			remaining,
+		});
+
+		return {
+			source: "gmail",
+			userId: row.userId,
+			status: "synced",
+			messagesWritten: written,
+			reason: done ? undefined : "Backfill in progress.",
+		};
 	}
 
 	private async incremental(
