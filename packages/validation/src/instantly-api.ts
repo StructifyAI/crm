@@ -60,3 +60,31 @@ export function parseInstantlyCampaignPage(value: unknown) {
 export function parseInstantlyLeadPage(value: unknown) {
 	return instantlyPage(instantlyLead).parse(value);
 }
+
+export const instantlyEmail = z.looseObject({
+	id: z.string(),
+	timestamp_created: z.string(),
+	timestamp_email: z.string(),
+	subject: z.string().nullable().optional(),
+	to_address_email_list: z.string().nullable().optional(),
+	body: z
+		.looseObject({
+			text: z.string().nullable().optional(),
+			html: z.string().nullable().optional(),
+		})
+		.nullable()
+		.optional(),
+	eaccount: z.string().nullable().optional(),
+	from_address_email: z.string().nullable().optional(),
+	campaign_id: z.string().nullable().optional(),
+	lead: z.string().nullable().optional(),
+	lead_id: z.string().nullable().optional(),
+	ue_type: z.number().nullable().optional(),
+	step: z.string().nullable().optional(),
+});
+
+export type InstantlyEmail = z.infer<typeof instantlyEmail>;
+
+export function parseInstantlyEmailPage(value: unknown) {
+	return instantlyPage(instantlyEmail).parse(value);
+}

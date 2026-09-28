@@ -234,6 +234,13 @@ An `email_sent` webhook updates that status line and files an `EMAIL` activity.
 The activity carries the sent subject and text, is stamped with Instantly's timestamp,
 and lands on the contact, its company, and the company's most recently active open deal.
 Sends are deduplicated on Instantly's `email_id`, so retried webhooks do not double-file.
+The same API key also polls `GET /api/v2/emails?email_type=sent` every 15 minutes
+(`/internal/sync/instantly-emails`) and files every sent email the same way, so a
+missed or unsubscribed webhook does not lose a touch. Instantly's email `id` is the
+webhook's `email_id`, so a send seen on both paths is filed once. The first run walks
+the full history from the oldest email; `AppSetting.instantlyEmailCursor` records the
+newest `timestamp_created` after each page, and each tick resumes one second before
+it, so a backfill spans as many 40-second ticks as it needs and never repeats itself.
 An `email_bounced` or `lead_unsubscribed` webhook marks the campaign lead as bounced or
 unsubscribed (the status line turns to a warning) and files a `NOTE` on the same records.
 Replies create a note.

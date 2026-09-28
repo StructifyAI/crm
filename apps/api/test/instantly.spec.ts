@@ -12,8 +12,12 @@ import type { InstantlyWebhookEvent } from "@crm/validation/instantly-webhook";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
-import { InstantlyClient } from "../src/instantly/instantly.client";
+import {
+	InstantlyClient,
+	type SentEmailQuery,
+} from "../src/instantly/instantly.client";
 import { InstantlyController } from "../src/instantly/instantly.controller";
+import { InstantlyEmailSyncService } from "../src/instantly/instantly-email-sync.service";
 import { InstantlyFilingService } from "../src/instantly/instantly-filing.service";
 import { InstantlyIngestService } from "../src/instantly/instantly-ingest.service";
 import { instantlyState } from "../src/instantly/instantly-state";
@@ -231,6 +235,180 @@ describe("Instantly filing", () => {
 				select: { lastContactAt: true, sendingMailbox: true },
 			}),
 		).toEqual({ lastContactAt: new Date(sentAt), sendingMailbox: mailbox });
+	});
+
+	it("files sent emails from the API, skips webhook duplicates, and resumes from the cursor", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key", instantlyEmailCursor: null },
+		});
+		const mailbox = `polling-${suffix}@example.test`;
+		await db.instantlyMailbox.create({
+			data: { emailAccount: mailbox, ownerId: mappedOwnerId },
+		});
+		const company = await db.company.upsert({
+			where: { domain },
+			create: { name: "Instantly Polling", domain },
+			update: {},
+			select: { id: true },
+		});
+		const contact = await db.contact.create({
+			data: {
+				email: `polled@${domain}`,
+				firstName: "Polled",
+				companyId: company.id,
+			},
+			select: { id: true },
+		});
+		const deal = await db.deal.create({
+			data: {
+				name: "Polled deal",
+				companyId: company.id,
+				ownerId: mappedOwnerId,
+				stage: "ENGAGED",
+			},
+			select: { id: true },
+		});
+		const campaignId = `campaign-polled-${suffix}`;
+		await db.instantlyCampaignLead.create({
+			data: {
+				leadId: `lead-polled-${suffix}`,
+				contactId: contact.id,
+				campaignId,
+				campaignName: "Spring campaign",
+				status: 1,
+			},
+		});
+		await ingest.accept(
+			event(`polled@${domain}`, {
+				event_type: "email_sent",
+				timestamp: "2026-09-24T19:55:00.000Z",
+				campaign_id: campaignId,
+				email_account: mailbox,
+				email_id: `email-webhook-${suffix}`,
+				email_subject: "First touch",
+				email_text: "Hi there.",
+			}),
+		);
+
+		const email = (
+			id: string,
+			lead: string | null,
+			at: string,
+			subject: string,
+		) => ({
+			id,
+			timestamp_created: at,
+			timestamp_email: at,
+			subject,
+			to_address_email_list: lead ?? `manual@${domain}`,
+			body: lead
+				? { text: `${subject} body` }
+				: {
+						html: `<div>Hi Chris,</div><div><br /></div><div>${subject} body</div>`,
+					},
+			eaccount: mailbox,
+			campaign_id: lead ? campaignId : null,
+			lead,
+		});
+		const queries: SentEmailQuery[] = [];
+		let pages = [
+			{
+				items: [
+					email(
+						`email-webhook-${suffix}`,
+						`polled@${domain}`,
+						"2026-09-24T19:55:00.000Z",
+						"First touch",
+					),
+					email(
+						`email-bump-${suffix}`,
+						`polled@${domain}`,
+						"2026-09-24T20:32:00.000Z",
+						"Bump",
+					),
+				],
+				cursor: "page-2",
+			},
+			{
+				items: [
+					email(
+						`email-manual-${suffix}`,
+						null,
+						"2026-09-25T09:00:00.000Z",
+						"Manual note",
+					),
+				],
+				cursor: null,
+			},
+		];
+		const client = {
+			listCampaigns: async () => [
+				{ id: campaignId, name: "Spring campaign", status: 1, email_list: [] },
+			],
+			listSentEmails: async (_key: string, query: SentEmailQuery) => {
+				queries.push(query);
+				return pages.shift() ?? { items: [], cursor: null };
+			},
+		} as unknown as InstantlyClient;
+		const sync = new InstantlyEmailSyncService(db, client, filing);
+
+		expect(await sync.run()).toEqual({
+			emails: 3,
+			filed: 2,
+			complete: true,
+			error: null,
+		});
+		expect(queries).toEqual([
+			{ since: null, cursor: undefined },
+			{ since: null, cursor: "page-2" },
+		]);
+		const activities = await db.activity.findMany({
+			where: { contactId: contact.id },
+			orderBy: { occurredAt: "asc" },
+			select: { type: true, subject: true, body: true, dealId: true },
+		});
+		expect(activities).toEqual([
+			{
+				type: "EMAIL",
+				subject: "First touch",
+				body: "Hi there.",
+				dealId: deal.id,
+			},
+			{ type: "EMAIL", subject: "Bump", body: "Bump body", dealId: deal.id },
+		]);
+		expect(
+			await db.activity.findFirst({
+				where: { contact: { email: `manual@${domain}` } },
+				select: { type: true, subject: true, body: true, occurredAt: true },
+			}),
+		).toEqual({
+			type: "EMAIL",
+			subject: "Manual note",
+			body: "Hi Chris,\n\nManual note body",
+			occurredAt: new Date("2026-09-25T09:00:00.000Z"),
+		});
+		expect(
+			await db.instantlyCampaignLead.findUnique({
+				where: { leadId: `lead-polled-${suffix}` },
+				select: { lastContactAt: true },
+			}),
+		).toEqual({ lastContactAt: new Date("2026-09-24T20:32:00.000Z") });
+		const cursor = new Date("2026-09-25T09:00:00.000Z");
+		expect(
+			await db.appSetting.findUnique({
+				where: { id: SETTINGS_ID },
+				select: { instantlyEmailCursor: true },
+			}),
+		).toEqual({ instantlyEmailCursor: cursor });
+
+		queries.length = 0;
+		pages = [];
+		expect(await sync.run()).toMatchObject({ emails: 0, complete: true });
+		expect(queries).toEqual([
+			{ since: new Date(cursor.getTime() - 1_000), cursor: undefined },
+		]);
 	});
 
 	it("marks a bounce on the campaign lead and notes it without creating contacts", async () => {
