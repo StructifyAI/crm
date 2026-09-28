@@ -411,6 +411,52 @@ describe("Instantly filing", () => {
 		]);
 	});
 
+	it("skips a tick while another run holds the lease", async () => {
+		const held = new Date(Date.now() + 60_000);
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: {
+				id: SETTINGS_ID,
+				instantlyApiKey: "test-key",
+				instantlyEmailLeaseUntil: held,
+			},
+			update: { instantlyApiKey: "test-key", instantlyEmailLeaseUntil: held },
+		});
+		let calls = 0;
+		const client = {
+			listCampaigns: async () => {
+				calls += 1;
+				return [];
+			},
+			listSentEmails: async () => {
+				calls += 1;
+				return { items: [], cursor: null };
+			},
+		} as unknown as InstantlyClient;
+		const sync = new InstantlyEmailSyncService(db, client, filing);
+
+		expect(await sync.run()).toEqual({
+			emails: 0,
+			filed: 0,
+			complete: false,
+			error: null,
+		});
+		expect(calls).toBe(0);
+
+		await db.appSetting.update({
+			where: { id: SETTINGS_ID },
+			data: { instantlyEmailLeaseUntil: new Date(Date.now() - 1_000) },
+		});
+		expect(await sync.run()).toMatchObject({ complete: true });
+		expect(calls).toBe(2);
+		expect(
+			await db.appSetting.findUnique({
+				where: { id: SETTINGS_ID },
+				select: { instantlyEmailLeaseUntil: true },
+			}),
+		).toEqual({ instantlyEmailLeaseUntil: null });
+	});
+
 	it("marks a bounce on the campaign lead and notes it without creating contacts", async () => {
 		const contact = await db.contact.create({
 			data: { email: `bounced@${domain}`, firstName: "Bounced" },

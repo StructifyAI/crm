@@ -240,7 +240,9 @@ missed or unsubscribed webhook does not lose a touch. Instantly's email `id` is 
 webhook's `email_id`, so a send seen on both paths is filed once. The first run walks
 the full history from the oldest email; `AppSetting.instantlyEmailCursor` records the
 newest `timestamp_created` after each page, and each tick resumes one second before
-it, so a backfill spans as many 40-second ticks as it needs and never repeats itself.
+it, so a backfill spans as many 30-second ticks as it needs and never repeats itself.
+`AppSetting.instantlyEmailLeaseUntil` is a two-minute lease: a tick that finds it held
+returns without reading, so the cron and "Sync now" never file the same page twice.
 An `email_bounced` or `lead_unsubscribed` webhook marks the campaign lead as bounced or
 unsubscribed (the status line turns to a warning) and files a `NOTE` on the same records.
 Replies create a note.

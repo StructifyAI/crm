@@ -49,6 +49,12 @@ two commits that are submitted upstream and not yet released:
 - `feat: show the agent who each synced email was sent to when it files the thread on a
   deal` — `@crm/validation/email-recipients` parses stored recipients once for the
   conversation view and the deal-link request.
+- `feat(api): file Instantly sends and bounces on the contact, company, and open deal` —
+  `email_sent` files an `EMAIL` activity deduped on `email_id`; bounces and unsubscribes
+  mark the campaign lead and file a `NOTE`.
+- `feat(api): poll Instantly sent emails onto the timeline and backfill history` — cron
+  `/internal/sync/instantly-emails` reads `GET /api/v2/emails?email_type=sent`, migrations
+  `instantly_email_sync` and `instantly_email_sync_lease`.
 
 Rules for this branch:
 
