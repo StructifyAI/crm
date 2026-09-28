@@ -5,6 +5,7 @@ const ORDER = [
 	DealStage.ENGAGED,
 	DealStage.DEMO_BOOKED,
 	DealStage.QUALIFIED_TO_BUY,
+	DealStage.IN_POC,
 	DealStage.DECISION_MAKER_BOUGHT_IN,
 	DealStage.CONTRACT_SENT,
 	DealStage.CLOSED_WON,
@@ -21,6 +22,7 @@ const PRESENTATION: DealStagePresentation = {
 	ENGAGED: { label: "Engaged", tone: "neutral" },
 	DEMO_BOOKED: { label: "Demo booked", tone: "neutral" },
 	QUALIFIED_TO_BUY: { label: "Qualified to buy", tone: "info" },
+	IN_POC: { label: "In PoC", tone: "info" },
 	DECISION_MAKER_BOUGHT_IN: { label: "Decision maker in", tone: "info" },
 	CONTRACT_SENT: { label: "Contract sent", tone: "warning" },
 	CLOSED_WON: { label: "Closed won", tone: "success" },
@@ -28,7 +30,7 @@ const PRESENTATION: DealStagePresentation = {
 	UNQUALIFIED_TO_BUY: { label: "Unqualified", tone: "neutral" },
 };
 
-export const OPEN_STAGES = ORDER.slice(0, 5) as readonly DealStage[];
+export const OPEN_STAGES = ORDER.slice(0, 6) as readonly DealStage[];
 
 export const LOSING_STAGES: readonly DealStage[] = [
 	DealStage.CLOSED_LOST,
@@ -46,6 +48,7 @@ const OPEN_STAGE_COLORS = [
 	"var(--chart-3)",
 	"var(--chart-4)",
 	"var(--chart-5)",
+	"var(--chart-6)",
 ] as const;
 
 export function isClosedStage(stage: DealStage): boolean {

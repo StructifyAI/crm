@@ -40,6 +40,7 @@
 	--chart-3: #b45309;
 	--chart-4: #7c3aed;
 	--chart-5: #0891b2;
+	--chart-6: #db2777;
 	--severity-critical: var(--destructive);
 	--severity-high: oklch(0.646 0.222 41.116);
 	--severity-medium: oklch(0.681 0.162 75.834);
@@ -112,6 +113,7 @@
 	--chart-3: #c07e22;
 	--chart-4: #9b7bf0;
 	--chart-5: #1e93b8;
+	--chart-6: #ec6fa8;
 	--severity-critical: oklch(0.637 0.237 25.331);
 	--severity-high: oklch(0.705 0.213 47.604);
 	--severity-medium: var(--chart-2);
@@ -197,6 +199,7 @@
 	--color-chart-3: var(--chart-3);
 	--color-chart-4: var(--chart-4);
 	--color-chart-5: var(--chart-5);
+	--color-chart-6: var(--chart-6);
 	--color-severity-critical: var(--severity-critical);
 	--color-severity-high: var(--severity-high);
 	--color-severity-medium: var(--severity-medium);

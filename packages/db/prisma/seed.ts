@@ -253,6 +253,7 @@ const OPEN_STAGES = [
 	DealStage.ENGAGED,
 	DealStage.DEMO_BOOKED,
 	DealStage.QUALIFIED_TO_BUY,
+	DealStage.IN_POC,
 	DealStage.DECISION_MAKER_BOUGHT_IN,
 	DealStage.CONTRACT_SENT,
 ] as const;
