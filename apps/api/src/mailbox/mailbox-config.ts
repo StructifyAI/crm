@@ -32,3 +32,7 @@ export const MAILBOX_DEAL_LINK = {
 	recipientsShown: 8,
 	backfillPage: 25,
 } as const;
+
+export const MAILBOX_CORRESPONDENCE = {
+	backfillPage: 50,
+} as const;

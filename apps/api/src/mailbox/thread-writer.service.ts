@@ -10,6 +10,7 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
+import { correspondenceSpan } from "./correspondence";
 import type { Deadline } from "./deadline";
 import { DealLinkService, type DealLinkTarget } from "./deal-link.service";
 import { EmailTriageService } from "./email-triage.service";
@@ -132,7 +133,10 @@ export class ThreadWriterService {
 			}
 		}
 
-		let stored: { threadId: string; occurredAt: Date };
+		const correspondence =
+			outbound || (await this.match.corresponds(parsed.from, context));
+
+		let stored: { threadId: string; occurredAt: Date | null };
 
 		try {
 			stored = await this.db.$transaction(async (tx) => {
@@ -165,6 +169,7 @@ export class ThreadWriterService {
 							direction: outbound
 								? EmailDirection.OUTBOUND
 								: EmailDirection.INBOUND,
+							correspondence,
 							fromEmail: parsed.from.email,
 							fromName: parsed.from.name,
 							recipients: parsed.recipients,
@@ -176,30 +181,29 @@ export class ThreadWriterService {
 					});
 				}
 
-				const stats = await tx.emailMessage.aggregate({
-					where: { threadId: record.id },
-					_count: { _all: true },
-					_min: { sentAt: true },
-					_max: { sentAt: true },
-				});
-
-				const firstMessageAt = stats._min.sentAt ?? parsed.sentAt;
-				const lastMessageAt = stats._max.sentAt ?? parsed.sentAt;
+				const span = await correspondenceSpan(tx, record.id);
+				if (!span) return { threadId: record.id, occurredAt: null };
 
 				const data: Prisma.EmailThreadUpdateInput = {
-					messageCount: stats._count._all,
-					firstMessageAt,
-					lastMessageAt,
+					messageCount: span.messageCount,
+					firstMessageAt: span.firstMessageAt,
+					lastMessageAt: span.lastMessageAt,
 				};
 
-				if (parsed.sentAt <= firstMessageAt) data.subject = parsed.subject;
+				if (correspondence && parsed.sentAt <= span.firstMessageAt) {
+					data.subject = parsed.subject;
+				}
 
 				await tx.emailThread.update({ where: { id: record.id }, data });
+
+				if (!correspondence) {
+					return { threadId: record.id, occurredAt: null };
+				}
 
 				const occurredAt = await this.project(tx, record.id, row.userId, {
 					subject: parsed.subject ?? "(no subject)",
 					snippet: snippetOf(parsed.body),
-					lastMessageAt,
+					lastMessageAt: span.lastMessageAt,
 					companyId,
 					contactId,
 					origin: options.origin,
@@ -211,6 +215,8 @@ export class ThreadWriterService {
 			if (await this.storedElsewhere(error, parsed.rfcMessageId)) return false;
 			throw error;
 		}
+
+		if (!stored.occurredAt) return !repair;
 
 		await this.touch(
 			{ companyId, contactId },

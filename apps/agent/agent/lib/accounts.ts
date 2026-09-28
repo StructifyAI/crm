@@ -185,6 +185,7 @@ export async function readCompanyHistory(
 								select: { id: true, firstName: true, lastName: true },
 							},
 							messages: {
+								where: { correspondence: true },
 								orderBy: { sentAt: "desc" },
 								take: options.messagesPerThread ?? 4,
 								select: {
@@ -222,6 +223,7 @@ export async function readCompanyHistory(
 				? db.emailMessage.findFirst({
 						where: {
 							direction: EmailDirection.INBOUND,
+							correspondence: true,
 							thread: belongsToCompany,
 						},
 						orderBy: { sentAt: "desc" },
@@ -417,6 +419,7 @@ export async function readDealHistory(
 								select: { id: true, firstName: true, lastName: true },
 							},
 							messages: {
+								where: { correspondence: true },
 								orderBy: { sentAt: "desc" },
 								take: options.messagesPerThread ?? 4,
 								select: {
@@ -459,6 +462,7 @@ export async function readDealHistory(
 				? db.emailMessage.findFirst({
 						where: {
 							direction: EmailDirection.INBOUND,
+							correspondence: true,
 							thread: relatedThreads,
 						},
 						orderBy: { sentAt: "desc" },

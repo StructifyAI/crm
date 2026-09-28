@@ -103,6 +103,33 @@ export class MailboxMatchService {
 		});
 	}
 
+	async corresponds(
+		person: Participant,
+		context: MatchContext,
+	): Promise<boolean> {
+		const email = person.email.toLowerCase();
+		const domain = workDomain(email);
+
+		if (context.ourAddresses.has(email)) return true;
+		if (domain && context.ourDomains.has(domain)) return true;
+		if (context.suppressedEmails.has(email)) return false;
+		if (domain && context.suppressedDomains.has(domain)) return false;
+
+		const contact = await this.db.contact.findFirst({
+			where: { email },
+			select: { id: true },
+		});
+		if (contact) return true;
+		if (!domain) return false;
+
+		const company = await this.db.company.findFirst({
+			where: { domain },
+			select: { id: true },
+		});
+
+		return company !== null;
+	}
+
 	async resolve(
 		request: MatchRequest,
 		context: MatchContext,
