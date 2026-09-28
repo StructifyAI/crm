@@ -31,6 +31,9 @@ two commits that are submitted upstream and not yet released:
 - `feat(db,app): add an Engaged deal stage before Demo booked` — `ENGAGED` value on
   `DealStage`, migration `deal_stage_engaged`; first open stage in the stepper, pipeline
   chart and filters. New deals still default to `DEMO_BOOKED`.
+- `feat(db,app): add an In PoC deal stage after Qualified to buy` — `IN_POC` value on
+  `DealStage`, migration `deal_stage_in_poc`; open stage between `QUALIFIED_TO_BUY` and
+  `DECISION_MAKER_BOUGHT_IN` in the stepper, pipeline chart and filters.
 - `feat: triage inbox counterparties through the agent before the sync files them` —
   agent route `/internal/crm/triage-email`; a `spam` verdict creates no company or
   contact and writes a `suppressedDomain` row. Needs `AGENT_URL` and
