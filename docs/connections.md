@@ -230,8 +230,13 @@ Every sync fills the owner for unowned contacts, and unmapped mailboxes stay uno
 An optional read-only API key syncs campaign leads every 15 minutes.
 Only leads enrolled in campaigns are imported. Lead-list-only leads are ignored.
 The contact status line shows the campaign state and expected next email.
-An `email_sent` webhook updates that status line without creating an activity.
-Only replies create a note.
+An `email_sent` webhook updates that status line and files an `EMAIL` activity.
+The activity carries the sent subject and text, is stamped with Instantly's timestamp,
+and lands on the contact, its company, and the company's most recently active open deal.
+Sends are deduplicated on Instantly's `email_id`, so retried webhooks do not double-file.
+An `email_bounced` or `lead_unsubscribed` webhook marks the campaign lead as bounced or
+unsubscribed (the status line turns to a warning) and files a `NOTE` on the same records.
+Replies create a note.
 
 ## Extrovert
 

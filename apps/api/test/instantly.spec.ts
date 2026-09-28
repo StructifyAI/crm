@@ -145,6 +145,141 @@ describe("Instantly filing", () => {
 		).toBe(1);
 	});
 
+	it("files a send as an email on the contact, company, and open deal", async () => {
+		const mailbox = `sender-${suffix}@example.test`;
+		await db.instantlyMailbox.create({
+			data: { emailAccount: mailbox, ownerId: mappedOwnerId },
+		});
+		const company = await db.company.upsert({
+			where: { domain },
+			create: { name: "Instantly Sends", domain },
+			update: {},
+			select: { id: true },
+		});
+		const contact = await db.contact.create({
+			data: {
+				email: `sent@${domain}`,
+				firstName: "Sent",
+				companyId: company.id,
+			},
+			select: { id: true },
+		});
+		const deal = await db.deal.create({
+			data: {
+				name: "Instantly deal",
+				companyId: company.id,
+				ownerId: mappedOwnerId,
+				stage: "ENGAGED",
+			},
+			select: { id: true },
+		});
+		await db.instantlyCampaignLead.create({
+			data: {
+				leadId: `lead-sent-${suffix}`,
+				contactId: contact.id,
+				campaignId: `campaign-sent-${suffix}`,
+				campaignName: "Spring campaign",
+				status: 1,
+			},
+		});
+		const sentAt = "2026-09-24T19:55:00.000Z";
+		const sent = event(`sent@${domain}`, {
+			event_type: "email_sent",
+			timestamp: sentAt,
+			campaign_id: `campaign-sent-${suffix}`,
+			email_account: mailbox,
+			email_id: `email-${suffix}`,
+			email_subject: "Quick question about carbides",
+			email_text: "Hi Curtis, saw you at IMTS.",
+		});
+
+		await ingest.accept(sent);
+		await ingest.accept(sent);
+
+		const activities = await db.activity.findMany({
+			where: { contactId: contact.id },
+			select: {
+				type: true,
+				subject: true,
+				body: true,
+				companyId: true,
+				dealId: true,
+				createdById: true,
+				occurredAt: true,
+			},
+		});
+		expect(activities).toEqual([
+			{
+				type: "EMAIL",
+				subject: "Quick question about carbides",
+				body: "Hi Curtis, saw you at IMTS.",
+				companyId: company.id,
+				dealId: deal.id,
+				createdById: mappedOwnerId,
+				occurredAt: new Date(sentAt),
+			},
+		]);
+		expect(
+			await db.deal.findUnique({
+				where: { id: deal.id },
+				select: { lastActivityAt: true },
+			}),
+		).toEqual({ lastActivityAt: new Date(sentAt) });
+		expect(
+			await db.instantlyCampaignLead.findUnique({
+				where: { leadId: `lead-sent-${suffix}` },
+				select: { lastContactAt: true, sendingMailbox: true },
+			}),
+		).toEqual({ lastContactAt: new Date(sentAt), sendingMailbox: mailbox });
+	});
+
+	it("marks a bounce on the campaign lead and notes it without creating contacts", async () => {
+		const contact = await db.contact.create({
+			data: { email: `bounced@${domain}`, firstName: "Bounced" },
+			select: { id: true },
+		});
+		await db.instantlyCampaignLead.create({
+			data: {
+				leadId: `lead-bounced-${suffix}`,
+				contactId: contact.id,
+				campaignId: `campaign-bounced-${suffix}`,
+				campaignName: "Spring campaign",
+				status: 1,
+			},
+		});
+
+		await ingest.accept(
+			event(`bounced@${domain}`, {
+				event_type: "email_bounced",
+				campaign_id: `campaign-bounced-${suffix}`,
+			}),
+		);
+		await ingest.accept(
+			event(`unknown-bounce@${domain}`, { event_type: "email_bounced" }),
+		);
+
+		expect(
+			await db.instantlyCampaignLead.findUnique({
+				where: { leadId: `lead-bounced-${suffix}` },
+				select: { status: true },
+			}),
+		).toEqual({ status: -1 });
+		expect(
+			await db.activity.findMany({
+				where: { contactId: contact.id },
+				select: { type: true, subject: true },
+			}),
+		).toEqual([
+			{
+				type: "NOTE",
+				subject: 'Email bounced in "Spring campaign" on Instantly',
+			},
+		]);
+		expect(
+			await db.contact.count({ where: { email: `unknown-bounce@${domain}` } }),
+		).toBe(0);
+	});
+
 	it("ignores non-lead events", async () => {
 		await ingest.accept(
 			event(`ignored@${domain}`, { event_type: "campaign_completed" }),
