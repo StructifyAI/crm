@@ -205,10 +205,16 @@ Two rules follow for the serverless build:
   `reconcileAll`: a parked row whose account still refreshes goes back to `IDLE` with
   its cursor and resume intact, so a parked mailbox is never permanent while the grant
   is alive.
-- **Gmail is forward-only from a `historyId`, Outlook from a timestamp.** Graph has no
-  mailbox-wide delta, so the Outlook cursor is the last `receivedDateTime` seen,
-  re-read with a one-second overlap; `rfcMessageId` is unique, so the overlap costs a
-  duplicate fetch and never a duplicate row.
+- **Gmail backfills the last `GMAIL_BACKFILL.windowDays` on first sync, then follows a
+  `historyId`; Outlook follows a timestamp.** A Gmail row with no cursor pins the
+  profile `historyId` first, then walks `messages.list` one page per tick under a
+  `backfill:<historyId>:<beforeMs>:<pageToken>` cursor, and settles to the plain
+  `historyId` once the last page drains. Mail that lands during the backfill is picked
+  up by `history.list` from the pinned id. Setting an established row's `cursor` to
+  `NULL` re-runs the backfill; stored `gmailMessageId`s are skipped without a fetch.
+  Graph has no mailbox-wide delta, so the Outlook cursor is the last
+  `receivedDateTime` seen, re-read with a one-second overlap; `rfcMessageId` is unique,
+  so the overlap costs a duplicate fetch and never a duplicate row.
 - **Granola syncs meeting notes from `GET /v1/notes` through
   `GET /internal/sync/granola` every 15 minutes.** Set `GRANOLA_API_KEY` to enable
   it. Notes enrich matching Google Calendar meetings,
