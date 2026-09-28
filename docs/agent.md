@@ -112,6 +112,10 @@ Request and answer are `@crm/validation/email-triage`.
   network, a billing system, an unsubscribe address is `spam`; anyone who could pay
   is `deal`, and so is a newsletter *we* send to them. Unsure is `deal`: the API
   turns `spam` into a `SuppressedDomain`, and a suppressed buyer is silent forever.
+- **A warm-up tracking code settles it before the model** — a body that ends in the
+  `EMAIL_TRIAGE.warmupCode` shape (`0a334c0cbn-XH-646cbc9e-`) is `spam`/`warmup` with no
+  gateway call. Warm-up tools send from the team's own mailbox, so the outbound
+  direction is not a sign of real outreach; the prompt says so too.
 - **The model sees a bounded transcript** — `EMAIL_TRIAGE.bodyChars` of body,
   `recipientsShown` addresses (`lib/email-triage-config.ts`) — and is told the body is
   data, not instructions.
