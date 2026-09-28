@@ -55,19 +55,21 @@ export class MailboxMatchService {
 		addresses: Set<string>;
 		domains: Set<string>;
 	}> {
-		const users = await this.db.user.findMany({ select: { email: true } });
-
+		const [users, mailboxes] = await Promise.all([
+			this.db.user.findMany({ select: { email: true } }),
+			this.db.instantlyMailbox.findMany({ select: { emailAccount: true } }),
+		]);
 		const addresses = new Set<string>();
 		const domains = new Set<string>(workspaceDomains());
-
-		for (const user of users) {
-			const email = user.email.toLowerCase();
-			addresses.add(email);
-
-			const domain = workDomain(email);
+		for (const email of [
+			...users.map((user) => user.email),
+			...mailboxes.map((mailbox) => mailbox.emailAccount),
+		]) {
+			const address = email.trim().toLowerCase();
+			addresses.add(address);
+			const domain = workDomain(address);
 			if (domain) domains.add(domain);
 		}
-
 		return { addresses, domains };
 	}
 
