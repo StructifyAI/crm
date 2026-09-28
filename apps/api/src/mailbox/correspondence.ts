@@ -1,10 +1,23 @@
 import type { Prisma } from "@crm/db";
+import { parseStoredRecipients } from "@crm/validation/email-recipients";
 
 export type CorrespondenceSpan = {
 	messageCount: number;
 	firstMessageAt: Date;
 	lastMessageAt: Date;
 };
+
+export function addressedIn(
+	messages: { recipients: Prisma.JsonValue }[],
+): Set<string> {
+	const addressed = new Set<string>();
+	for (const message of messages) {
+		for (const recipient of parseStoredRecipients(message.recipients)) {
+			addressed.add(recipient.email.toLowerCase());
+		}
+	}
+	return addressed;
+}
 
 export async function correspondenceSpan(
 	tx: Prisma.TransactionClient,

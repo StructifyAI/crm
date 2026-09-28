@@ -10,7 +10,7 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
-import { correspondenceSpan } from "./correspondence";
+import { addressedIn, correspondenceSpan } from "./correspondence";
 import type { Deadline } from "./deadline";
 import { DealLinkService, type DealLinkTarget } from "./deal-link.service";
 import { EmailTriageService } from "./email-triage.service";
@@ -133,8 +133,18 @@ export class ThreadWriterService {
 			}
 		}
 
+		const addressed =
+			thread && !outbound
+				? addressedIn(
+						await this.db.emailMessage.findMany({
+							where: { threadId: thread.id },
+							select: { recipients: true },
+						}),
+					)
+				: undefined;
 		const correspondence =
-			outbound || (await this.match.corresponds(parsed.from, context));
+			outbound ||
+			(await this.match.corresponds(parsed.from, context, addressed));
 
 		let stored: { threadId: string; occurredAt: Date | null };
 
@@ -179,6 +189,31 @@ export class ThreadWriterService {
 							sentAt: parsed.sentAt,
 						},
 					});
+
+					if (correspondence) {
+						const addressedNow = parsed.recipients
+							.map((person) => person.email.toLowerCase())
+							.filter((email) => {
+								const domain = workDomain(email);
+								return (
+									!context.suppressedEmails.has(email) &&
+									!(domain && context.suppressedDomains.has(domain))
+								);
+							});
+						if (addressedNow.length > 0) {
+							await tx.emailMessage.updateMany({
+								where: {
+									threadId: record.id,
+									correspondence: false,
+									fromEmail: {
+										in: addressedNow,
+										mode: "insensitive",
+									},
+								},
+								data: { correspondence: true },
+							});
+						}
+					}
 				}
 
 				const span = await correspondenceSpan(tx, record.id);

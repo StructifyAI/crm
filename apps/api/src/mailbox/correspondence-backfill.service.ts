@@ -1,11 +1,11 @@
-import { type Db, EmailDirection } from "@crm/db";
+import { type Db, EmailDirection, type Prisma } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import {
 	ActivityStampService,
 	type StampTargets,
 } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
-import { correspondenceSpan } from "./correspondence";
+import { addressedIn, correspondenceSpan } from "./correspondence";
 import { deadlineIn, overdue } from "./deadline";
 import { MAILBOX_CORRESPONDENCE, SYNC_TICK } from "./mailbox-config";
 import {
@@ -26,6 +26,7 @@ type StoredMessage = {
 	direction: EmailDirection;
 	fromEmail: string;
 	fromName: string | null;
+	recipients: Prisma.JsonValue;
 	correspondence: boolean;
 };
 
@@ -43,7 +44,6 @@ export class CorrespondenceBackfillService {
 	async backfill(cursor: string | null): Promise<CorrespondenceBackfill> {
 		const deadline = deadlineIn(SYNC_TICK.budgetMs);
 		const context = await this.writer.context(deadline);
-		const verdicts = new Map<string, boolean>();
 
 		const page = await this.db.emailThread.findMany({
 			where: { id: cursor ? { lt: cursor } : undefined },
@@ -57,6 +57,7 @@ export class CorrespondenceBackfillService {
 						direction: true,
 						fromEmail: true,
 						fromName: true,
+						recipients: true,
 						correspondence: true,
 					},
 				},
@@ -78,7 +79,14 @@ export class CorrespondenceBackfillService {
 			last = thread.id;
 			examined += 1;
 
-			const changed = await this.reclassify(thread.messages, context, verdicts);
+			const addressed = addressedIn(thread.messages);
+			const verdicts = new Map<string, boolean>();
+			const changed = await this.reclassify(
+				thread.messages,
+				context,
+				addressed,
+				verdicts,
+			);
 			if (changed === 0) continue;
 
 			reclassified += changed;
@@ -109,6 +117,7 @@ export class CorrespondenceBackfillService {
 	private async reclassify(
 		messages: StoredMessage[],
 		context: MatchContext,
+		addressed: ReadonlySet<string>,
 		verdicts: Map<string, boolean>,
 	): Promise<number> {
 		const flips: { id: string; correspondence: boolean }[] = [];
@@ -116,7 +125,7 @@ export class CorrespondenceBackfillService {
 		for (const message of messages) {
 			const correspondence =
 				message.direction === EmailDirection.OUTBOUND ||
-				(await this.verdict(message, context, verdicts));
+				(await this.verdict(message, context, addressed, verdicts));
 			if (correspondence !== message.correspondence) {
 				flips.push({ id: message.id, correspondence });
 			}
@@ -139,6 +148,7 @@ export class CorrespondenceBackfillService {
 	private async verdict(
 		message: StoredMessage,
 		context: MatchContext,
+		addressed: ReadonlySet<string>,
 		verdicts: Map<string, boolean>,
 	): Promise<boolean> {
 		const key = message.fromEmail.toLowerCase();
@@ -148,6 +158,7 @@ export class CorrespondenceBackfillService {
 		const answer = await this.match.corresponds(
 			{ email: message.fromEmail, name: message.fromName },
 			context,
+			addressed,
 		);
 		verdicts.set(key, answer);
 		return answer;
