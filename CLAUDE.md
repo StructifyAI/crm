@@ -46,6 +46,11 @@ two commits that are submitted upstream and not yet released:
 - `feat: file every synced email on the open deal the agent says it belongs to` —
   agent route `/internal/crm/link-deal`; the API sets `Activity.dealId` only to an id it
   offered. Backfill: `GET /internal/sync/deal-links?cursor=…` with the cron secret.
+- `fix(api): keep reminders and other notices from moving thread and deal clocks` —
+  `EmailMessage.correspondence`; only mail from the mailbox, an internal address, a known
+  contact or a known company domain moves `lastMessageAt`, `occurredAt` and
+  `lastActivityAt`. Backfill: `GET /internal/sync/correspondence?cursor=…` with the cron
+  secret.
 - `feat: show the agent who each synced email was sent to when it files the thread on a
   deal` — `@crm/validation/email-recipients` parses stored recipients once for the
   conversation view and the deal-link request.

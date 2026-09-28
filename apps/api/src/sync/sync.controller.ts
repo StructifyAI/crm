@@ -26,9 +26,10 @@ import { ExtrovertEngagementSyncService } from "../extrovert/extrovert-engagemen
 import { ExtrovertSyncService } from "../extrovert/extrovert-sync.service";
 import { InstantlyEmailSyncService } from "../instantly/instantly-email-sync.service";
 import { InstantlySyncService } from "../instantly/instantly-sync.service";
+import { CorrespondenceBackfillService } from "../mailbox/correspondence-backfill.service";
 import { DealLinkService } from "../mailbox/deal-link.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
-import { dealLinkBackfillCursor } from "./sync.contracts";
+import { backfillCursor } from "./sync.contracts";
 
 @ApiTags("Internal — Cron")
 @ApiHeader({
@@ -50,6 +51,7 @@ export class SyncController {
 		private readonly extrovert: ExtrovertSyncService,
 		private readonly extrovertEngagement: ExtrovertEngagementSyncService,
 		private readonly dealLinks: DealLinkService,
+		private readonly correspondence: CorrespondenceBackfillService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -185,6 +187,38 @@ export class SyncController {
 		return this.runDealLinks(authorization, cursor);
 	}
 
+	@Get("correspondence")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary:
+			"Backfill one page of stored email threads: mark notices as non-correspondence and restamp",
+	})
+	@ApiQuery({
+		name: "cursor",
+		required: false,
+		description: "The `next` value from the previous page; omit to start over.",
+	})
+	@ApiOkResponse({
+		description:
+			"`examined`, `reclassified`, `restamped` and `next`; call again with `next` until it is null.",
+	})
+	async correspondenceViaGet(
+		@Headers("authorization") authorization?: string,
+		@Query("cursor") cursor?: string,
+	) {
+		return this.runCorrespondence(authorization, cursor);
+	}
+
+	@Post("correspondence")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async correspondenceViaPost(
+		@Headers("authorization") authorization?: string,
+		@Query("cursor") cursor?: string,
+	) {
+		return this.runCorrespondence(authorization, cursor);
+	}
+
 	private async run(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.sync.runDue();
@@ -212,11 +246,20 @@ export class SyncController {
 
 	private async runDealLinks(authorization?: string, cursor?: string) {
 		this.assertSecret(authorization);
-		const parsed = dealLinkBackfillCursor.safeParse(cursor);
+		return this.dealLinks.backfill(this.parseCursor(cursor));
+	}
+
+	private async runCorrespondence(authorization?: string, cursor?: string) {
+		this.assertSecret(authorization);
+		return this.correspondence.backfill(this.parseCursor(cursor));
+	}
+
+	private parseCursor(cursor?: string): string | null {
+		const parsed = backfillCursor.safeParse(cursor);
 		if (!parsed.success) {
 			throw new BadRequestException("cursor must be a short non-empty string.");
 		}
-		return this.dealLinks.backfill(parsed.data ?? null);
+		return parsed.data ?? null;
 	}
 
 	private assertSecret(authorization?: string) {

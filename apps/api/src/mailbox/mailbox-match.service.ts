@@ -55,19 +55,21 @@ export class MailboxMatchService {
 		addresses: Set<string>;
 		domains: Set<string>;
 	}> {
-		const users = await this.db.user.findMany({ select: { email: true } });
-
+		const [users, mailboxes] = await Promise.all([
+			this.db.user.findMany({ select: { email: true } }),
+			this.db.instantlyMailbox.findMany({ select: { emailAccount: true } }),
+		]);
 		const addresses = new Set<string>();
 		const domains = new Set<string>(workspaceDomains());
-
-		for (const user of users) {
-			const email = user.email.toLowerCase();
-			addresses.add(email);
-
-			const domain = workDomain(email);
+		for (const email of [
+			...users.map((user) => user.email),
+			...mailboxes.map((mailbox) => mailbox.emailAccount),
+		]) {
+			const address = email.trim().toLowerCase();
+			addresses.add(address);
+			const domain = workDomain(address);
 			if (domain) domains.add(domain);
 		}
-
 		return { addresses, domains };
 	}
 
@@ -101,6 +103,33 @@ export class MailboxMatchService {
 			message: "Domain suppressed by inbox triage",
 			domain,
 		});
+	}
+
+	async corresponds(
+		person: Participant,
+		context: MatchContext,
+	): Promise<boolean> {
+		const email = person.email.toLowerCase();
+		const domain = workDomain(email);
+
+		if (context.ourAddresses.has(email)) return true;
+		if (domain && context.ourDomains.has(domain)) return true;
+		if (context.suppressedEmails.has(email)) return false;
+		if (domain && context.suppressedDomains.has(domain)) return false;
+
+		const contact = await this.db.contact.findFirst({
+			where: { email },
+			select: { id: true },
+		});
+		if (contact) return true;
+		if (!domain) return false;
+
+		const company = await this.db.company.findFirst({
+			where: { domain },
+			select: { id: true },
+		});
+
+		return company !== null;
 	}
 
 	async resolve(

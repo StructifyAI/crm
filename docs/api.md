@@ -247,6 +247,23 @@ Two rules follow for the serverless build:
   it offered, so a closed deal is never linked, and it never overwrites a `dealId` a
   rep already set. No candidate, no call: a thread with no open deal costs nothing.
   The call shares the tick `Deadline`, so a slow model cannot stall the mailbox sync.
+- **Only correspondence moves the clocks.** `ThreadWriterService` stores every message
+  on a thread it already files, but sets `EmailMessage.correspondence` from the sender:
+  the synced mailbox, an Instantly mailbox account, any internal address or domain, a known contact's email, or a
+  known company's domain is correspondence; anything else (a Superhuman reminder, a
+  calendar bot, a stranger) is a notice. A notice still counts in `messageCount` and
+  shows in the conversation, but `firstMessageAt`, `lastMessageAt`, the `EMAIL`
+  activity's `occurredAt`, the `lastActivityAt` stamps, and deal linking come only
+  from correspondence (`correspondenceSpan`). The agent readers filter on
+  `correspondence: true` so a reminder never reads as a reply.
+  `GET /internal/sync/correspondence` (`Bearer <CRON_SECRET>`) runs
+  `CorrespondenceBackfillService.backfill` over one page of threads, newest first,
+  `MAILBOX_CORRESPONDENCE.backfillPage` at a time: it reclassifies stored messages
+  with the same rule, rewrites the thread span and activity `occurredAt` where a flag
+  flipped, and recomputes the touched company, contact and deal stamps. It returns
+  `{ examined, reclassified, restamped, next }`; call again with `?cursor=<next>` until
+  `next` is null. A rerun flips nothing and is idempotent. Adding the sender as a
+  contact and rerunning promotes their old messages to correspondence.
 - **Emails stored before that shipped are backfilled by hand.**
   `GET /internal/sync/deal-links` (`Bearer <CRON_SECRET>`) runs `DealLinkService.backfill`
   over one page of `EMAIL` activities with no `dealId` whose company or contact has an

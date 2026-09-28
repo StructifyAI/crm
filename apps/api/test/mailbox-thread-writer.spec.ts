@@ -21,6 +21,9 @@ const mailbox = `rep-${suffix}@example.test`;
 const person = `buyer@${domain}`;
 const rootId = `<root-${suffix}@mail.test>`;
 const movedRoot = `outlook-conversation:${suffix}`;
+const reminder = `reminder@superhuman-${suffix}.test`;
+const instantlyMailbox = "ronak@getstructify.org";
+const instantlySender = "taichi@getstructify.org";
 
 const agent = {
 	contactCreated: async () => true,
@@ -47,12 +50,17 @@ const threads = new ThreadWriterService(db, match, stamp, triage, dealLink);
 
 let row: MailboxSync;
 
-function message(id: string, sentAt: Date, root = rootId): IncomingMessage {
+function message(
+	id: string,
+	sentAt: Date,
+	root = rootId,
+	from = { email: mailbox, name: "Test Rep" },
+): IncomingMessage {
 	return {
 		rfcMessageId: id,
 		rootId: root,
 		subject: "Pricing",
-		from: { email: mailbox, name: "Test Rep" },
+		from,
 		recipients: [{ email: person, name: "A Buyer", kind: "to" }],
 		body: "The numbers you asked for.",
 		transcript: "The numbers you asked for.",
@@ -69,6 +77,9 @@ async function clean() {
 	});
 	await db.contact.deleteMany({ where: { email: person } });
 	await db.company.deleteMany({ where: { domain } });
+	await db.instantlyMailbox.deleteMany({
+		where: { emailAccount: instantlyMailbox },
+	});
 	await db.mailboxSync.deleteMany({ where: { userId } });
 	await db.user.deleteMany({ where: { id: userId } });
 }
@@ -246,5 +257,114 @@ describe("storing a synced email", () => {
 
 		expect(repaired?.messageCount).toBe(2);
 		expect(repaired?.activity).not.toBeNull();
+	});
+
+	it("stores a reminder from an unknown sender without moving the thread or activity clocks", async () => {
+		const before = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: {
+				lastMessageAt: true,
+				activity: { select: { occurredAt: true } },
+			},
+		});
+
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<reminder-${suffix}@mail.test>`,
+				new Date("2026-01-20T09:00:00Z"),
+				rootId,
+				{ email: reminder, name: "Superhuman" },
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		expect(stored).toBe(true);
+
+		const notice = await db.emailMessage.findUniqueOrThrow({
+			where: { rfcMessageId: `<reminder-${suffix}@mail.test>` },
+			select: { correspondence: true, direction: true },
+		});
+		expect(notice.correspondence).toBe(false);
+		expect(notice.direction).toBe("INBOUND");
+
+		const after = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: {
+				messageCount: true,
+				lastMessageAt: true,
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(after.messageCount).toBe(3);
+		expect(after.lastMessageAt).toEqual(before.lastMessageAt);
+		expect(after.activity?.occurredAt).toEqual(before.activity?.occurredAt);
+	});
+
+	it("moves the clocks for a reply from a known contact", async () => {
+		const sentAt = new Date("2026-01-21T09:00:00Z");
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(`<reply-${suffix}@mail.test>`, sentAt, rootId, {
+				email: person,
+				name: "A Buyer",
+			}),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		expect(stored).toBe(true);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: {
+				messageCount: true,
+				lastMessageAt: true,
+				messages: {
+					where: { rfcMessageId: `<reply-${suffix}@mail.test>` },
+					select: { correspondence: true },
+				},
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(thread.messages[0]?.correspondence).toBe(true);
+		expect(thread.messageCount).toBe(4);
+		expect(thread.lastMessageAt).toEqual(sentAt);
+		expect(thread.activity?.occurredAt).toEqual(sentAt);
+	});
+
+	it("treats an Instantly mailbox domain as internal correspondence", async () => {
+		await db.instantlyMailbox.create({
+			data: { emailAccount: instantlyMailbox },
+		});
+		const sentAt = new Date("2026-01-22T09:00:00Z");
+
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(`<instantly-${suffix}@mail.test>`, sentAt, rootId, {
+				email: instantlySender,
+				name: "Taichi",
+			}),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		expect(stored).toBe(true);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: {
+				lastMessageAt: true,
+				messages: {
+					where: { rfcMessageId: `<instantly-${suffix}@mail.test>` },
+					select: { correspondence: true },
+				},
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(thread.messages[0]?.correspondence).toBe(true);
+		expect(thread.lastMessageAt).toEqual(sentAt);
+		expect(thread.activity?.occurredAt).toEqual(sentAt);
 	});
 });

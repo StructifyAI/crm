@@ -1250,14 +1250,15 @@ model EmailMessage {
   outlookMessageId String?
   outlookWebLink   String?
 
-  direction  EmailDirection
-  fromEmail  String
-  fromName   String?
-  recipients Json
-  subject    String?
-  snippet    String?
-  body       String?
-  sentAt     DateTime
+  direction      EmailDirection
+  correspondence Boolean        @default(true)
+  fromEmail      String
+  fromName       String?
+  recipients     Json
+  subject        String?
+  snippet        String?
+  body           String?
+  sentAt         DateTime
 
   createdAt DateTime @default(now())
 

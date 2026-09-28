@@ -220,6 +220,7 @@ export class DealLinkService {
 			select: {
 				subject: true,
 				messages: {
+					where: { correspondence: true },
 					orderBy: { sentAt: "desc" },
 					take: MAILBOX_DEAL_LINK.messagesShown,
 					select: {

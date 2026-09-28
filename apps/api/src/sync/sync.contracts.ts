@@ -1,8 +1,3 @@
 import { z } from "zod";
 
-export const dealLinkBackfillCursor = z
-	.string()
-	.trim()
-	.min(1)
-	.max(64)
-	.optional();
+export const backfillCursor = z.string().trim().min(1).max(64).optional();

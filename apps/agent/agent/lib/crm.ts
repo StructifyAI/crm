@@ -211,6 +211,7 @@ export async function readCrmHistory(
 						messageCount: true,
 						lastMessageAt: true,
 						messages: {
+							where: { correspondence: true },
 							orderBy: { sentAt: "desc" },
 							take: options.messagesPerThread ?? 6,
 							select: {
