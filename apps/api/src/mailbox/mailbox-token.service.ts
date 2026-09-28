@@ -13,6 +13,7 @@ import {
 	SCOPE_FOR_SOURCE,
 	type SyncSource,
 } from "./mailbox.constants";
+import { MAILBOX_TOKEN } from "./mailbox-config";
 
 export type TokenFailure =
 	| { outcome: "needs-reconnect"; reason: string }
@@ -80,8 +81,52 @@ export class MailboxTokenService {
 			};
 		}
 
+		let current: { accessToken?: string; accessTokenExpiresAt?: Date };
 		try {
-			const { accessToken } = await auth.api.getAccessToken({
+			current = await auth.api.getAccessToken({
+				body: { providerId, userId },
+			});
+		} catch (error) {
+			return this.refreshFailed(
+				userId,
+				source,
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+
+		if (!current.accessToken) {
+			return {
+				outcome: "needs-reconnect",
+				reason: `${label(providerId)} returned no access token.`,
+			};
+		}
+
+		if (outlivesSync(current.accessTokenExpiresAt)) {
+			return { outcome: "ok", accessToken: current.accessToken };
+		}
+
+		return this.renew(userId, source);
+	}
+
+	async refresh(userId: string, source: SyncSource): Promise<TokenResult> {
+		if (!(await this.isConnected(userId, source))) {
+			return {
+				outcome: "not-connected",
+				reason: `The ${source} scope has not been granted.`,
+			};
+		}
+
+		return this.renew(userId, source);
+	}
+
+	private async renew(
+		userId: string,
+		source: SyncSource,
+	): Promise<TokenResult> {
+		const providerId = PROVIDER_FOR_SOURCE[source];
+
+		try {
+			const { accessToken } = await auth.api.refreshToken({
 				body: { providerId, userId },
 			});
 
@@ -94,19 +139,33 @@ export class MailboxTokenService {
 
 			return { outcome: "ok", accessToken };
 		} catch (error) {
-			this.logger.warn({
-				message: "Mailbox token refresh failed",
+			return this.refreshFailed(
 				userId,
-				providerId,
 				source,
-				reason: error instanceof Error ? error.message : String(error),
-			});
-
-			return {
-				outcome: "needs-reconnect",
-				reason: `${label(providerId)} would not refresh the access token.`,
-			};
+				error instanceof Error ? error.message : String(error),
+			);
 		}
+	}
+
+	private refreshFailed(
+		userId: string,
+		source: SyncSource,
+		reason: string,
+	): TokenFailure {
+		const providerId = PROVIDER_FOR_SOURCE[source];
+
+		this.logger.warn({
+			message: "Mailbox token refresh failed",
+			userId,
+			providerId,
+			source,
+			reason,
+		});
+
+		return {
+			outcome: "needs-reconnect",
+			reason: `${label(providerId)} would not refresh the access token.`,
+		};
 	}
 
 	async revoke(
@@ -162,6 +221,11 @@ export class MailboxTokenService {
 
 		return false;
 	}
+}
+
+function outlivesSync(expiresAt: Date | undefined): boolean {
+	if (!expiresAt) return true;
+	return expiresAt.getTime() - Date.now() >= MAILBOX_TOKEN.minLifetimeMs;
 }
 
 function label(providerId: MailboxProviderId): string {

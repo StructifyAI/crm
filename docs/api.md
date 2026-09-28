@@ -193,6 +193,18 @@ Two rules follow for the serverless build:
   page token it stopped at; Gmail and Outlook stop between messages and leave the
   cursor where it was. A paused run is `synced`, never `failed`, and `due` orders by
   `lastSyncedAt`, so the row that gave up its turn goes first next tick.
+- **A `401` is not proof the user revoked access.** `better-auth` refreshes an access
+  token only in its last five seconds, and a calendar pass runs on one token for up to
+  35 seconds, so a token that was valid at the start of a tick expires halfway through
+  and Google answers `401`. `MailboxTokenService.accessTokenFor` renews a token that
+  cannot outlive `MAILBOX_TOKEN.minLifetimeMs`, and `TokenSession`
+  (`mailbox/token-session.ts`) retries the one request that got `401` once with a
+  freshly refreshed token, keeping the same page token or message id. Only a `401`
+  that survives the retry, or a refresh that fails, parks the row `NEEDS_RECONNECT`.
+  `restoreParkedRows` (`mailbox/reconnect.ts`) runs from `onConnected` and
+  `reconcileAll`: a parked row whose account still refreshes goes back to `IDLE` with
+  its cursor and resume intact, so a parked mailbox is never permanent while the grant
+  is alive.
 - **Gmail is forward-only from a `historyId`, Outlook from a timestamp.** Graph has no
   mailbox-wide delta, so the Outlook cursor is the last `receivedDateTime` seen,
   re-read with a one-second overlap; `rfcMessageId` is unique, so the overlap costs a

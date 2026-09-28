@@ -17,6 +17,7 @@ import {
 	type IncomingMessage,
 	ThreadWriterService,
 } from "../mailbox/thread-writer.service";
+import { TokenSession } from "../mailbox/token-session";
 import { GmailClient, type GmailMessage } from "./gmail.client";
 import {
 	type GmailHeader,
@@ -72,7 +73,15 @@ export class GmailSyncService {
 
 		await this.state.markRunning(row.id);
 
-		const profile = await this.gmail.profile(token.accessToken);
+		const session = new TokenSession(
+			this.tokens,
+			row.userId,
+			"gmail",
+			token.accessToken,
+		);
+		const profile = await session.call((accessToken) =>
+			this.gmail.profile(accessToken),
+		);
 		if (profile.outcome !== "ok") {
 			return this.handleFailure(row, profile);
 		}
@@ -92,13 +101,7 @@ export class GmailSyncService {
 			return this.start(row, profile.data.historyId ?? null);
 		}
 
-		return this.incremental(
-			row,
-			token.accessToken,
-			mailbox,
-			row.cursor,
-			deadline,
-		);
+		return this.incremental(row, session, mailbox, row.cursor, deadline);
 	}
 
 	private async start(
@@ -130,14 +133,14 @@ export class GmailSyncService {
 
 	private async incremental(
 		row: MailboxSync,
-		accessToken: string,
+		session: TokenSession,
 		mailbox: string,
 		startHistoryId: string,
 		deadline: Deadline,
 	): Promise<GmailSyncOutcome> {
-		const history = await this.gmail.listHistory(accessToken, {
-			startHistoryId,
-		});
+		const history = await session.call((accessToken) =>
+			this.gmail.listHistory(accessToken, { startHistoryId }),
+		);
 
 		if (history.outcome === "cursor-invalid") {
 			await this.state.clearCursor(row.id, history.reason);
@@ -161,13 +164,20 @@ export class GmailSyncService {
 			}
 		}
 
-		const { written, remaining } = await this.ingest(
+		const { written, remaining, unauthorized } = await this.ingest(
 			row,
-			accessToken,
+			session,
 			mailbox,
 			[...ids],
 			deadline,
 		);
+
+		if (unauthorized) {
+			return this.handleFailure(row, {
+				outcome: "unauthorized",
+				reason: unauthorized,
+			});
+		}
 
 		await this.state.settle(row.id, {
 			cursor:
@@ -196,11 +206,11 @@ export class GmailSyncService {
 
 	private async ingest(
 		row: MailboxSync,
-		accessToken: string,
+		session: TokenSession,
 		mailbox: string,
 		ids: readonly string[],
 		deadline: Deadline,
-	): Promise<{ written: number; remaining: number }> {
+	): Promise<{ written: number; remaining: number; unauthorized?: string }> {
 		if (ids.length === 0) return { written: 0, remaining: 0 };
 
 		const alreadyHave = await this.db.emailMessage.findMany({
@@ -227,7 +237,12 @@ export class GmailSyncService {
 				break;
 			}
 
-			const message = await this.gmail.getMessage(accessToken, id);
+			const message = await session.call((accessToken) =>
+				this.gmail.getMessage(accessToken, id),
+			);
+			if (message.outcome === "unauthorized") {
+				return { written, remaining, unauthorized: message.reason };
+			}
 			if (message.outcome !== "ok") continue;
 
 			const parsed = this.parse(message.data);

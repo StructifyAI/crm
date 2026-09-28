@@ -4,6 +4,7 @@ import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
+import { restoreParkedRows } from "../mailbox/reconnect";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import {
 	MICROSOFT_PROVIDER_ID,
@@ -94,6 +95,20 @@ export class MicrosoftConnectionService {
 				message: "Microsoft connected",
 				userId,
 				sources: added,
+			});
+		}
+
+		const restored = await restoreParkedRows(
+			{ tokens: this.tokens, state: this.state },
+			userId,
+			existing,
+		);
+
+		if (restored.length > 0) {
+			this.logger.log({
+				message: "Microsoft reconnected; sync resumes",
+				userId,
+				sources: restored,
 			});
 		}
 	}

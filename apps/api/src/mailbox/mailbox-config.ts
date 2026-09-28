@@ -4,6 +4,10 @@ export const SYNC_TICK = {
 	budgetMs: 35 * SECOND_MS,
 } as const;
 
+export const MAILBOX_TOKEN = {
+	minLifetimeMs: 2 * SYNC_TICK.budgetMs,
+} as const;
+
 export const MAILBOX_TRIAGE = {
 	timeoutMs: 30 * SECOND_MS,
 	reasonChars: 200,
