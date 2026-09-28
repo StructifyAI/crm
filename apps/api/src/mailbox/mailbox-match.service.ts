@@ -108,6 +108,7 @@ export class MailboxMatchService {
 	async corresponds(
 		person: Participant,
 		context: MatchContext,
+		addressed?: ReadonlySet<string>,
 	): Promise<boolean> {
 		const email = person.email.toLowerCase();
 		const domain = workDomain(email);
@@ -116,6 +117,7 @@ export class MailboxMatchService {
 		if (domain && context.ourDomains.has(domain)) return true;
 		if (context.suppressedEmails.has(email)) return false;
 		if (domain && context.suppressedDomains.has(domain)) return false;
+		if (addressed?.has(email)) return true;
 
 		const contact = await this.db.contact.findFirst({
 			where: { email },

@@ -250,7 +250,7 @@ Two rules follow for the serverless build:
 - **Only correspondence moves the clocks.** `ThreadWriterService` stores every message
   on a thread it already files, but sets `EmailMessage.correspondence` from the sender:
   the synced mailbox, an Instantly mailbox account, any internal address or domain, a known contact's email, or a
-  known company's domain is correspondence; anything else (a Superhuman reminder, a
+  known company's domain, or an address that another message on the thread was sent to is correspondence; anything else (a Superhuman reminder, a
   calendar bot, a stranger) is a notice. A notice still counts in `messageCount` and
   shows in the conversation, but `firstMessageAt`, `lastMessageAt`, the `EMAIL`
   activity's `occurredAt`, the `lastActivityAt` stamps, and deal linking come only

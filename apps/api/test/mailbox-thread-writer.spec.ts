@@ -21,7 +21,10 @@ const mailbox = `rep-${suffix}@example.test`;
 const person = `buyer@${domain}`;
 const rootId = `<root-${suffix}@mail.test>`;
 const movedRoot = `outlook-conversation:${suffix}`;
+const addressedRoot = `<addressed-${suffix}@mail.test>`;
+const promotionRoot = `<promotion-${suffix}@mail.test>`;
 const reminder = `reminder@superhuman-${suffix}.test`;
+const stranger = "stranger@unknown-co.com";
 const instantlyMailbox = "ronak@getstructify.org";
 const instantlySender = "taichi@getstructify.org";
 
@@ -55,13 +58,14 @@ function message(
 	sentAt: Date,
 	root = rootId,
 	from = { email: mailbox, name: "Test Rep" },
+	recipients = [{ email: person, name: "A Buyer", kind: "to" as const }],
 ): IncomingMessage {
 	return {
 		rfcMessageId: id,
 		rootId: root,
 		subject: "Pricing",
 		from,
-		recipients: [{ email: person, name: "A Buyer", kind: "to" }],
+		recipients,
 		body: "The numbers you asked for.",
 		transcript: "The numbers you asked for.",
 		sentAt,
@@ -73,7 +77,11 @@ function message(
 
 async function clean() {
 	await db.emailThread.deleteMany({
-		where: { rootMessageId: { in: [rootId, movedRoot] } },
+		where: {
+			rootMessageId: {
+				in: [rootId, movedRoot, addressedRoot, promotionRoot],
+			},
+		},
 	});
 	await db.contact.deleteMany({ where: { email: person } });
 	await db.company.deleteMany({ where: { domain } });
@@ -364,6 +372,145 @@ describe("storing a synced email", () => {
 			},
 		});
 		expect(thread.messages[0]?.correspondence).toBe(true);
+		expect(thread.lastMessageAt).toEqual(sentAt);
+		expect(thread.activity?.occurredAt).toEqual(sentAt);
+	});
+
+	it("treats an inbound reply to an outbound participant as correspondence", async () => {
+		const company = await db.company.findUniqueOrThrow({
+			where: { domain },
+			select: { id: true },
+		});
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: person },
+			select: { id: true },
+		});
+		await db.emailThread.create({
+			data: {
+				rootMessageId: addressedRoot,
+				subject: "Pricing",
+				companyId: company.id,
+				contactId: contact.id,
+				firstMessageAt: new Date("2026-02-01T09:00:00Z"),
+				lastMessageAt: new Date("2026-02-01T09:00:00Z"),
+			},
+		});
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<addressed-outbound-${suffix}@mail.test>`,
+				new Date("2026-02-01T09:00:00Z"),
+				addressedRoot,
+				{ email: mailbox, name: "Test Rep" },
+				[{ email: stranger, name: "Stranger", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+		const sentAt = new Date("2026-02-01T10:00:00Z");
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<addressed-inbound-${suffix}@mail.test>`,
+				sentAt,
+				addressedRoot,
+				{ email: stranger, name: "Stranger" },
+				[{ email: mailbox, name: "Test Rep", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: addressedRoot },
+			select: {
+				lastMessageAt: true,
+				messages: {
+					where: { rfcMessageId: `<addressed-inbound-${suffix}@mail.test>` },
+					select: { correspondence: true },
+				},
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(thread.messages[0]?.correspondence).toBe(true);
+		expect(thread.lastMessageAt).toEqual(sentAt);
+		expect(thread.activity?.occurredAt).toEqual(sentAt);
+	});
+
+	it("promotes an earlier notice when a known contact addresses its sender", async () => {
+		const company = await db.company.findUniqueOrThrow({
+			where: { domain },
+			select: { id: true },
+		});
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: person },
+			select: { id: true },
+		});
+		const initialAt = new Date("2026-02-02T09:00:00Z");
+		await db.emailThread.create({
+			data: {
+				rootMessageId: promotionRoot,
+				subject: "Pricing",
+				companyId: company.id,
+				contactId: contact.id,
+				firstMessageAt: initialAt,
+				lastMessageAt: initialAt,
+			},
+		});
+
+		const noticeAt = new Date("2026-02-02T10:00:00Z");
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<promotion-notice-${suffix}@mail.test>`,
+				noticeAt,
+				promotionRoot,
+				{ email: stranger, name: "Stranger" },
+				[{ email: mailbox, name: "Test Rep", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const before = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: promotionRoot },
+			select: { lastMessageAt: true, activity: { select: { id: true } } },
+		});
+		expect(before.lastMessageAt).toEqual(initialAt);
+		expect(before.activity).toBeNull();
+
+		const sentAt = new Date("2026-02-02T11:00:00Z");
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<promotion-reply-${suffix}@mail.test>`,
+				sentAt,
+				promotionRoot,
+				{ email: person, name: "A Buyer" },
+				[{ email: stranger, name: "Stranger", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: promotionRoot },
+			select: {
+				firstMessageAt: true,
+				lastMessageAt: true,
+				messages: {
+					orderBy: { sentAt: "asc" },
+					select: { fromEmail: true, correspondence: true },
+				},
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(thread.messages).toEqual([
+			{ fromEmail: stranger, correspondence: true },
+			{ fromEmail: person, correspondence: true },
+		]);
+		expect(thread.firstMessageAt).toEqual(noticeAt);
 		expect(thread.lastMessageAt).toEqual(sentAt);
 		expect(thread.activity?.occurredAt).toEqual(sentAt);
 	});
