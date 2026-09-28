@@ -492,7 +492,7 @@ describe("Instantly email polling", () => {
 			from: string,
 			at: string,
 			text: string,
-			extra: Record<string, number> = {},
+			extra: { is_auto_reply?: number; lead?: string } = {},
 		) => ({
 			id,
 			timestamp_created: at,
@@ -538,6 +538,25 @@ describe("Instantly email polling", () => {
 							"2026-09-25T17:30:00.000Z",
 							"Sounds good.\n\nOn Thu, Sep 25, 2026 alex wrote:\n> Talk soon?",
 						),
+						received(
+							`reply-reminder-${suffix}`,
+							`reminder@tool-${suffix}.test`,
+							"2026-09-25T18:00:00.000Z",
+							"Reminder: follow up.",
+						),
+						received(
+							`reply-colleague-${suffix}`,
+							`colleague@${domain}`,
+							"2026-09-25T18:30:00.000Z",
+							"Looping in from Replier.",
+						),
+						received(
+							`reply-stranger-${suffix}`,
+							`stranger@elsewhere-${suffix}.test`,
+							"2026-09-25T19:00:00.000Z",
+							"Newsletter.",
+							{ lead: mailbox },
+						),
 					],
 					cursor: null,
 				},
@@ -557,8 +576,8 @@ describe("Instantly email polling", () => {
 		expect(await sync.run()).toEqual({
 			emails: 0,
 			filed: 0,
-			replies: 4,
-			repliesFiled: 1,
+			replies: 7,
+			repliesFiled: 2,
 			complete: true,
 			error: null,
 		});
@@ -598,16 +617,32 @@ describe("Instantly email polling", () => {
 		).toEqual({ replyCount: 2 });
 		expect(
 			await db.contact.count({
-				where: { email: `${mappedOwnerId}@example.test` },
+				where: {
+					email: {
+						in: [
+							`${mappedOwnerId}@example.test`,
+							`reminder@tool-${suffix}.test`,
+							`stranger@elsewhere-${suffix}.test`,
+						],
+					},
+				},
 			}),
 		).toBe(0);
+		expect(
+			await db.activity.findMany({
+				where: { contact: { email: `colleague@${domain}` } },
+				select: { type: true, body: true, dealId: true },
+			}),
+		).toEqual([
+			{ type: "EMAIL", body: "Looping in from Replier.", dealId: deal.id },
+		]);
 		expect(
 			await db.appSetting.findUnique({
 				where: { id: SETTINGS_ID },
 				select: { instantlyReplyCursor: true },
 			}),
 		).toEqual({
-			instantlyReplyCursor: new Date("2026-09-25T17:30:00.000Z"),
+			instantlyReplyCursor: new Date("2026-09-25T19:00:00.000Z"),
 		});
 	});
 

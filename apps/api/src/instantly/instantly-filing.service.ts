@@ -66,6 +66,7 @@ export type InstantlyReply = {
 	subject: string | null;
 	text: string;
 	occurredAt: Date;
+	createContact: boolean;
 };
 
 export type FilingOutcome = "filed" | "duplicate" | "skipped";
@@ -249,13 +250,15 @@ export class InstantlyFilingService {
 	}
 
 	async fileReply(reply: InstantlyReply): Promise<FilingOutcome> {
-		const resolved = await this.resolveContact({
-			email: reply.leadEmail,
-			firstName: reply.firstName,
-			lastName: reply.lastName,
-			mailbox: reply.mailbox,
-			reason: "Replied to an Instantly campaign",
-		});
+		const resolved = reply.createContact
+			? await this.resolveContact({
+					email: reply.leadEmail,
+					firstName: reply.firstName,
+					lastName: reply.lastName,
+					mailbox: reply.mailbox,
+					reason: "Replied to an Instantly campaign",
+				})
+			: await this.existingContact(reply.leadEmail);
 		if (!resolved) return "skipped";
 
 		const campaign = `"${reply.campaignName ?? "campaign"}"`;
@@ -407,6 +410,7 @@ export function replyFromEvent(
 		subject: event.reply_subject ?? null,
 		text: event.reply_text ?? event.reply_text_snippet ?? "",
 		occurredAt: new Date(event.timestamp),
+		createContact: true,
 	};
 }
 

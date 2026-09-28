@@ -247,6 +247,19 @@ export function sendFromEmail(
 	};
 }
 
+function isInternal(
+	address: string,
+	mailbox: string | null,
+	internal: InternalIdentity,
+): boolean {
+	const domain = workDomain(address);
+	return (
+		address === mailbox ||
+		internal.addresses.has(address) ||
+		(domain !== null && internal.domains.has(domain))
+	);
+}
+
 export function replyFromEmail(
 	email: InstantlyEmail,
 	campaigns: Map<string, string>,
@@ -255,14 +268,13 @@ export function replyFromEmail(
 	const from = email.from_address_email?.trim().toLowerCase();
 	if (!from || email.is_auto_reply) return null;
 	const mailbox = email.eaccount?.trim().toLowerCase() ?? null;
-	const domain = workDomain(from);
-	if (
-		from === mailbox ||
-		internal.addresses.has(from) ||
-		(domain !== null && internal.domains.has(domain))
-	) {
-		return null;
-	}
+	if (isInternal(from, mailbox, internal)) return null;
+	const lead = email.lead?.trim().toLowerCase() || null;
+	const externalLead =
+		lead !== null && !isInternal(lead, mailbox, internal) ? lead : null;
+	const fromLead =
+		externalLead !== null &&
+		(from === externalLead || workDomain(from) === workDomain(externalLead));
 	return {
 		leadEmail: from,
 		firstName: null,
@@ -278,5 +290,6 @@ export function replyFromEmail(
 		subject: email.subject ?? null,
 		text: bodyText(email),
 		occurredAt: new Date(email.timestamp_email),
+		createContact: fromLead,
 	};
 }

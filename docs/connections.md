@@ -248,9 +248,14 @@ unsubscribed (the status line turns to a warning) and files a `NOTE` on the same
 A `reply_received` webhook files the reply as an `EMAIL` activity on the same records,
 stamped with the webhook timestamp, with the quoted history stripped from the body.
 After the sent walk finishes, the same tick polls `GET /api/v2/emails?email_type=received`
-from `AppSetting.instantlyReplyCursor` and files every reply the same way. A received
-email whose sender is a workspace user, a mapped Instantly mailbox, a workspace domain, or
-an auto-reply is skipped. The API knows the email `id`; the webhook knows only the Unibox
+from `AppSetting.instantlyReplyCursor` and files every reply the same way. Instantly
+exposes the whole inbox of a connected mailbox here, not only campaign replies, so the
+walk is selective. A received email whose sender is a workspace user, a mapped Instantly
+mailbox, a workspace domain, or an auto-reply is skipped. When the row's `lead` is an
+external address and the sender is that lead or shares its domain, the reply files and
+creates the contact when missing. Any other sender files only when the contact already
+exists in the CRM; a reminder tool, a calendar notice, or a newsletter that lands in the
+mailbox creates nothing. The API knows the email `id`; the webhook knows only the Unibox
 thread, so a reply is a duplicate when the `id` matches, or when the thread matches and
 the timestamps fall within `INSTANTLY.emails.replyMatchWindowMs`. Each filed reply adds
 one to the campaign lead's `replyCount`.
