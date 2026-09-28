@@ -22,6 +22,7 @@ import {
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import { isMachineAddress, type Participant } from "../mailbox/participants";
 import { SyncStateService } from "../mailbox/sync-state.service";
+import { TokenSession } from "../mailbox/token-session";
 import {
 	CalendarClient,
 	conferenceUrl,
@@ -77,6 +78,12 @@ export class CalendarSyncService {
 
 		await this.state.markRunning(row.id);
 
+		const session = new TokenSession(
+			this.tokens,
+			row.userId,
+			"calendar",
+			token.accessToken,
+		);
 		const resume = parseCalendarSyncResume(row.resume);
 		const [internal, suppressedDomains, suppressedEmails] = await Promise.all([
 			this.match.internalIdentity(),
@@ -100,12 +107,14 @@ export class CalendarSyncService {
 		const progress = { written: 0, removed: 0 };
 
 		for (let page = 0; page < CALENDAR_SYNC.maxPagesPerTick; page += 1) {
-			const result = await this.calendar.listEvents(token.accessToken, {
-				syncToken,
-				pageToken,
-				maxResults: CALENDAR_SYNC.pageSize,
-				...range,
-			});
+			const result = await session.call((accessToken) =>
+				this.calendar.listEvents(accessToken, {
+					syncToken,
+					pageToken,
+					maxResults: CALENDAR_SYNC.pageSize,
+					...range,
+				}),
+			);
 
 			if (result.outcome === "cursor-invalid") {
 				await this.state.clearCursor(row.id, result.reason);

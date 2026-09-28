@@ -95,6 +95,12 @@ function harness(options: {
 		async accessTokenFor() {
 			return { outcome: "ok" as const, accessToken: "token" };
 		},
+		async refresh() {
+			return {
+				outcome: "needs-reconnect" as const,
+				reason: "Microsoft would not refresh the access token.",
+			};
+		},
 	} as unknown as MailboxTokenService;
 
 	const state = {

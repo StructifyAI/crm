@@ -27,6 +27,10 @@ export const MICROSOFT_SYNC_SOURCES = ["outlook"] as const;
 export type GoogleSyncSource = (typeof GOOGLE_SYNC_SOURCES)[number];
 export type MicrosoftSyncSource = (typeof MICROSOFT_SYNC_SOURCES)[number];
 
+export function isSyncSource(source: string): source is SyncSource {
+	return (SYNC_SOURCES as readonly string[]).includes(source);
+}
+
 export function isGoogleSyncSource(source: string): source is GoogleSyncSource {
 	return (GOOGLE_SYNC_SOURCES as readonly string[]).includes(source);
 }

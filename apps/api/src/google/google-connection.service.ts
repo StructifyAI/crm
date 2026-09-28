@@ -6,6 +6,7 @@ import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { MailboxMatchService } from "../mailbox/mailbox-match.service";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
+import { restoreParkedRows } from "../mailbox/reconnect";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import {
 	GOOGLE_PROVIDER_ID,
@@ -95,6 +96,20 @@ export class GoogleConnectionService {
 
 		if (added.length > 0) {
 			this.logger.log({ message: "Google connected", userId, sources: added });
+		}
+
+		const restored = await restoreParkedRows(
+			{ tokens: this.tokens, state: this.state },
+			userId,
+			existing,
+		);
+
+		if (restored.length > 0) {
+			this.logger.log({
+				message: "Google reconnected; sync resumes",
+				userId,
+				sources: restored,
+			});
 		}
 	}
 

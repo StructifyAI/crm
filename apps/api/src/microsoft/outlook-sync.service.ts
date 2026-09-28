@@ -19,6 +19,7 @@ import {
 	ThreadWriterService,
 	type WriteContext,
 } from "../mailbox/thread-writer.service";
+import { TokenSession } from "../mailbox/token-session";
 import {
 	type GraphAddress,
 	GraphClient,
@@ -89,7 +90,13 @@ export class OutlookSyncService {
 
 		await this.state.markRunning(row.id);
 
-		const me = await this.graph.me(token.accessToken);
+		const session = new TokenSession(
+			this.tokens,
+			row.userId,
+			"outlook",
+			token.accessToken,
+		);
+		const me = await session.call((accessToken) => this.graph.me(accessToken));
 		if (me.outcome !== "ok") {
 			return this.handleFailure(row, me);
 		}
@@ -117,13 +124,7 @@ export class OutlookSyncService {
 			return this.start(row, initializedAt);
 		}
 
-		return this.incremental(
-			row,
-			token.accessToken,
-			mailbox,
-			row.cursor,
-			deadline,
-		);
+		return this.incremental(row, session, mailbox, row.cursor, deadline);
 	}
 
 	private async start(
@@ -145,7 +146,7 @@ export class OutlookSyncService {
 
 	private async incremental(
 		row: MailboxSync,
-		accessToken: string,
+		session: TokenSession,
 		mailbox: string,
 		cursor: string,
 		deadline: Deadline,
@@ -161,17 +162,19 @@ export class OutlookSyncService {
 			};
 		}
 
-		const folders = await this.excludedFolderIds(accessToken);
+		const folders = await this.excludedFolderIds(session);
 		if (folders.outcome !== "ok") {
 			return this.handleFailure(row, folders.failure);
 		}
 
 		const excluded = folders.ids;
 
-		let page = await this.graph.listMessages(accessToken, {
-			after: new Date(from.getTime() - OVERLAP_MS),
-			top: PAGE_SIZE,
-		});
+		let page = await session.call((accessToken) =>
+			this.graph.listMessages(accessToken, {
+				after: new Date(from.getTime() - OVERLAP_MS),
+				top: PAGE_SIZE,
+			}),
+		);
 
 		let context: WriteContext | null = null;
 		let written = 0;
@@ -219,7 +222,9 @@ export class OutlookSyncService {
 			const nextLink = page.data["@odata.nextLink"];
 			if (paused || !nextLink || seen >= MAX_MESSAGES_PER_TICK) break;
 
-			page = await this.graph.nextPage(accessToken, nextLink);
+			page = await session.call((accessToken) =>
+				this.graph.nextPage(accessToken, nextLink),
+			);
 		}
 
 		if (page.outcome !== "ok") {
@@ -249,12 +254,14 @@ export class OutlookSyncService {
 	}
 
 	private async excludedFolderIds(
-		accessToken: string,
+		session: TokenSession,
 	): Promise<ExcludedFolders> {
 		const ids = new Set<string>();
 
 		for (const name of EXCLUDED_FOLDERS) {
-			const folder = await this.graph.folder(accessToken, name);
+			const folder = await session.call((accessToken) =>
+				this.graph.folder(accessToken, name),
+			);
 
 			if (folder.outcome === "ok") {
 				if (folder.data.id) ids.add(folder.data.id);
