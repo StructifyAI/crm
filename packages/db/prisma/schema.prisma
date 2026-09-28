@@ -1367,6 +1367,7 @@ model AppSetting {
   instantlySyncError       String?
   instantlyEmailCursor     DateTime?
   instantlyEmailLeaseUntil DateTime?
+  instantlyReplyCursor     DateTime?
   extrovertApiKey          String?
   extrovertWebhookSecret   String?
   extrovertLastEventAt     DateTime?

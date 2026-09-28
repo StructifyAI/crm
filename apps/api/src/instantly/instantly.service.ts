@@ -41,6 +41,7 @@ export class InstantlyService {
 					instantlyLastSyncAt: true,
 					instantlySyncError: true,
 					instantlyEmailCursor: true,
+					instantlyReplyCursor: true,
 				},
 			}),
 			this.db.instantlyMailbox.count(),
@@ -62,6 +63,8 @@ export class InstantlyService {
 			syncError: setting?.instantlySyncError ?? null,
 			leads: leadCount,
 			emailsSyncedThrough: setting?.instantlyEmailCursor?.toISOString() ?? null,
+			repliesSyncedThrough:
+				setting?.instantlyReplyCursor?.toISOString() ?? null,
 		};
 	}
 
@@ -92,6 +95,7 @@ export class InstantlyService {
 		return {
 			...leads,
 			emails: emails.filed,
+			replies: emails.repliesFiled,
 			error: leads.error ?? emails.error,
 		};
 	}

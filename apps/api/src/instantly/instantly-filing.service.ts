@@ -9,6 +9,7 @@ import { ActivityStampService } from "../crm/activity-stamp.service";
 import { racedContact, suppressionReason } from "../crm/contact-intake";
 import { normalizeEmail } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
+import { stripQuotedHistory } from "../mailbox/message-text";
 import {
 	isAutomatedAddress,
 	isMachineAddress,
@@ -46,11 +47,30 @@ type TimelineEntry = {
 	eventType: string;
 	campaignId: string | null;
 	emailId: string | null;
+	threadId?: string | null;
+	uniboxUrl?: string | null;
 	mailbox: string | null;
 	occurredAt: Date;
 };
 
+export type InstantlyReply = {
+	leadEmail: string;
+	firstName: string | null;
+	lastName: string | null;
+	mailbox: string | null;
+	campaignId: string | null;
+	campaignName: string | null;
+	emailId: string | null;
+	threadId: string | null;
+	uniboxUrl: string | null;
+	subject: string | null;
+	text: string;
+	occurredAt: Date;
+};
+
 export type FilingOutcome = "filed" | "duplicate" | "skipped";
+
+const THREAD_PREFIX = "thread:";
 
 const OPEN_DEAL: Prisma.DealWhereInput = {
 	archivedAt: null,
@@ -127,6 +147,10 @@ export class InstantlyFilingService {
 
 	async file(event: InstantlyWebhookEvent): Promise<void> {
 		try {
+			if (event.event_type === "reply_received") {
+				await this.fileReply(replyFromEvent(event, event.lead_email ?? ""));
+				return;
+			}
 			const resolved = await this.resolveContact({
 				email: event.lead_email ?? "",
 				firstName: event.firstName,
@@ -134,23 +158,11 @@ export class InstantlyFilingService {
 				mailbox: event.email_account,
 				reason: "Replied to an Instantly campaign",
 			});
-			if (!resolved) return;
-			if (event.event_type === "reply_received") {
-				await this.attachReply(resolved.id, event);
-			}
-			if (!event.campaign_id) return;
-			const lead = { contactId: resolved.id, campaignId: event.campaign_id };
-			if (event.event_type === "reply_received") {
-				await this.db.instantlyCampaignLead.updateMany({
-					where: lead,
-					data: { replyCount: { increment: 1 } },
-				});
-				return;
-			}
+			if (!resolved || !event.campaign_id) return;
 			const interestStatus = interestStatusFor(event.event_type);
 			if (interestStatus === undefined) return;
 			await this.db.instantlyCampaignLead.updateMany({
-				where: lead,
+				where: { contactId: resolved.id, campaignId: event.campaign_id },
 				data: { interestStatus },
 			});
 		} catch (error) {
@@ -236,6 +248,38 @@ export class InstantlyFilingService {
 		});
 	}
 
+	async fileReply(reply: InstantlyReply): Promise<FilingOutcome> {
+		const resolved = await this.resolveContact({
+			email: reply.leadEmail,
+			firstName: reply.firstName,
+			lastName: reply.lastName,
+			mailbox: reply.mailbox,
+			reason: "Replied to an Instantly campaign",
+		});
+		if (!resolved) return "skipped";
+
+		const campaign = `"${reply.campaignName ?? "campaign"}"`;
+		const outcome = await this.attach(resolved.id, {
+			type: ActivityType.EMAIL,
+			subject: reply.subject || `Replied to ${campaign} on Instantly`,
+			body: stripQuotedHistory(reply.text),
+			eventType: "reply_received",
+			campaignId: reply.campaignId,
+			emailId: reply.emailId,
+			threadId: reply.threadId,
+			uniboxUrl: reply.uniboxUrl,
+			mailbox: reply.mailbox,
+			occurredAt: reply.occurredAt,
+		});
+		if (outcome === "filed" && reply.campaignId) {
+			await this.db.instantlyCampaignLead.updateMany({
+				where: { contactId: resolved.id, campaignId: reply.campaignId },
+				data: { replyCount: { increment: 1 } },
+			});
+		}
+		return outcome;
+	}
+
 	private async existingContact(email: string): Promise<{ id: string } | null> {
 		const normalized = normalizeEmail(email);
 		if (!normalized) return null;
@@ -254,9 +298,7 @@ export class InstantlyFilingService {
 				contactId,
 				AND: [
 					{ meta: { path: ["eventType"], equals: entry.eventType } },
-					entry.emailId
-						? { meta: { path: ["emailId"], equals: entry.emailId } }
-						: { occurredAt: entry.occurredAt },
+					duplicateKey(entry),
 				],
 			},
 			select: { id: true },
@@ -297,6 +339,8 @@ export class InstantlyFilingService {
 					eventType: entry.eventType,
 					campaignId: entry.campaignId,
 					emailId: entry.emailId,
+					threadId: entry.threadId ?? null,
+					uniboxUrl: entry.uniboxUrl ?? null,
 					sendingMailbox: entry.mailbox,
 				},
 			},
@@ -326,53 +370,6 @@ export class InstantlyFilingService {
 			select: { id: true },
 		});
 	}
-
-	private async attachReply(
-		contactId: string,
-		event: InstantlyWebhookEvent,
-	): Promise<void> {
-		if (event.unibox_url) {
-			const duplicate = await this.db.activity.findFirst({
-				where: {
-					contactId,
-					meta: { path: ["uniboxUrl"], equals: event.unibox_url },
-				},
-				select: { id: true },
-			});
-			if (duplicate) return;
-		}
-
-		const contact = await this.db.contact.findUnique({
-			where: { id: contactId },
-			select: { ownerId: true },
-		});
-		const author =
-			contact?.ownerId ??
-			(await this.db.user.findFirst({ select: { id: true } }))?.id;
-		if (!author) return;
-		const now = new Date();
-
-		const activity = await this.db.activity.create({
-			data: {
-				type: ActivityType.NOTE,
-				subject: `Replied to "${event.campaign_name ?? "campaign"}" on Instantly`,
-				body: event.reply_text_snippet ?? event.reply_text ?? "",
-				contactId,
-				occurredAt: now,
-				createdById: author,
-				meta: {
-					automated: true,
-					source: "instantly",
-					eventType: event.event_type,
-					campaignId: event.campaign_id ?? null,
-					uniboxUrl: event.unibox_url ?? null,
-				},
-			},
-			select: { createdAt: true },
-		});
-
-		await this.stamp.touch({ contactId }, activity.createdAt);
-	}
 }
 
 export function sendFromEvent(
@@ -391,6 +388,66 @@ export function sendFromEvent(
 		text: event.email_text ?? "",
 		occurredAt: new Date(event.timestamp),
 	};
+}
+
+export function replyFromEvent(
+	event: InstantlyWebhookEvent,
+	leadEmail: string,
+): InstantlyReply {
+	return {
+		leadEmail,
+		firstName: event.firstName ?? null,
+		lastName: event.lastName ?? null,
+		mailbox: event.email_account ?? null,
+		campaignId: event.campaign_id ?? null,
+		campaignName: event.campaign_name ?? null,
+		emailId: null,
+		threadId: threadIdFromUniboxUrl(event.unibox_url),
+		uniboxUrl: event.unibox_url ?? null,
+		subject: event.reply_subject ?? null,
+		text: event.reply_text ?? event.reply_text_snippet ?? "",
+		occurredAt: new Date(event.timestamp),
+	};
+}
+
+export function threadIdFromUniboxUrl(
+	url: string | null | undefined,
+): string | null {
+	if (!url) return null;
+	try {
+		const search = new URL(url).searchParams.get("thread_search");
+		if (!search?.startsWith(THREAD_PREFIX)) return null;
+		return search.slice(THREAD_PREFIX.length) || null;
+	} catch {
+		return null;
+	}
+}
+
+function duplicateKey(entry: TimelineEntry): Prisma.ActivityWhereInput {
+	const keys: Prisma.ActivityWhereInput[] = [];
+	if (entry.emailId) {
+		keys.push({ meta: { path: ["emailId"], equals: entry.emailId } });
+	}
+	if (entry.threadId) {
+		const window = INSTANTLY.emails.replyMatchWindowMs;
+		keys.push({
+			OR: [
+				{ meta: { path: ["threadId"], equals: entry.threadId } },
+				{
+					meta: {
+						path: ["uniboxUrl"],
+						string_contains: `${THREAD_PREFIX}${entry.threadId}`,
+					},
+				},
+			],
+			occurredAt: {
+				gte: new Date(entry.occurredAt.getTime() - window),
+				lte: new Date(entry.occurredAt.getTime() + window),
+			},
+		});
+	}
+	if (keys.length === 0) return { occurredAt: entry.occurredAt };
+	return { OR: keys };
 }
 
 function describeFailure(event: InstantlyWebhookEvent) {

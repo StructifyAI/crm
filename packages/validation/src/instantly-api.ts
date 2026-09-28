@@ -81,7 +81,11 @@ export const instantlyEmail = z.looseObject({
 	lead_id: z.string().nullable().optional(),
 	ue_type: z.number().nullable().optional(),
 	step: z.string().nullable().optional(),
+	thread_id: z.string().nullable().optional(),
+	is_auto_reply: z.union([z.number(), z.boolean()]).nullable().optional(),
 });
+
+export type InstantlyEmailType = "sent" | "received";
 
 export type InstantlyEmail = z.infer<typeof instantlyEmail>;
 

@@ -54,7 +54,8 @@ two commits that are submitted upstream and not yet released:
   mark the campaign lead and file a `NOTE`.
 - `feat(api): poll Instantly sent emails onto the timeline and backfill history` — cron
   `/internal/sync/instantly-emails` reads `GET /api/v2/emails?email_type=sent`, migrations
-  `instantly_email_sync` and `instantly_email_sync_lease`.
+  `instantly_email_sync` and `instantly_email_sync_lease` and
+  `instantly_reply_sync`.
 
 Rules for this branch:
 
