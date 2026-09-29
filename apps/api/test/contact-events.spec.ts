@@ -38,6 +38,7 @@ const fixtures: {
 }[] = [];
 const extraContactIds: string[] = [];
 const activityIds: string[] = [];
+const calendarEventIds: string[] = [];
 const messageIds: string[] = [];
 const threadRoots: string[] = [];
 const clocks = new ContactClockService(db);
@@ -257,6 +258,7 @@ async function createActivity(
 		type: ActivityType;
 		direction?: ContactDirection | null;
 		occurredAt?: Date | null;
+		calendarEventId?: string | null;
 		subject?: string;
 		body?: string | null;
 		meta?: Prisma.InputJsonValue;
@@ -278,12 +280,57 @@ async function createActivity(
 			contactId:
 				input.contactId === undefined ? fixture.contactId : input.contactId,
 			dealId: input.dealId ?? null,
+			calendarEventId: input.calendarEventId ?? null,
 			createdById: userId,
 		},
 		select: { id: true },
 	});
 	activityIds.push(activity.id);
 	return activity;
+}
+
+async function createCalendarMeeting(
+	fixture: Awaited<ReturnType<typeof createFixture>>,
+	input: {
+		activityContactId: string | null;
+		attendees: { contactId: string; responseStatus: string }[];
+	},
+) {
+	const occurredAt = ago(4);
+	const calendarEvent = await db.calendarEvent.create({
+		data: {
+			iCalUid: `contact-events-${crypto.randomUUID()}`,
+			originalStartTime: occurredAt,
+			startsAt: occurredAt,
+			endsAt: new Date(occurredAt.getTime() + 60 * 60 * 1_000),
+			status: "confirmed",
+			companyId: fixture.companyId,
+			contactId: input.activityContactId,
+		},
+		select: { id: true },
+	});
+	calendarEventIds.push(calendarEvent.id);
+	const attendees = await Promise.all(
+		input.attendees.map(({ contactId, responseStatus }) =>
+			db.calendarAttendee.create({
+				data: {
+					eventId: calendarEvent.id,
+					email: `${crypto.randomUUID()}@contact-events.test`,
+					contactId,
+					responseStatus,
+				},
+				select: { id: true },
+			}),
+		),
+	);
+	const activity = await createActivity(fixture, {
+		type: ActivityType.MEETING,
+		direction: null,
+		occurredAt,
+		contactId: input.activityContactId,
+		calendarEventId: calendarEvent.id,
+	});
+	return { activity, attendeeIds: attendees.map(({ id }) => id) };
 }
 
 async function createMessage(
@@ -394,6 +441,13 @@ async function clean() {
 		await db.contactExtraction.deleteMany({
 			where: { activityId: { in: activityIds } },
 		});
+	}
+	if (calendarEventIds.length) {
+		await db.calendarEvent.deleteMany({
+			where: { id: { in: calendarEventIds } },
+		});
+	}
+	if (activityIds.length) {
 		await db.activity.deleteMany({ where: { id: { in: activityIds } } });
 	}
 	if (threadRoots.length) {
@@ -1094,7 +1148,98 @@ describe("contact event ledger", () => {
 				.every((event) => event.supersededAt !== null),
 		).toBe(true);
 	});
+});
 
+describe("calendar meeting contact events", () => {
+	it("records calendar meetings only when the linked contact has not declined", async () => {
+		const fixture = await createFixture("calendar-declined-contact");
+		const acceptedContact = await db.contact.create({
+			data: {
+				firstName: "Other",
+				lastName: "Attendee",
+				email: `other-${suffix}@calendar.test`,
+				companyId: fixture.companyId,
+			},
+			select: { id: true },
+		});
+		extraContactIds.push(acceptedContact.id);
+		const meeting = await createCalendarMeeting(fixture, {
+			activityContactId: fixture.contactId,
+			attendees: [
+				{ contactId: fixture.contactId, responseStatus: "declined" },
+				{ contactId: acceptedContact.id, responseStatus: "accepted" },
+			],
+		});
+
+		expect(await events.recordActivity(meeting.activity.id)).toBe(0);
+		expect(
+			await db.contactEvent.findMany({
+				where: {
+					sourceActivityId: meeting.activity.id,
+					supersededAt: null,
+				},
+			}),
+		).toEqual([]);
+
+		await db.calendarAttendee.update({
+			where: { id: meeting.attendeeIds[0] },
+			data: { responseStatus: "accepted" },
+		});
+		expect(await events.recordActivity(meeting.activity.id)).toBe(2);
+		expect(
+			await db.contactEvent.findMany({
+				where: {
+					sourceActivityId: meeting.activity.id,
+					supersededAt: null,
+				},
+				select: { sourceKey: true, direction: true },
+				orderBy: { sourceKey: "asc" },
+			}),
+		).toEqual([
+			{
+				sourceKey: `act:${meeting.activity.id}:IN`,
+				direction: ContactDirection.IN,
+			},
+			{
+				sourceKey: `act:${meeting.activity.id}:OUT`,
+				direction: ContactDirection.OUT,
+			},
+		]);
+	});
+
+	it("skips company-only calendar meetings when all linked attendees declined", async () => {
+		const fixture = await createFixture("calendar-declined-company");
+		const otherContact = await db.contact.create({
+			data: {
+				firstName: "Second",
+				lastName: "Buyer",
+				email: `second-${suffix}@calendar.test`,
+				companyId: fixture.companyId,
+			},
+			select: { id: true },
+		});
+		extraContactIds.push(otherContact.id);
+		const meeting = await createCalendarMeeting(fixture, {
+			activityContactId: null,
+			attendees: [
+				{ contactId: fixture.contactId, responseStatus: "declined" },
+				{ contactId: otherContact.id, responseStatus: "declined" },
+			],
+		});
+
+		expect(await events.recordActivity(meeting.activity.id)).toBe(0);
+		expect(
+			await db.contactEvent.findMany({
+				where: {
+					sourceActivityId: meeting.activity.id,
+					supersededAt: null,
+				},
+			}),
+		).toEqual([]);
+	});
+});
+
+describe("contact event ledger", () => {
 	it("backfills a directionless meeting with a contact in both directions", async () => {
 		const fixture = await createFixture("meeting-backfill");
 		const meeting = await createActivity(fixture, {

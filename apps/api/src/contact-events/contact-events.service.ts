@@ -375,6 +375,7 @@ export class ContactEventsService {
 				contactId: true,
 				dealId: true,
 				emailThreadId: true,
+				calendarEventId: true,
 				meta: true,
 			},
 		});
@@ -384,7 +385,33 @@ export class ContactEventsService {
 		const channel = ACTIVITY_CHANNELS[activity.type];
 		const baseKey = `act:${activity.id}`;
 		const splitKeys = [`${baseKey}:OUT`, `${baseKey}:IN`];
-		if (
+		const calendarAttendees =
+			activity.type === ActivityType.MEETING && activity.calendarEventId
+				? await this.db.calendarAttendee.findMany({
+						where: {
+							eventId: activity.calendarEventId,
+							contactId: { not: null },
+						},
+						select: { contactId: true, responseStatus: true },
+					})
+				: [];
+		const contactAttendee = activity.contactId
+			? calendarAttendees.find(
+					(attendee) => attendee.contactId === activity.contactId,
+				)
+			: undefined;
+		const declinedCalendarMeeting =
+			activity.type === ActivityType.MEETING &&
+			Boolean(activity.calendarEventId) &&
+			(contactAttendee
+				? contactAttendee.responseStatus === "declined"
+				: calendarAttendees.length > 0 &&
+					calendarAttendees.every(
+						(attendee) => attendee.responseStatus === "declined",
+					));
+		if (declinedCalendarMeeting) {
+			written += await this.supersedeMany([baseKey, ...splitKeys], options);
+		} else if (
 			activity.type === ActivityType.MEETING &&
 			!activity.emailThreadId &&
 			!activity.direction &&
