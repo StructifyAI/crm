@@ -10,11 +10,14 @@ export type EmailClassificationContext = {
 	ourDomains: ReadonlySet<string>;
 	companyDomain: string | null;
 	scopedContactEmails: ReadonlySet<string>;
+	suppressedEmails?: ReadonlySet<string>;
+	suppressedDomains?: ReadonlySet<string>;
 };
 
 export function classifyEmail(
 	input: { direction: EmailDirection; fromEmail: string },
 	context: EmailClassificationContext,
+	addressed?: ReadonlySet<string>,
 ): EmailClassification {
 	if (input.direction === EmailDirection.OUTBOUND) {
 		return EmailClassification.OURS;
@@ -32,7 +35,18 @@ export function classifyEmail(
 		return EmailClassification.INTERNAL;
 	}
 
+	if (
+		context.suppressedEmails?.has(email) ||
+		(domain !== null && context.suppressedDomains?.has(domain))
+	) {
+		return EmailClassification.UNKNOWN;
+	}
+
 	if (context.scopedContactEmails.has(email)) {
+		return EmailClassification.THEIRS;
+	}
+
+	if (addressed?.has(email)) {
 		return EmailClassification.THEIRS;
 	}
 

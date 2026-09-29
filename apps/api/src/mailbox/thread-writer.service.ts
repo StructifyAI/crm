@@ -12,7 +12,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
-import { correspondenceSpan } from "./correspondence";
+import { addressedIn, correspondenceSpan } from "./correspondence";
 import type { Deadline } from "./deadline";
 import { DealLinkService, type DealLinkTarget } from "./deal-link.service";
 import { EmailClassificationService } from "./email-classification.service";
@@ -151,6 +151,14 @@ export class ThreadWriterService {
 			}
 		}
 
+		const addressed = thread
+			? addressedIn(
+					await this.db.emailMessage.findMany({
+						where: { threadId: thread.id },
+						select: { recipients: true },
+					}),
+				)
+			: new Set<string>();
 		const classification = await this.classification.classify(
 			{
 				direction: outbound ? EmailDirection.OUTBOUND : EmailDirection.INBOUND,
@@ -161,14 +169,17 @@ export class ThreadWriterService {
 				companyDomain,
 			},
 			context,
+			addressed,
 		);
 		const correspondence =
-			outbound || (await this.match.corresponds(parsed.from, context));
+			outbound ||
+			(await this.match.corresponds(parsed.from, context, addressed));
 
 		let stored: {
 			threadId: string;
 			messageId: string;
 			occurredAt: Date | null;
+			flippedMessageIds: string[];
 		};
 
 		try {
@@ -190,6 +201,7 @@ export class ThreadWriterService {
 							select: { id: true },
 						});
 
+				const flippedMessageIds: string[] = [];
 				const message = !repair
 					? await tx.emailMessage.create({
 							data: {
@@ -219,6 +231,53 @@ export class ThreadWriterService {
 							data: { correspondence, classification },
 							select: { id: true },
 						});
+				if (!repair && correspondence) {
+					const addressedNow = parsed.recipients
+						.map((person) => person.email.toLowerCase())
+						.filter((email) => {
+							const domain = workDomain(email);
+							return (
+								!context.suppressedEmails.has(email) &&
+								!(domain && context.suppressedDomains.has(domain))
+							);
+						});
+					if (addressedNow.length > 0) {
+						const earlierMessages = await tx.emailMessage.findMany({
+							where: {
+								threadId: record.id,
+								correspondence: false,
+								fromEmail: {
+									in: addressedNow,
+									mode: "insensitive",
+								},
+							},
+							select: { id: true, classification: true },
+						});
+						if (earlierMessages.length > 0) {
+							await tx.emailMessage.updateMany({
+								where: {
+									id: { in: earlierMessages.map(({ id }) => id) },
+								},
+								data: { correspondence: true },
+							});
+							flippedMessageIds.push(
+								...earlierMessages
+									.filter(
+										({ classification: previous }) =>
+											previous === EmailClassification.UNKNOWN ||
+											previous === EmailClassification.AUTOMATED,
+									)
+									.map(({ id }) => id),
+							);
+							if (flippedMessageIds.length > 0) {
+								await tx.emailMessage.updateMany({
+									where: { id: { in: flippedMessageIds } },
+									data: { classification: EmailClassification.THEIRS },
+								});
+							}
+						}
+					}
+				}
 
 				const span = await correspondenceSpan(tx, record.id);
 				if (!span) {
@@ -226,6 +285,7 @@ export class ThreadWriterService {
 						threadId: record.id,
 						messageId: message.id,
 						occurredAt: null,
+						flippedMessageIds,
 					};
 				}
 
@@ -246,6 +306,7 @@ export class ThreadWriterService {
 						threadId: record.id,
 						messageId: message.id,
 						occurredAt: null,
+						flippedMessageIds,
 					};
 				}
 
@@ -258,7 +319,12 @@ export class ThreadWriterService {
 					origin: options.origin,
 				});
 
-				return { threadId: record.id, messageId: message.id, occurredAt };
+				return {
+					threadId: record.id,
+					messageId: message.id,
+					occurredAt,
+					flippedMessageIds,
+				};
 			});
 		} catch (error) {
 			if (await this.storedElsewhere(error, parsed.rfcMessageId)) return false;
@@ -266,6 +332,9 @@ export class ThreadWriterService {
 		}
 
 		await this.contactEvents.recordMessage(stored.messageId);
+		for (const messageId of stored.flippedMessageIds) {
+			await this.contactEvents.recordMessage(messageId);
+		}
 
 		if (
 			!stored.occurredAt ||

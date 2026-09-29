@@ -9,6 +9,7 @@ import type { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { CorrespondenceBackfillService } from "../src/mailbox/correspondence-backfill.service";
 import type { EmailClassificationService } from "../src/mailbox/email-classification.service";
 import { SYNC_TICK } from "../src/mailbox/mailbox-config";
+import type { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import type { ThreadWriterService } from "../src/mailbox/thread-writer.service";
 import { backfillCursor } from "../src/sync/sync.contracts";
 
@@ -107,6 +108,9 @@ function correspondenceBackfill(
 	const classification = {
 		contextFor: async () => ({}),
 	} as unknown as EmailClassificationService;
+	const match = {
+		corresponds: async () => false,
+	} as unknown as MailboxMatchService;
 	const contactEvents = {
 		recordMessage: async () => 0,
 	} as unknown as ContactEventsService;
@@ -115,6 +119,7 @@ function correspondenceBackfill(
 		fakeDb,
 		stamp,
 		writer,
+		match,
 		classification,
 		contactEvents,
 	);

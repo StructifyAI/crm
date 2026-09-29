@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { db, type MailboxSyncModel as MailboxSync } from "@crm/db";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
+import { ContactClockService } from "../src/contact-events/contact-clock.service";
+import { ContactEventsService } from "../src/contact-events/contact-events.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
 import { deadlineIn } from "../src/mailbox/deadline";
@@ -14,7 +16,6 @@ import {
 	ThreadWriterService,
 } from "../src/mailbox/thread-writer.service";
 import { withDiscardedCrmEvents } from "./agent-trigger.stub";
-import { noContactEvents } from "./contact-events.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "thread-writer-spec";
 const domain = `threads-${suffix}.test`;
@@ -23,7 +24,14 @@ const mailbox = `rep-${suffix}@example.test`;
 const person = `buyer@${domain}`;
 const rootId = `<root-${suffix}@mail.test>`;
 const movedRoot = `outlook-conversation:${suffix}`;
+const addressedRoot = `<addressed-${suffix}@mail.test>`;
+const promotionRoot = `<promotion-${suffix}@mail.test>`;
+const suppressedRoot = `<suppressed-${suffix}@mail.test>`;
+const machineReminderRoot = `<machine-reminder-${suffix}@mail.test>`;
 const reminder = `reminder@superhuman-${suffix}.test`;
+const machineReminder = "reminder@superhuman.com";
+const stranger = "stranger@unknown-co.com";
+const suppressedAddress = `suppressed-${suffix}@unknown-co.com`;
 const instantlyMailbox = "ronak@getstructify.org";
 const instantlySender = "taichi@getstructify.org";
 
@@ -35,6 +43,7 @@ const agent = {
 } as unknown as AgentTriggerService;
 
 const stamp = new ActivityStampService(db);
+const contactEvents = new ContactEventsService(db, new ContactClockService(db));
 const directory = new CompanyDirectoryService(agent);
 const log = new EnrichmentLogService(db, stamp);
 const match = new MailboxMatchService(db, directory, agent, log);
@@ -55,7 +64,7 @@ const threads = new ThreadWriterService(
 	triage,
 	dealLink,
 	new EmailClassificationService(db),
-	noContactEvents,
+	contactEvents,
 );
 
 let row: MailboxSync;
@@ -65,13 +74,14 @@ function message(
 	sentAt: Date,
 	root = rootId,
 	from = { email: mailbox, name: "Test Rep" },
+	recipients = [{ email: person, name: "A Buyer", kind: "to" as const }],
 ): IncomingMessage {
 	return {
 		rfcMessageId: id,
 		rootId: root,
 		subject: "Pricing",
 		from,
-		recipients: [{ email: person, name: "A Buyer", kind: "to" }],
+		recipients,
 		body: "The numbers you asked for.",
 		transcript: "The numbers you asked for.",
 		sentAt,
@@ -83,9 +93,24 @@ function message(
 
 async function clean() {
 	await db.emailThread.deleteMany({
-		where: { rootMessageId: { in: [rootId, movedRoot] } },
+		where: {
+			rootMessageId: {
+				in: [
+					rootId,
+					movedRoot,
+					addressedRoot,
+					promotionRoot,
+					suppressedRoot,
+					machineReminderRoot,
+				],
+			},
+		},
 	});
 	await db.contact.deleteMany({ where: { email: person } });
+	await db.contact.deleteMany({ where: { email: suppressedAddress } });
+	await db.suppressedContact.deleteMany({
+		where: { email: suppressedAddress },
+	});
 	await db.company.deleteMany({ where: { domain } });
 	await db.instantlyMailbox.deleteMany({
 		where: { emailAccount: instantlyMailbox },
@@ -360,6 +385,36 @@ describe("storing a synced email", () => {
 		expect(after.activity?.occurredAt).toEqual(before.activity?.occurredAt);
 	});
 
+	it("keeps an unaddressed Superhuman reminder automated", async () => {
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<superhuman-outbound-${suffix}@mail.test>`,
+				new Date("2026-01-20T10:00:00Z"),
+				machineReminderRoot,
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<superhuman-reminder-${suffix}@mail.test>`,
+				new Date("2026-01-20T11:00:00Z"),
+				machineReminderRoot,
+				{ email: machineReminder, name: "Superhuman" },
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const reminderMessage = await db.emailMessage.findUniqueOrThrow({
+			where: { rfcMessageId: `<superhuman-reminder-${suffix}@mail.test>` },
+			select: { classification: true },
+		});
+		expect(reminderMessage.classification).toBe("AUTOMATED");
+	});
+
 	it("moves the clocks for a reply from a known contact", async () => {
 		const sentAt = new Date("2026-01-21T09:00:00Z");
 		const stored = await threads.store(
@@ -434,5 +489,234 @@ describe("storing a synced email", () => {
 		});
 		expect(thread.lastMessageAt).toEqual(before.lastMessageAt);
 		expect(thread.activity?.occurredAt).toEqual(before.activity?.occurredAt);
+	});
+
+	it("treats an inbound reply to an outbound participant as correspondence", async () => {
+		const company = await db.company.findUniqueOrThrow({
+			where: { domain },
+			select: { id: true },
+		});
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: person },
+			select: { id: true },
+		});
+		await db.emailThread.create({
+			data: {
+				rootMessageId: addressedRoot,
+				subject: "Pricing",
+				companyId: company.id,
+				contactId: contact.id,
+				firstMessageAt: new Date("2026-02-01T09:00:00Z"),
+				lastMessageAt: new Date("2026-02-01T09:00:00Z"),
+			},
+		});
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<addressed-outbound-${suffix}@mail.test>`,
+				new Date("2026-02-01T09:00:00Z"),
+				addressedRoot,
+				{ email: mailbox, name: "Test Rep" },
+				[{ email: stranger, name: "Stranger", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+		const sentAt = new Date("2026-02-01T10:00:00Z");
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<addressed-inbound-${suffix}@mail.test>`,
+				sentAt,
+				addressedRoot,
+				{ email: stranger, name: "Stranger" },
+				[{ email: mailbox, name: "Test Rep", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: addressedRoot },
+			select: {
+				lastMessageAt: true,
+				messages: {
+					where: { rfcMessageId: `<addressed-inbound-${suffix}@mail.test>` },
+					select: { correspondence: true, classification: true },
+				},
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(thread.messages[0]).toEqual({
+			correspondence: true,
+			classification: "THEIRS",
+		});
+		expect(thread.lastMessageAt).toEqual(sentAt);
+		expect(thread.activity?.occurredAt).toEqual(sentAt);
+	});
+
+	it("does not classify a suppressed addressed stranger as theirs", async () => {
+		const company = await db.company.findUniqueOrThrow({
+			where: { domain },
+			select: { id: true },
+		});
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: person },
+			select: { id: true },
+		});
+		await db.suppressedContact.create({
+			data: { email: suppressedAddress },
+		});
+		await db.contact.create({
+			data: {
+				firstName: "Suppressed",
+				lastName: "Sender",
+				email: suppressedAddress,
+				companyId: company.id,
+			},
+		});
+		await db.emailThread.create({
+			data: {
+				rootMessageId: suppressedRoot,
+				subject: "Pricing",
+				companyId: company.id,
+				contactId: contact.id,
+				firstMessageAt: new Date("2026-02-03T09:00:00Z"),
+				lastMessageAt: new Date("2026-02-03T09:00:00Z"),
+			},
+		});
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<suppressed-outbound-${suffix}@mail.test>`,
+				new Date("2026-02-03T09:00:00Z"),
+				suppressedRoot,
+				{ email: mailbox, name: "Test Rep" },
+				[{ email: suppressedAddress, name: "Suppressed", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<suppressed-inbound-${suffix}@mail.test>`,
+				new Date("2026-02-03T10:00:00Z"),
+				suppressedRoot,
+				{ email: suppressedAddress, name: "Suppressed" },
+				[{ email: mailbox, name: "Test Rep", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const inbound = await db.emailMessage.findUniqueOrThrow({
+			where: { rfcMessageId: `<suppressed-inbound-${suffix}@mail.test>` },
+			select: { classification: true, correspondence: true },
+		});
+		expect(inbound).toEqual({
+			classification: "UNKNOWN",
+			correspondence: false,
+		});
+	});
+
+	it("promotes an earlier notice when a rep addresses its sender", async () => {
+		const company = await db.company.findUniqueOrThrow({
+			where: { domain },
+			select: { id: true },
+		});
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: person },
+			select: { id: true },
+		});
+		const initialAt = new Date("2026-02-02T09:00:00Z");
+		await db.emailThread.create({
+			data: {
+				rootMessageId: promotionRoot,
+				subject: "Pricing",
+				companyId: company.id,
+				contactId: contact.id,
+				firstMessageAt: initialAt,
+				lastMessageAt: initialAt,
+			},
+		});
+
+		const noticeAt = new Date("2026-02-02T10:00:00Z");
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<promotion-notice-${suffix}@mail.test>`,
+				noticeAt,
+				promotionRoot,
+				{ email: stranger, name: "Stranger" },
+				[{ email: mailbox, name: "Test Rep", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const before = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: promotionRoot },
+			select: { lastMessageAt: true, activity: { select: { id: true } } },
+		});
+		expect(before.lastMessageAt).toEqual(initialAt);
+		expect(before.activity).toBeNull();
+
+		const sentAt = new Date("2026-02-02T11:00:00Z");
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<promotion-reply-${suffix}@mail.test>`,
+				sentAt,
+				promotionRoot,
+				{ email: mailbox, name: "Test Rep" },
+				[{ email: stranger, name: "Stranger", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: promotionRoot },
+			select: {
+				firstMessageAt: true,
+				lastMessageAt: true,
+				messages: {
+					orderBy: { sentAt: "asc" },
+					select: {
+						id: true,
+						fromEmail: true,
+						correspondence: true,
+						classification: true,
+					},
+				},
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(
+			thread.messages.map(({ fromEmail, correspondence, classification }) => ({
+				fromEmail,
+				correspondence,
+				classification,
+			})),
+		).toEqual([
+			{
+				fromEmail: stranger,
+				correspondence: true,
+				classification: "THEIRS",
+			},
+			{ fromEmail: mailbox, correspondence: true, classification: "OURS" },
+		]);
+		const promotedMessageId = thread.messages[0]?.id;
+		const promotedEvent = await db.contactEvent.findUniqueOrThrow({
+			where: { sourceKey: `msg:${promotedMessageId}` },
+			select: { sourceMessageId: true },
+		});
+		expect(promotedEvent.sourceMessageId).toBe(promotedMessageId ?? null);
+		expect(thread.firstMessageAt).toEqual(noticeAt);
+		expect(thread.lastMessageAt).toEqual(sentAt);
+		expect(thread.activity?.occurredAt).toEqual(sentAt);
 	});
 });

@@ -1,4 +1,9 @@
-import { type Db, EmailClassification } from "@crm/db";
+import {
+	type Db,
+	EmailClassification,
+	EmailDirection,
+	type Prisma,
+} from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
@@ -6,11 +11,15 @@ import {
 	type StampTargets,
 } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
-import { correspondenceSpan } from "./correspondence";
+import { addressedIn, correspondenceSpan } from "./correspondence";
 import { deadlineIn, overdue } from "./deadline";
 import { classifyEmail } from "./email-classification";
 import { EmailClassificationService } from "./email-classification.service";
 import { MAILBOX_CORRESPONDENCE, SYNC_TICK } from "./mailbox-config";
+import {
+	MailboxMatchService,
+	type MatchContext,
+} from "./mailbox-match.service";
 import { ThreadWriterService } from "./thread-writer.service";
 
 export type CorrespondenceBackfill = {
@@ -21,6 +30,16 @@ export type CorrespondenceBackfill = {
 	complete: boolean;
 };
 
+type StoredMessage = {
+	id: string;
+	direction: EmailDirection;
+	fromEmail: string;
+	fromName: string | null;
+	recipients: Prisma.JsonValue;
+	classification: EmailClassification | null;
+	correspondence: boolean;
+};
+
 @Injectable()
 export class CorrespondenceBackfillService {
 	private readonly logger = new Logger(CorrespondenceBackfillService.name);
@@ -29,6 +48,7 @@ export class CorrespondenceBackfillService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly stamp: ActivityStampService,
 		private readonly writer: ThreadWriterService,
+		private readonly match: MailboxMatchService,
 		private readonly classification: EmailClassificationService,
 		private readonly contactEvents: ContactEventsService,
 	) {}
@@ -60,12 +80,14 @@ export class CorrespondenceBackfillService {
 					},
 				},
 				messages: {
-					where: all ? undefined : { classification: null },
 					select: {
 						id: true,
 						direction: true,
 						fromEmail: true,
+						fromName: true,
+						recipients: true,
 						classification: true,
+						correspondence: true,
 					},
 				},
 			},
@@ -88,6 +110,8 @@ export class CorrespondenceBackfillService {
 			processed += 1;
 			examined += 1;
 
+			const addressed = addressedIn(thread.messages);
+			const verdicts = new Map<string, boolean>();
 			const classificationContext = await this.classification.contextFor(
 				{
 					companyId: thread.companyId,
@@ -97,16 +121,39 @@ export class CorrespondenceBackfillService {
 				},
 				context,
 			);
-			const flips = thread.messages.flatMap((message) => {
-				const classification = classifyEmail(message, classificationContext);
-				return classification !== message.classification
-					? [{ id: message.id, classification }]
-					: [];
-			});
-			if (flips.length === 0) continue;
+			const correspondenceFlips = await Promise.all(
+				thread.messages.map(async (message) => ({
+					id: message.id,
+					correspondence:
+						message.direction === EmailDirection.OUTBOUND ||
+						(await this.verdict(message, context, addressed, verdicts)),
+				})),
+			);
+			const classificationFlips = thread.messages
+				.filter((message) => all || message.classification === null)
+				.flatMap((message) => {
+					const classification = classifyEmail(
+						message,
+						classificationContext,
+						addressed,
+					);
+					return classification !== message.classification
+						? [{ id: message.id, classification }]
+						: [];
+				});
+			const updatedCorrespondence = correspondenceFlips.filter(
+				(flip, index) =>
+					flip.correspondence !== thread.messages[index]?.correspondence,
+			);
+			if (
+				classificationFlips.length === 0 &&
+				updatedCorrespondence.length === 0
+			) {
+				continue;
+			}
 
 			for (const classification of Object.values(EmailClassification)) {
-				const ids = flips
+				const ids = classificationFlips
 					.filter((flip) => flip.classification === classification)
 					.map((flip) => flip.id);
 				if (ids.length === 0) continue;
@@ -116,7 +163,18 @@ export class CorrespondenceBackfillService {
 				});
 			}
 
-			reclassified += flips.length;
+			for (const value of [true, false]) {
+				const ids = updatedCorrespondence
+					.filter((flip) => flip.correspondence === value)
+					.map((flip) => flip.id);
+				if (ids.length === 0) continue;
+				await this.db.emailMessage.updateMany({
+					where: { id: { in: ids } },
+					data: { correspondence: value },
+				});
+			}
+
+			reclassified += classificationFlips.length;
 			await this.restamp(thread.id, targets);
 			for (const message of thread.messages) {
 				await this.contactEvents.recordMessage(message.id);
@@ -146,6 +204,25 @@ export class CorrespondenceBackfillService {
 			next: exhausted ? null : last,
 			complete: exhausted,
 		};
+	}
+
+	private async verdict(
+		message: StoredMessage,
+		context: MatchContext,
+		addressed: ReadonlySet<string>,
+		verdicts: Map<string, boolean>,
+	): Promise<boolean> {
+		const key = message.fromEmail.toLowerCase();
+		const cached = verdicts.get(key);
+		if (cached !== undefined) return cached;
+
+		const answer = await this.match.corresponds(
+			{ email: message.fromEmail, name: message.fromName },
+			context,
+			addressed,
+		);
+		verdicts.set(key, answer);
+		return answer;
 	}
 
 	private async restamp(threadId: string, targets: StampTargets) {

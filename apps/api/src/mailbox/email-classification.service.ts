@@ -7,6 +7,12 @@ import {
 } from "./email-classification";
 import type { MatchContext } from "./mailbox-match.service";
 
+type ClassificationMatchContext = Pick<
+	MatchContext,
+	"ourAddresses" | "ourDomains"
+> &
+	Partial<Pick<MatchContext, "suppressedEmails" | "suppressedDomains">>;
+
 export type ThreadClassificationTarget = {
 	direction: EmailDirection;
 	fromEmail: string;
@@ -27,14 +33,19 @@ export class EmailClassificationService {
 
 	async classify(
 		target: ThreadClassificationTarget,
-		match: Pick<MatchContext, "ourAddresses" | "ourDomains">,
+		match: ClassificationMatchContext,
+		addressed?: ReadonlySet<string>,
 	): Promise<EmailClassification> {
-		return classifyEmail(target, await this.contextFor(target, match));
+		return classifyEmail(
+			target,
+			await this.contextFor(target, match),
+			addressed,
+		);
 	}
 
 	async contextFor(
 		target: ThreadClassificationScope,
-		match: Pick<MatchContext, "ourAddresses" | "ourDomains">,
+		match: ClassificationMatchContext,
 	): Promise<EmailClassificationContext> {
 		return {
 			...match,

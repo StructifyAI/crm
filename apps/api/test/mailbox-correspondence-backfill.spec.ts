@@ -24,9 +24,11 @@ const domain = `backfill-${suffix}.test`;
 const userId = `user-${suffix}`;
 const mailbox = `rep-${suffix}@example.test`;
 const buyer = `buyer@${domain}`;
+const stranger = `stranger-${suffix}@unknown-co.com`;
 const reminder = `reminder-${suffix}@superhuman.com`;
 const rootId = `<root-${suffix}@mail.test>`;
 const machineRootId = `<root-${suffix}-machine@mail.test>`;
+const addressedRoot = `<addressed-${suffix}@mail.test>`;
 
 const humanAt = new Date("2026-03-01T10:00:00Z");
 const reminderAt = new Date("2026-03-09T10:00:00Z");
@@ -59,6 +61,7 @@ const backfill = new CorrespondenceBackfillService(
 	db,
 	stamp,
 	writer,
+	match,
 	new EmailClassificationService(db),
 	noContactEvents,
 );
@@ -67,8 +70,9 @@ let threadId: string;
 let dealId: string;
 
 async function clean() {
-	await db.emailThread.deleteMany({ where: { rootMessageId: rootId } });
-	await db.emailThread.deleteMany({ where: { rootMessageId: machineRootId } });
+	await db.emailThread.deleteMany({
+		where: { rootMessageId: { in: [rootId, machineRootId, addressedRoot] } },
+	});
 	await db.deal.deleteMany({ where: { company: { domain } } });
 	await db.contact.deleteMany({ where: { email: buyer } });
 	await db.contact.deleteMany({ where: { email: reminder } });
@@ -301,6 +305,92 @@ describe("correspondence backfill", () => {
 		});
 		expect(thread.lastMessageAt).toEqual(reminderAt);
 		expect(thread.activity?.occurredAt).toEqual(reminderAt);
+	});
+
+	it("promotes an addressed participant and does nothing on a rerun", async () => {
+		const outboundAt = new Date("2026-03-02T10:00:00Z");
+		const strangerAt = new Date("2026-03-03T10:00:00Z");
+		const company = await db.company.findUniqueOrThrow({
+			where: { domain },
+			select: { id: true },
+		});
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: buyer },
+			select: { id: true },
+		});
+		await db.emailThread.create({
+			data: {
+				rootMessageId: addressedRoot,
+				subject: "Pricing",
+				companyId: company.id,
+				contactId: contact.id,
+				firstMessageAt: reminderAt,
+				lastMessageAt: reminderAt,
+				messageCount: 2,
+				messages: {
+					create: [
+						{
+							rfcMessageId: `<addressed-outbound-${suffix}@mail.test>`,
+							syncedByUserId: userId,
+							direction: EmailDirection.OUTBOUND,
+							fromEmail: mailbox,
+							fromName: "Backfill Rep",
+							recipients: [{ email: stranger, name: "Stranger", kind: "to" }],
+							subject: "Pricing",
+							sentAt: outboundAt,
+						},
+						{
+							rfcMessageId: `<addressed-inbound-${suffix}@mail.test>`,
+							syncedByUserId: userId,
+							direction: EmailDirection.INBOUND,
+							fromEmail: stranger,
+							fromName: "Stranger",
+							recipients: [
+								{ email: mailbox, name: "Backfill Rep", kind: "to" },
+							],
+							subject: "Pricing",
+							sentAt: strangerAt,
+							correspondence: false,
+						},
+					],
+				},
+				activity: {
+					create: {
+						type: ActivityType.EMAIL,
+						subject: "Pricing",
+						occurredAt: reminderAt,
+						companyId: company.id,
+						contactId: contact.id,
+						dealId,
+						createdById: userId,
+						meta: { synced: true, source: "gmail" },
+					},
+				},
+			},
+		});
+
+		expect(await runToEnd()).toBe(2);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: addressedRoot },
+			select: {
+				firstMessageAt: true,
+				lastMessageAt: true,
+				messages: {
+					orderBy: { sentAt: "asc" },
+					select: { correspondence: true },
+				},
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(thread.messages.map((message) => message.correspondence)).toEqual([
+			true,
+			true,
+		]);
+		expect(thread.firstMessageAt).toEqual(outboundAt);
+		expect(thread.lastMessageAt).toEqual(strangerAt);
+		expect(thread.activity?.occurredAt).toEqual(strangerAt);
+		expect(await runToEnd()).toBe(0);
 
 		await db.contact.deleteMany({ where: { email: reminder } });
 	});

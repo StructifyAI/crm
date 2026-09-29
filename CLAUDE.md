@@ -48,7 +48,7 @@ two commits that are submitted upstream and not yet released:
   offered. Backfill: `GET /internal/sync/deal-links?cursor=…` with the cron secret.
 - `fix(api): keep reminders and other notices from moving thread and deal clocks` —
   `EmailMessage.correspondence`; only mail from the mailbox, an internal address, a known
-  contact or a known company domain moves `lastMessageAt`, `occurredAt` and
+  contact, a known company domain or an addressed participant on the same thread moves `lastMessageAt`, `occurredAt` and
   `lastActivityAt`. Backfill: `GET /internal/sync/correspondence?cursor=…` with the cron
   secret.
 - `feat: show the agent who each synced email was sent to when it files the thread on a
