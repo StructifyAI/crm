@@ -440,6 +440,10 @@ export type DealListItem = {
 	daysSinceLastActivity: number;
 	neverActive: boolean;
 	expectedCloseDate: string | null;
+	lastContactedAt?: string | null;
+	lastRepliedAt?: string | null;
+	daysSinceLastContact?: number | null;
+	awaitingReply?: boolean;
 };
 
 export type DealListResult = {
@@ -486,6 +490,10 @@ const dealListItem = z.object({
 	daysSinceLastActivity: finiteNumber,
 	neverActive: z.boolean().catch(false),
 	expectedCloseDate: requiredText.nullable(),
+	lastContactedAt: requiredText.nullable().optional(),
+	lastRepliedAt: requiredText.nullable().optional(),
+	daysSinceLastContact: finiteNumber.nullable().optional(),
+	awaitingReply: z.boolean().optional(),
 });
 
 const dealListResult = z

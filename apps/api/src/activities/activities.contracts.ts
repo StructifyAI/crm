@@ -63,6 +63,7 @@ export const activityCreateInput = z
 		companyId: z.string().optional(),
 		contactId: z.string().optional(),
 		dealId: z.string().optional(),
+		direction: z.enum(["OUT", "IN"]).optional(),
 	})
 	.refine((input) => input.companyId || input.contactId || input.dealId, {
 		message: "An activity has to be about a company, a contact or a deal.",
@@ -73,14 +74,39 @@ export const activityCreateInput = z
 			message: "A task needs a subject — it is the thing to do.",
 			path: ["subject"],
 		},
+	)
+	.refine(
+		(input) => input.type !== ActivityType.EMAIL || Boolean(input.direction),
+		{
+			message: "Say whether the email was sent or received.",
+			path: ["direction"],
+		},
 	);
 
 export type ActivityCreateInput = z.infer<typeof activityCreateInput>;
+
+export const activityUpdateInput = z
+	.object({
+		id: z.string(),
+		type: composableEnum.optional(),
+		direction: z.enum(["OUT", "IN"]).optional(),
+	})
+	.refine(
+		(input) => input.type !== undefined || input.direction !== undefined,
+		{
+			message: "Provide an activity type or direction to update.",
+		},
+	);
+
+export type ActivityUpdateInput = z.infer<typeof activityUpdateInput>;
 
 export const completeInput = z.object({
 	id: z.string(),
 	completed: z.boolean().default(true),
 });
+
+export const activityDeleteInput = z.object({ id: z.string() });
+export const activityDeleteOutput = z.object({ id: z.string() });
 
 export const myTasksInput = z.object({
 	window: z.enum(["overdue", "upcoming", "all"]).default("all"),
@@ -141,6 +167,7 @@ const activityCalendarEventOutput = z
 export const activityEntryOutput = z.object({
 	id: z.string(),
 	type: activityTypeOutput,
+	direction: z.enum(["OUT", "IN"]).nullable(),
 	subject: z.string().nullable(),
 	body: z.string().nullable(),
 	occurredAt: z.string().nullable(),

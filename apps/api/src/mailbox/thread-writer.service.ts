@@ -1,6 +1,7 @@
 import {
 	ActivityType,
 	type Db,
+	EmailClassification,
 	EmailDirection,
 	type MailboxSyncModel as MailboxSync,
 	type Prisma,
@@ -8,11 +9,13 @@ import {
 	RecordSource,
 } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { addressedIn, correspondenceSpan } from "./correspondence";
 import type { Deadline } from "./deadline";
 import { DealLinkService, type DealLinkTarget } from "./deal-link.service";
+import { EmailClassificationService } from "./email-classification.service";
 import { EmailTriageService } from "./email-triage.service";
 import type { SyncSource } from "./mailbox.constants";
 import { MAILBOX_TRIAGE } from "./mailbox-config";
@@ -51,6 +54,8 @@ export class ThreadWriterService {
 		private readonly stamp: ActivityStampService,
 		private readonly triage: EmailTriageService,
 		private readonly deals: DealLinkService,
+		private readonly classification: EmailClassificationService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async context(deadline: Deadline): Promise<WriteContext> {
@@ -78,12 +83,14 @@ export class ThreadWriterService {
 		const existing = await this.db.emailMessage.findUnique({
 			where: { rfcMessageId: parsed.rfcMessageId },
 			select: {
+				id: true,
 				threadId: true,
 				thread: {
 					select: {
 						companyId: true,
 						contactId: true,
-						activity: { select: { id: true } },
+						company: { select: { domain: true } },
+						activity: { select: { id: true, dealId: true } },
 					},
 				},
 			},
@@ -99,14 +106,24 @@ export class ThreadWriterService {
 					id: existing.threadId,
 					companyId: existing.thread.companyId,
 					contactId: existing.thread.contactId,
+					company: existing.thread.company,
+					activity: existing.thread.activity,
 				}
 			: await this.db.emailThread.findUnique({
 					where: { rootMessageId: parsed.rootId },
-					select: { id: true, companyId: true, contactId: true },
+					select: {
+						id: true,
+						companyId: true,
+						contactId: true,
+						company: { select: { domain: true } },
+						activity: { select: { dealId: true } },
+					},
 				});
 
 		let companyId = thread?.companyId ?? null;
 		let contactId = thread?.contactId ?? null;
+		const dealId = thread?.activity?.dealId ?? null;
+		let companyDomain = thread?.company?.domain ?? null;
 
 		if (!thread) {
 			const repliedTo =
@@ -127,26 +144,43 @@ export class ThreadWriterService {
 
 			companyId = match.companyId;
 			contactId = match.contactId;
+			companyDomain = match.domain;
 
 			if (!companyId && !contactId) {
 				return false;
 			}
 		}
 
-		const addressed =
-			thread && !outbound
-				? addressedIn(
-						await this.db.emailMessage.findMany({
-							where: { threadId: thread.id },
-							select: { recipients: true },
-						}),
-					)
-				: undefined;
+		const addressed = thread
+			? addressedIn(
+					await this.db.emailMessage.findMany({
+						where: { threadId: thread.id },
+						select: { recipients: true },
+					}),
+				)
+			: new Set<string>();
+		const classification = await this.classification.classify(
+			{
+				direction: outbound ? EmailDirection.OUTBOUND : EmailDirection.INBOUND,
+				fromEmail: parsed.from.email,
+				companyId,
+				contactId,
+				dealId,
+				companyDomain,
+			},
+			context,
+			addressed,
+		);
 		const correspondence =
 			outbound ||
 			(await this.match.corresponds(parsed.from, context, addressed));
 
-		let stored: { threadId: string; occurredAt: Date | null };
+		let stored: {
+			threadId: string;
+			messageId: string;
+			occurredAt: Date | null;
+			flippedMessageIds: string[];
+		};
 
 		try {
 			stored = await this.db.$transaction(async (tx) => {
@@ -167,57 +201,93 @@ export class ThreadWriterService {
 							select: { id: true },
 						});
 
-				if (!repair) {
-					await tx.emailMessage.create({
-						data: {
-							threadId: record.id,
-							rfcMessageId: parsed.rfcMessageId,
-							syncedByUserId: row.userId,
-							gmailMessageId: parsed.gmailMessageId ?? null,
-							outlookMessageId: parsed.outlookMessageId ?? null,
-							outlookWebLink: parsed.outlookWebLink ?? null,
-							direction: outbound
-								? EmailDirection.OUTBOUND
-								: EmailDirection.INBOUND,
-							correspondence,
-							fromEmail: parsed.from.email,
-							fromName: parsed.from.name,
-							recipients: parsed.recipients,
-							subject: parsed.subject,
-							snippet: snippetOf(parsed.body),
-							body: parsed.body || null,
-							sentAt: parsed.sentAt,
-						},
-					});
-
-					if (correspondence) {
-						const addressedNow = parsed.recipients
-							.map((person) => person.email.toLowerCase())
-							.filter((email) => {
-								const domain = workDomain(email);
-								return (
-									!context.suppressedEmails.has(email) &&
-									!(domain && context.suppressedDomains.has(domain))
-								);
-							});
-						if (addressedNow.length > 0) {
+				const flippedMessageIds: string[] = [];
+				const message = !repair
+					? await tx.emailMessage.create({
+							data: {
+								threadId: record.id,
+								rfcMessageId: parsed.rfcMessageId,
+								syncedByUserId: row.userId,
+								gmailMessageId: parsed.gmailMessageId ?? null,
+								outlookMessageId: parsed.outlookMessageId ?? null,
+								outlookWebLink: parsed.outlookWebLink ?? null,
+								direction: outbound
+									? EmailDirection.OUTBOUND
+									: EmailDirection.INBOUND,
+								correspondence,
+								classification,
+								fromEmail: parsed.from.email,
+								fromName: parsed.from.name,
+								recipients: parsed.recipients,
+								subject: parsed.subject,
+								snippet: snippetOf(parsed.body),
+								body: parsed.body || null,
+								sentAt: parsed.sentAt,
+							},
+							select: { id: true },
+						})
+					: await tx.emailMessage.update({
+							where: { id: existing.id },
+							data: { correspondence, classification },
+							select: { id: true },
+						});
+				if (!repair && correspondence) {
+					const addressedNow = parsed.recipients
+						.map((person) => person.email.toLowerCase())
+						.filter((email) => {
+							const domain = workDomain(email);
+							return (
+								!context.suppressedEmails.has(email) &&
+								!(domain && context.suppressedDomains.has(domain))
+							);
+						});
+					if (addressedNow.length > 0) {
+						const earlierMessages = await tx.emailMessage.findMany({
+							where: {
+								threadId: record.id,
+								correspondence: false,
+								fromEmail: {
+									in: addressedNow,
+									mode: "insensitive",
+								},
+							},
+							select: { id: true, classification: true },
+						});
+						if (earlierMessages.length > 0) {
 							await tx.emailMessage.updateMany({
 								where: {
-									threadId: record.id,
-									correspondence: false,
-									fromEmail: {
-										in: addressedNow,
-										mode: "insensitive",
-									},
+									id: { in: earlierMessages.map(({ id }) => id) },
 								},
 								data: { correspondence: true },
 							});
+							flippedMessageIds.push(
+								...earlierMessages
+									.filter(
+										({ classification: previous }) =>
+											previous === EmailClassification.UNKNOWN ||
+											previous === EmailClassification.AUTOMATED,
+									)
+									.map(({ id }) => id),
+							);
+							if (flippedMessageIds.length > 0) {
+								await tx.emailMessage.updateMany({
+									where: { id: { in: flippedMessageIds } },
+									data: { classification: EmailClassification.THEIRS },
+								});
+							}
 						}
 					}
 				}
 
 				const span = await correspondenceSpan(tx, record.id);
-				if (!span) return { threadId: record.id, occurredAt: null };
+				if (!span) {
+					return {
+						threadId: record.id,
+						messageId: message.id,
+						occurredAt: null,
+						flippedMessageIds,
+					};
+				}
 
 				const data: Prisma.EmailThreadUpdateInput = {
 					messageCount: span.messageCount,
@@ -232,7 +302,12 @@ export class ThreadWriterService {
 				await tx.emailThread.update({ where: { id: record.id }, data });
 
 				if (!correspondence) {
-					return { threadId: record.id, occurredAt: null };
+					return {
+						threadId: record.id,
+						messageId: message.id,
+						occurredAt: null,
+						flippedMessageIds,
+					};
 				}
 
 				const occurredAt = await this.project(tx, record.id, row.userId, {
@@ -244,14 +319,30 @@ export class ThreadWriterService {
 					origin: options.origin,
 				});
 
-				return { threadId: record.id, occurredAt };
+				return {
+					threadId: record.id,
+					messageId: message.id,
+					occurredAt,
+					flippedMessageIds,
+				};
 			});
 		} catch (error) {
 			if (await this.storedElsewhere(error, parsed.rfcMessageId)) return false;
 			throw error;
 		}
 
-		if (!stored.occurredAt) return !repair;
+		await this.contactEvents.recordMessage(stored.messageId);
+		for (const messageId of stored.flippedMessageIds) {
+			await this.contactEvents.recordMessage(messageId);
+		}
+
+		if (
+			!stored.occurredAt ||
+			(classification !== EmailClassification.OURS &&
+				classification !== EmailClassification.THEIRS)
+		) {
+			return !repair;
+		}
 
 		await this.touch(
 			{ companyId, contactId },

@@ -23,6 +23,7 @@ describe("calendar meeting deal link", () => {
 		const dealQueries: unknown[] = [];
 		const activityQueries: unknown[] = [];
 		const stampTargets: unknown[] = [];
+		const recordedActivityIds: string[] = [];
 		const db = {
 			deal: {
 				findMany: async (query: Prisma.DealFindManyArgs) => {
@@ -36,7 +37,10 @@ describe("calendar meeting deal link", () => {
 			activity: {
 				upsert: async (query: Prisma.ActivityUpsertArgs) => {
 					activityQueries.push(query);
-					return { createdAt: new Date("2026-01-01T00:00:00.000Z") };
+					return {
+						id: "activity-1",
+						createdAt: new Date("2026-01-01T00:00:00.000Z"),
+					};
 				},
 			},
 		} as unknown as Db;
@@ -78,6 +82,11 @@ describe("calendar meeting deal link", () => {
 				stampTargets.push(target);
 			},
 		} as unknown as ActivityStampService;
+		const contactEvents = {
+			recordActivity: async (activityId: string) => {
+				recordedActivityIds.push(activityId);
+			},
+		};
 		const service = new CalendarSyncService(
 			db,
 			calendar,
@@ -85,6 +94,7 @@ describe("calendar meeting deal link", () => {
 			match,
 			state,
 			stamp,
+			contactEvents as never,
 			{} as unknown as AgentTriggerService,
 		);
 
@@ -123,5 +133,6 @@ describe("calendar meeting deal link", () => {
 		expect(stampTargets).toEqual([
 			{ companyId: "company-1", contactId: null, dealId: "deal-1" },
 		]);
+		expect(recordedActivityIds).toEqual(["activity-1"]);
 	});
 });

@@ -1,4 +1,4 @@
-import { ActivityType, db, EmailDirection } from "@crm/db";
+import { ActivityType, db } from "@crm/db";
 import { z } from "zod";
 import { isDerivedName } from "./names";
 
@@ -88,6 +88,10 @@ export type CompanyHistory = {
 		theyReplied: boolean;
 		lastReplyAt: string | null;
 		lastReplyFrom: string | null;
+		lastContactedAt: string | null;
+		lastReplyChannel: string | null;
+		lastContactChannel: string | null;
+		awaitingReply: boolean;
 		nextMeetingAt: string | null;
 	};
 };
@@ -102,6 +106,8 @@ export async function readCompanyHistory(
 		includeCalendar?: boolean;
 	} = {},
 ): Promise<CompanyHistory | null> {
+	const includeEmail = options.includeEmail ?? true;
+	const includeCalendar = options.includeCalendar ?? true;
 	const company = await db.company.findUnique({
 		where: { id: companyId },
 		select: {
@@ -116,16 +122,28 @@ export async function readCompanyHistory(
 			description: true,
 			linkedinUrl: true,
 			enrichmentStatus: true,
+			lastContactedAt: true,
+			lastRepliedAt: true,
+			lastRepliedEventId: true,
+			lastContactedEvent: { select: { channel: true } },
 		},
 	});
 
 	if (!company) return null;
-	const includeEmail = options.includeEmail ?? true;
-	const includeCalendar = options.includeCalendar ?? true;
 
 	const belongsToCompany = { OR: [{ companyId }, { contact: { companyId } }] };
+	const lastRepliedEventPromise =
+		includeEmail && company.lastRepliedEventId
+			? db.contactEvent.findUnique({
+					where: { id: company.lastRepliedEventId },
+					select: {
+						channel: true,
+						contact: { select: { firstName: true, lastName: true } },
+					},
+				})
+			: Promise.resolve(null);
 
-	const [people, deals, threads, meetings, notes, lastInbound, counts] =
+	const [people, deals, threads, meetings, notes, lastRepliedEvent, counts] =
 		await Promise.all([
 			db.contact.findMany({
 				where: { companyId },
@@ -219,17 +237,7 @@ export async function readCompanyHistory(
 					})
 				: Promise.resolve([]),
 			recentNotes({ companyId }),
-			includeEmail
-				? db.emailMessage.findFirst({
-						where: {
-							direction: EmailDirection.INBOUND,
-							correspondence: true,
-							thread: belongsToCompany,
-						},
-						orderBy: { sentAt: "desc" },
-						select: { sentAt: true, fromEmail: true, fromName: true },
-					})
-				: Promise.resolve(null),
+			lastRepliedEventPromise,
 			Promise.all([
 				db.contact.count({ where: { companyId } }),
 				includeEmail
@@ -286,11 +294,18 @@ export async function readCompanyHistory(
 			openDeals: deals.filter((deal) => isOpen(deal.stage)).length,
 			emails: emailCount,
 			meetings: meetingCount,
-			theyReplied: lastInbound !== null,
-			lastReplyAt: lastInbound?.sentAt.toISOString() ?? null,
-			lastReplyFrom: lastInbound
-				? (lastInbound.fromName ?? lastInbound.fromEmail)
+			theyReplied: company.lastRepliedAt !== null,
+			lastReplyAt: company.lastRepliedAt?.toISOString() ?? null,
+			lastReplyFrom: lastRepliedEvent?.contact
+				? fullName(lastRepliedEvent.contact)
 				: null,
+			lastContactedAt: company.lastContactedAt?.toISOString() ?? null,
+			lastReplyChannel: lastRepliedEvent?.channel ?? null,
+			lastContactChannel: company.lastContactedEvent?.channel ?? null,
+			awaitingReply:
+				company.lastContactedAt !== null &&
+				(company.lastRepliedAt === null ||
+					company.lastContactedAt > company.lastRepliedAt),
 			nextMeetingAt:
 				meetings
 					.filter((meeting) => meeting.startsAt > now)
@@ -333,6 +348,10 @@ export type DealHistory = {
 		theyReplied: boolean;
 		lastReplyAt: string | null;
 		lastReplyFrom: string | null;
+		lastContactedAt: string | null;
+		lastReplyChannel: string | null;
+		lastContactChannel: string | null;
+		awaitingReply: boolean;
 		nextMeetingAt: string | null;
 		daysSinceLastActivity: number | null;
 	};
@@ -348,6 +367,8 @@ export async function readDealHistory(
 		includeCalendar?: boolean;
 	} = {},
 ): Promise<DealHistory | null> {
+	const includeEmail = options.includeEmail ?? true;
+	const includeCalendar = options.includeCalendar ?? true;
 	const deal = await db.deal.findUnique({
 		where: { id: dealId },
 		select: {
@@ -362,6 +383,10 @@ export async function readDealHistory(
 			closedAt: true,
 			closedReason: true,
 			lastActivityAt: true,
+			lastContactedAt: true,
+			lastRepliedAt: true,
+			lastRepliedEventId: true,
+			lastContactedEvent: { select: { channel: true } },
 			createdAt: true,
 			owner: { select: { name: true, email: true } },
 			company: { select: { id: true, name: true, domain: true } },
@@ -383,8 +408,6 @@ export async function readDealHistory(
 	});
 
 	if (!deal) return null;
-	const includeEmail = options.includeEmail ?? true;
-	const includeCalendar = options.includeCalendar ?? true;
 
 	const contactIds = deal.contacts.map(({ contact }) => contact.id);
 
@@ -398,7 +421,18 @@ export async function readDealHistory(
 				}
 			: { companyId: deal.company.id };
 
-	const [stageChanges, threads, meetings, notes, lastInbound] =
+	const lastRepliedEventPromise =
+		includeEmail && deal.lastRepliedEventId
+			? db.contactEvent.findUnique({
+					where: { id: deal.lastRepliedEventId },
+					select: {
+						channel: true,
+						contact: { select: { firstName: true, lastName: true } },
+					},
+				})
+			: Promise.resolve(null);
+
+	const [stageChanges, threads, meetings, notes, lastRepliedEvent] =
 		await Promise.all([
 			db.activity.findMany({
 				where: { dealId, type: ActivityType.STAGE_CHANGE },
@@ -458,17 +492,7 @@ export async function readDealHistory(
 					})
 				: Promise.resolve([]),
 			recentNotes({ dealId }),
-			includeEmail
-				? db.emailMessage.findFirst({
-						where: {
-							direction: EmailDirection.INBOUND,
-							correspondence: true,
-							thread: relatedThreads,
-						},
-						orderBy: { sentAt: "desc" },
-						select: { sentAt: true, fromEmail: true, fromName: true },
-					})
-				: Promise.resolve(null),
+			lastRepliedEventPromise,
 		]);
 
 	const now = new Date();
@@ -510,11 +534,18 @@ export async function readDealHistory(
 		meetings: meetings.map((meeting) => toAccountMeeting(meeting, now)),
 		notes,
 		stats: {
-			theyReplied: lastInbound !== null,
-			lastReplyAt: lastInbound?.sentAt.toISOString() ?? null,
-			lastReplyFrom: lastInbound
-				? (lastInbound.fromName ?? lastInbound.fromEmail)
+			theyReplied: deal.lastRepliedAt !== null,
+			lastReplyAt: deal.lastRepliedAt?.toISOString() ?? null,
+			lastReplyFrom: lastRepliedEvent?.contact
+				? fullName(lastRepliedEvent.contact)
 				: null,
+			lastContactedAt: deal.lastContactedAt?.toISOString() ?? null,
+			lastReplyChannel: lastRepliedEvent?.channel ?? null,
+			lastContactChannel: deal.lastContactedEvent?.channel ?? null,
+			awaitingReply:
+				deal.lastContactedAt !== null &&
+				(deal.lastRepliedAt === null ||
+					deal.lastContactedAt > deal.lastRepliedAt),
 			nextMeetingAt:
 				meetings
 					.filter((meeting) => meeting.startsAt > now)

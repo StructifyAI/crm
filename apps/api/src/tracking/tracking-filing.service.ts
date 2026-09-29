@@ -9,7 +9,10 @@ import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
 import { isMachineDomain } from "../companies/domain";
-import { ActivityStampService } from "../crm/activity-stamp.service";
+import {
+	ActivityStampService,
+	activityTime,
+} from "../crm/activity-stamp.service";
 import { racedContact, suppressionReason } from "../crm/contact-intake";
 import { normalizeEmail } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
@@ -176,10 +179,10 @@ export class TrackingFilingService {
 					createdById: author,
 					meta: { automated: true, source: "tracking" },
 				},
-				select: { createdAt: true },
+				select: { createdAt: true, occurredAt: true },
 			});
 
-			await this.stamp.touch({ contactId }, activity.createdAt);
+			await this.stamp.touch({ contactId }, activityTime(activity));
 		}
 
 		if (!visitorId) return;

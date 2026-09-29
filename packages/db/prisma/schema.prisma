@@ -219,6 +219,47 @@ enum ActivityType {
   ENRICHMENT
 }
 
+enum EmailClassification {
+  OURS
+  THEIRS
+  INTERNAL
+  AUTOMATED
+  UNKNOWN
+}
+
+enum ContactDirection {
+  OUT
+  IN
+}
+
+enum ContactChannel {
+  EMAIL
+  CALL
+  MEETING
+  LINKEDIN
+  TEXT
+  VOICEMAIL
+  IN_PERSON
+  OTHER
+}
+
+enum ContactDatePrecision {
+  EXACT
+  DAY
+  MONTH
+  UNKNOWN
+}
+
+enum ContactEventOrigin {
+  RECORDED
+  EXTRACTED
+}
+
+enum ContactExtractionStatus {
+  DONE
+  FAILED
+}
+
 enum EnrichmentStatus {
   PENDING
   RUNNING
@@ -354,7 +395,15 @@ model Company {
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
+  lastContactedAt      DateTime?
+  lastContactedEventId String?
+  lastContactedEvent   ContactEvent? @relation("CompanyLastContacted", fields: [lastContactedEventId], references: [id], onDelete: SetNull)
+  lastRepliedAt        DateTime?
+  lastRepliedEventId   String?
+  lastRepliedEvent     ContactEvent? @relation("CompanyLastReplied", fields: [lastRepliedEventId], references: [id], onDelete: SetNull)
+
   contacts       Contact[]           @relation("CompanyContacts")
+  contactEvents  ContactEvent[]
   conversations  AgentConversation[]
   deals          Deal[]
   activities     Activity[]
@@ -368,6 +417,8 @@ model Company {
   @@index([ownerId])
   @@index([name])
   @@index([lastActivityAt])
+  @@index([lastContactedAt])
+  @@index([lastRepliedAt])
   @@index([archivedAt])
   @@map("company")
 }
@@ -417,7 +468,15 @@ model Contact {
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
+  lastContactedAt      DateTime?
+  lastContactedEventId String?
+  lastContactedEvent   ContactEvent? @relation("ContactLastContacted", fields: [lastContactedEventId], references: [id], onDelete: SetNull)
+  lastRepliedAt        DateTime?
+  lastRepliedEventId   String?
+  lastRepliedEvent     ContactEvent? @relation("ContactLastReplied", fields: [lastRepliedEventId], references: [id], onDelete: SetNull)
+
   deals           DealContact[]
+  contactEvents   ContactEvent[]
   activities      Activity[]
   emailThreads    EmailThread[]
   calendarEvents  CalendarEvent[]
@@ -434,6 +493,8 @@ model Contact {
   @@index([companyId])
   @@index([ownerId])
   @@index([lastActivityAt])
+  @@index([lastContactedAt])
+  @@index([lastRepliedAt])
   @@index([archivedAt])
   @@map("contact")
 }
@@ -975,7 +1036,15 @@ model Deal {
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
+  lastContactedAt      DateTime?
+  lastContactedEventId String?
+  lastContactedEvent   ContactEvent? @relation("DealLastContacted", fields: [lastContactedEventId], references: [id], onDelete: SetNull)
+  lastRepliedAt        DateTime?
+  lastRepliedEventId   String?
+  lastRepliedEvent     ContactEvent? @relation("DealLastReplied", fields: [lastRepliedEventId], references: [id], onDelete: SetNull)
+
   contacts    DealContact[]
+  contactEvents ContactEvent[]
   activities  Activity[]
   fieldValues FieldValue[]
   createdAt   DateTime      @default(now())
@@ -986,6 +1055,8 @@ model Deal {
   @@index([stage])
   @@index([expectedCloseDate])
   @@index([lastActivityAt])
+  @@index([lastContactedAt])
+  @@index([lastRepliedAt])
   @@index([baseAmount])
   @@index([currency])
   @@index([archivedAt])
@@ -1152,6 +1223,7 @@ model Activity {
   occurredAt  DateTime?
   dueAt       DateTime?
   completedAt DateTime?
+  direction   ContactDirection?
 
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -1166,6 +1238,8 @@ model Activity {
 
   emailThreadId   String?        @unique
   emailThread     EmailThread?   @relation(fields: [emailThreadId], references: [id], onDelete: Cascade)
+  contactEvents   ContactEvent[]
+  contactExtraction ContactExtraction?
   calendarEventId String?        @unique
   calendarEvent   CalendarEvent? @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
 
@@ -1252,6 +1326,7 @@ model EmailMessage {
 
   direction      EmailDirection
   correspondence Boolean        @default(true)
+  classification EmailClassification?
   fromEmail      String
   fromName       String?
   recipients     Json
@@ -1260,10 +1335,69 @@ model EmailMessage {
   body           String?
   sentAt         DateTime
 
+  contactEvents ContactEvent[]
+
   createdAt DateTime @default(now())
 
   @@index([threadId, sentAt])
   @@map("emailMessage")
+}
+
+model ContactEvent {
+  id        String @id @default(cuid())
+  sourceKey String @unique
+
+  dealId    String?
+  deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  occurredAt       DateTime?
+  datePrecision    ContactDatePrecision
+  channel          ContactChannel
+  direction        ContactDirection
+  origin           ContactEventOrigin
+  sourceActivityId String?
+  sourceActivity   Activity? @relation(fields: [sourceActivityId], references: [id], onDelete: Cascade)
+  sourceMessageId  String?
+  sourceMessage    EmailMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: Cascade)
+  bodyHash         String?
+  confidence       Float?
+  verification     Float?
+  quote            String?
+  needsReview      Boolean @default(false)
+  supersededAt     DateTime?
+  createdAt        DateTime @default(now())
+
+  dealLastContacted    Deal[]    @relation("DealLastContacted")
+  dealLastReplied      Deal[]    @relation("DealLastReplied")
+  contactLastContacted Contact[] @relation("ContactLastContacted")
+  contactLastReplied   Contact[] @relation("ContactLastReplied")
+  companyLastContacted Company[] @relation("CompanyLastContacted")
+  companyLastReplied   Company[] @relation("CompanyLastReplied")
+
+  @@index([dealId])
+  @@index([contactId])
+  @@index([companyId])
+  @@index([sourceActivityId])
+  @@index([needsReview])
+  @@map("contactEvent")
+}
+
+model ContactExtraction {
+  activityId String   @id
+  activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  bodyHash   String
+  status     ContactExtractionStatus
+  attempts   Int      @default(0)
+  error      String?
+  model      String?
+  extractedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("contactExtraction")
 }
 
 model CalendarEvent {

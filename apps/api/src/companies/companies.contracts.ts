@@ -1,6 +1,7 @@
 import { DealStage, EnrichmentStatus, RecordSource } from "@crm/db";
 import { FIELD_TYPES } from "@crm/db/fields";
 import { z } from "zod";
+import { contactClockOutput } from "../contact-events/contact-events.contracts";
 import { bulkIdsInput } from "../crm/bulk";
 import { fieldEntity, recordFieldValues } from "../fields/fields.contracts";
 import { activityFacetInput, listInput } from "../trpc/list-input";
@@ -130,6 +131,8 @@ export const companyRowOutput = z.object({
 	contactCount: z.number(),
 	openDealCount: z.number(),
 	lastActivityAt: z.string().nullable(),
+	lastContacted: contactClockOutput.nullable(),
+	lastReplied: contactClockOutput.nullable(),
 	createdAt: z.string(),
 	archivedAt: z.string().nullable(),
 	fields: recordFieldValues,
@@ -206,6 +209,9 @@ export const companyDetailOutput = z.object({
 	fields: z.array(companyRecordFieldOutput),
 	queued: z.boolean(),
 	createdAt: z.string(),
+	lastContacted: contactClockOutput.nullable(),
+	lastReplied: contactClockOutput.nullable(),
+	unclassifiedInbound: z.number(),
 	archivedAt: z.string().nullable(),
 	enrichedAt: z.string().nullable(),
 	primaryContactId: z.string().nullable(),

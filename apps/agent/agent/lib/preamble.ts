@@ -253,6 +253,10 @@ export async function dealPreamble(
 			currency: true,
 			expectedCloseDate: true,
 			lastActivityAt: true,
+			lastContactedAt: true,
+			lastRepliedAt: true,
+			lastContactedEvent: { select: { channel: true } },
+			lastRepliedEvent: { select: { channel: true } },
 			company: { select: { id: true, name: true } },
 			contacts: {
 				select: {
@@ -278,6 +282,28 @@ export async function dealPreamble(
 		})
 		.join("; ");
 
+	const awaitingReply =
+		deal.lastContactedAt !== null &&
+		(deal.lastRepliedAt === null || deal.lastContactedAt > deal.lastRepliedAt);
+	const contactClockLine =
+		deal.lastContactedAt === null && deal.lastRepliedAt === null
+			? deal.lastActivityAt
+				? `Last touched ${deal.lastActivityAt.toDateString()}.`
+				: "Nothing has happened on it yet."
+			: [
+					deal.lastContactedAt
+						? `Last contacted ${deal.lastContactedAt.toDateString()} by ${deal.lastContactedEvent?.channel.toLowerCase() ?? "unknown channel"}.`
+						: "",
+					deal.lastRepliedAt
+						? `Last reply ${deal.lastRepliedAt.toDateString()} by ${deal.lastRepliedEvent?.channel.toLowerCase() ?? "unknown channel"}.`
+						: "No reply yet.",
+					awaitingReply
+						? "We wrote last and they have not answered, so a follow-up is due."
+						: "",
+				]
+					.filter(Boolean)
+					.join(" ");
+
 	const markdown = [
 		"## This session",
 		"",
@@ -295,9 +321,7 @@ export async function dealPreamble(
 				? `. Expected close: ${deal.expectedCloseDate.toDateString()}`
 				: ""
 		}.`,
-		deal.lastActivityAt
-			? `Last touched ${deal.lastActivityAt.toDateString()}.`
-			: "Nothing has happened on it yet.",
+		contactClockLine,
 		...(deal.description
 			? [`The rep's own description of it: "${deal.description}"`]
 			: []),

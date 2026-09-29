@@ -56,6 +56,7 @@ function build(options: {
 	const updates: { id: string; data: Prisma.ActivityUpdateInput }[] = [];
 	const creates: Prisma.ActivityCreateInput[] = [];
 	const stamps: ActivityTarget[] = [];
+	const recordedActivityIds: string[] = [];
 	const saved: Date[] = [];
 	const resumes: Prisma.AppSettingUncheckedUpdateInput["granolaSyncResume"][] =
 		[];
@@ -111,7 +112,10 @@ function build(options: {
 			},
 			create: async ({ data }: { data: Prisma.ActivityCreateInput }) => {
 				creates.push(data);
-				return { createdAt: new Date("2026-09-01T10:06:00.000Z") };
+				return {
+					id: "activity-created",
+					createdAt: new Date("2026-09-01T10:06:00.000Z"),
+				};
 			},
 		},
 		deal: {
@@ -166,11 +170,17 @@ function build(options: {
 			stamps.push(target);
 		},
 	};
+	const contactEvents = {
+		recordActivity: async (activityId: string) => {
+			recordedActivityIds.push(activityId);
+		},
+	};
 	const service = new GranolaSyncService(
 		db,
 		api,
 		match as never,
 		stamp as never,
+		contactEvents as never,
 		config as never,
 	);
 
@@ -179,6 +189,7 @@ function build(options: {
 		updates,
 		creates,
 		stamps,
+		recordedActivityIds,
 		saved,
 		resumes,
 		stateUpdates,
@@ -244,7 +255,7 @@ describe("GranolaSyncService", () => {
 	});
 
 	it("creates a matched meeting and stamps its deal", async () => {
-		const { service, creates, stamps } = build({
+		const { service, creates, stamps, recordedActivityIds } = build({
 			key: "grn_test",
 			details: {
 				"note-1": note({
@@ -289,6 +300,7 @@ describe("GranolaSyncService", () => {
 		expect(stamps).toEqual([
 			{ companyId: "company-1", contactId: "contact-1", dealId: "deal-1" },
 		]);
+		expect(recordedActivityIds).toEqual(["activity-created"]);
 	});
 
 	it("updates an existing standalone Granola activity", async () => {

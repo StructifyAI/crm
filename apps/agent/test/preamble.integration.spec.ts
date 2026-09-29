@@ -1,5 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { DealStage, db } from "@crm/db";
+import {
+	ContactChannel,
+	ContactDatePrecision,
+	ContactDirection,
+	ContactEventOrigin,
+	DealStage,
+	db,
+} from "@crm/db";
 import {
 	companyPreamble,
 	composeClosing,
@@ -16,6 +23,7 @@ const domain = `fernhill-${suffix}.test`;
 
 let companyId: string;
 let dealId: string;
+let clockDealId: string;
 let paulaId: string;
 let tomiId: string;
 
@@ -81,6 +89,17 @@ beforeAll(async () => {
 		select: { id: true },
 	});
 	dealId = deal.id;
+
+	const clockDeal = await db.deal.create({
+		data: {
+			name: `Fernhill contact clocks ${suffix}`,
+			companyId,
+			ownerId: user.id,
+			stage: DealStage.CONTRACT_SENT,
+		},
+		select: { id: true },
+	});
+	clockDealId = clockDeal.id;
 });
 
 afterAll(cleanup);
@@ -162,6 +181,86 @@ describe("dealPreamble", () => {
 		expect(markdown).toContain(`company id \`${companyId}\``);
 		expect(markdown).toContain(`Champion \`${paulaId}\``);
 		expect(focus).toEqual({ companyId });
+	});
+
+	it("falls back to the activity timestamp when both contact clocks are empty", async () => {
+		const lastActivityAt = new Date("2026-08-01T12:00:00.000Z");
+		await db.deal.update({
+			where: { id: dealId },
+			data: { lastActivityAt },
+		});
+
+		const { markdown } = await dealPreamble(dealId, rep);
+
+		expect(markdown).toContain(
+			`Last touched ${lastActivityAt.toDateString()}.`,
+		);
+		expect(markdown).not.toContain("No reply yet.");
+	});
+
+	it("reports the maintained contact clocks and due follow-up", async () => {
+		const lastContactedAt = new Date("2026-08-02T12:00:00.000Z");
+		const lastRepliedAt = new Date("2026-08-01T12:00:00.000Z");
+		const lastContactedEvent = await db.contactEvent.create({
+			data: {
+				sourceKey: `preamble-contact-${suffix}`,
+				dealId: clockDealId,
+				contactId: paulaId,
+				companyId,
+				occurredAt: lastContactedAt,
+				datePrecision: ContactDatePrecision.EXACT,
+				channel: ContactChannel.EMAIL,
+				direction: ContactDirection.OUT,
+				origin: ContactEventOrigin.RECORDED,
+			},
+			select: { id: true },
+		});
+		const lastRepliedEvent = await db.contactEvent.create({
+			data: {
+				sourceKey: `preamble-reply-${suffix}`,
+				dealId: clockDealId,
+				contactId: paulaId,
+				companyId,
+				occurredAt: lastRepliedAt,
+				datePrecision: ContactDatePrecision.EXACT,
+				channel: ContactChannel.EMAIL,
+				direction: ContactDirection.IN,
+				origin: ContactEventOrigin.RECORDED,
+			},
+			select: { id: true },
+		});
+		await db.deal.update({
+			where: { id: clockDealId },
+			data: {
+				lastContactedAt,
+				lastContactedEventId: lastContactedEvent.id,
+				lastRepliedAt,
+				lastRepliedEventId: lastRepliedEvent.id,
+			},
+		});
+
+		const { markdown } = await dealPreamble(clockDealId, rep);
+
+		expect(markdown).toContain(
+			`Last contacted ${lastContactedAt.toDateString()} by email.`,
+		);
+		expect(markdown).toContain(
+			`Last reply ${lastRepliedAt.toDateString()} by email.`,
+		);
+		expect(markdown).toContain(
+			"We wrote last and they have not answered, so a follow-up is due.",
+		);
+		expect(markdown).not.toContain("Last touched");
+
+		await db.deal.update({
+			where: { id: clockDealId },
+			data: { lastRepliedAt: null, lastRepliedEventId: null },
+		});
+		const noReply = await dealPreamble(clockDealId, rep);
+		expect(noReply.markdown).toContain("No reply yet.");
+		expect(noReply.markdown).toContain(
+			"We wrote last and they have not answered, so a follow-up is due.",
+		);
 	});
 });
 

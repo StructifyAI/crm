@@ -1,6 +1,7 @@
 import { isMicrosoftConfigured, signsInWithMicrosoft } from "@crm/auth";
 import type { Db, Prisma } from "@crm/db";
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
@@ -30,6 +31,7 @@ export class MicrosoftConnectionService {
 		private readonly tokens: MailboxTokenService,
 		private readonly state: SyncStateService,
 		private readonly stamp: ActivityStampService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async status(userId: string): Promise<MicrosoftConnectionStatus> {
@@ -135,15 +137,41 @@ export class MicrosoftConnectionService {
 			outlookMessageId: { not: null },
 		};
 
-		const purged = await this.db.$transaction(
+		const result = await this.db.$transaction(
 			async (tx) => {
-				const touched = await tx.emailMessage.findMany({
+				const messagesBeforeDelete = await tx.emailMessage.findMany({
 					where: mine,
-					select: { threadId: true },
-					distinct: ["threadId"],
+					select: { id: true, threadId: true },
 				});
 
-				const threadIds = touched.map((row) => row.threadId);
+				const messageIds = messagesBeforeDelete.map((row) => row.id);
+				const threadIds = [
+					...new Set(messagesBeforeDelete.map((row) => row.threadId)),
+				];
+				const threadActivities =
+					threadIds.length > 0
+						? await tx.activity.findMany({
+								where: { emailThreadId: { in: threadIds } },
+								select: { id: true },
+							})
+						: [];
+				const activityIds = threadActivities.map((activity) => activity.id);
+				const contactEventTargets =
+					messageIds.length > 0 || activityIds.length > 0
+						? await this.contactEvents.targetsForEvents(
+								{
+									OR: [
+										...(messageIds.length > 0
+											? [{ sourceMessageId: { in: messageIds } }]
+											: []),
+										...(activityIds.length > 0
+											? [{ sourceActivityId: { in: activityIds } }]
+											: []),
+									],
+								},
+								tx,
+							)
+						: [];
 				const messages = await tx.emailMessage.deleteMany({ where: mine });
 
 				await tx.emailThread.deleteMany({
@@ -152,16 +180,21 @@ export class MicrosoftConnectionService {
 
 				await rebuildThreads(tx, threadIds);
 
-				return messages.count;
+				return { purged: messages.count, contactEventTargets };
 			},
 			{ timeout: PURGE_TIMEOUT_MS },
 		);
 
 		await this.stamp.recomputeAll();
+		await this.contactEvents.refreshAffected(result.contactEventTargets);
 
-		this.logger.log({ message: "Outlook data purged", userId, purged });
+		this.logger.log({
+			message: "Outlook data purged",
+			userId,
+			purged: result.purged,
+		});
 
-		return { purged };
+		return { purged: result.purged };
 	}
 
 	async revoke(userId: string): Promise<RevokeAccessOutput> {

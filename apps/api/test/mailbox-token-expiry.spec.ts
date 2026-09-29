@@ -19,6 +19,7 @@ import type { SyncStateService } from "../src/mailbox/sync-state.service";
 import type { ThreadWriterService } from "../src/mailbox/thread-writer.service";
 import type { GraphClient } from "../src/microsoft/graph.client";
 import { OutlookSyncService } from "../src/microsoft/outlook-sync.service";
+import { noContactEvents } from "./contact-events.stub";
 
 const timeMin = "2026-01-01T00:00:00.000Z";
 const timeMax = "2026-06-30T00:00:00.000Z";
@@ -140,6 +141,7 @@ function calendar(
 		match as never,
 		stateStub(log),
 		{} as never,
+		noContactEvents,
 		{} as never,
 	);
 

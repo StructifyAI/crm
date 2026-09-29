@@ -1,4 +1,4 @@
-import type { Prisma } from "@crm/db";
+import { EmailClassification, type Prisma } from "@crm/db";
 import { parseStoredRecipients } from "@crm/validation/email-recipients";
 
 export type CorrespondenceSpan = {
@@ -26,7 +26,17 @@ export async function correspondenceSpan(
 	const [all, human] = await Promise.all([
 		tx.emailMessage.count({ where: { threadId } }),
 		tx.emailMessage.aggregate({
-			where: { threadId, correspondence: true },
+			where: {
+				threadId,
+				OR: [
+					{
+						classification: {
+							in: [EmailClassification.OURS, EmailClassification.THEIRS],
+						},
+					},
+					{ classification: null, correspondence: true },
+				],
+			},
 			_min: { sentAt: true },
 			_max: { sentAt: true },
 		}),

@@ -9,8 +9,10 @@ import {
 import { parseStoredRecipients } from "@crm/validation/email-recipients";
 import { Injectable, Logger } from "@nestjs/common";
 import { bridge } from "../agent/bridge";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
+import { correspondenceSpan } from "./correspondence";
 import { type Deadline, deadlineIn, overdue, remainingMs } from "./deadline";
 import { MAILBOX_DEAL_LINK, SYNC_TICK } from "./mailbox-config";
 
@@ -37,6 +39,7 @@ export class DealLinkService {
 	constructor(
 		@InjectDatabase() private readonly db: Db,
 		private readonly stamp: ActivityStampService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async attach(
@@ -48,7 +51,7 @@ export class DealLinkService {
 
 		const activity = await this.db.activity.findUnique({
 			where: { emailThreadId: threadId },
-			select: { id: true, dealId: true, occurredAt: true },
+			select: { id: true, dealId: true },
 		});
 		if (!activity || activity.dealId) return null;
 
@@ -75,9 +78,16 @@ export class DealLinkService {
 		});
 		if (linked.count === 0) return null;
 
-		await this.stamp.touch(
-			{ dealId: answer.dealId },
-			activity.occurredAt ?? new Date(),
+		const span = await correspondenceSpan(this.db, threadId);
+		if (span) {
+			await this.stamp.touch({ dealId: answer.dealId }, span.lastMessageAt);
+		}
+		const messages = await this.db.emailMessage.findMany({
+			where: { threadId },
+			select: { id: true },
+		});
+		await Promise.all(
+			messages.map((message) => this.contactEvents.recordMessage(message.id)),
 		);
 
 		this.logger.log({

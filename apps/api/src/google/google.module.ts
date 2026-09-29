@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AgentModule } from "../agent/agent.module";
+import { ContactEventsModule } from "../contact-events/contact-events.module";
 import { MailboxModule } from "../mailbox/mailbox.module";
 import { TrpcModule } from "../trpc/trpc.module";
 import { CalendarClient } from "./calendar.client";
@@ -12,7 +13,7 @@ import { GoogleConnectionService } from "./google-connection.service";
 import { GoogleSyncService } from "./google-sync.service";
 
 @Module({
-	imports: [TrpcModule, MailboxModule, AgentModule],
+	imports: [TrpcModule, MailboxModule, AgentModule, ContactEventsModule],
 	providers: [
 		CalendarClient,
 		CalendarSyncService,

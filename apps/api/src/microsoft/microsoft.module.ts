@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { ContactEventsModule } from "../contact-events/contact-events.module";
 import { MailboxModule } from "../mailbox/mailbox.module";
 import { TrpcModule } from "../trpc/trpc.module";
 import { GraphClient } from "./graph.client";
@@ -8,7 +9,7 @@ import { MicrosoftSyncService } from "./microsoft-sync.service";
 import { OutlookSyncService } from "./outlook-sync.service";
 
 @Module({
-	imports: [TrpcModule, MailboxModule],
+	imports: [TrpcModule, MailboxModule, ContactEventsModule],
 	providers: [
 		GraphClient,
 		OutlookSyncService,

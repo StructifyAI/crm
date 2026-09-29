@@ -47,6 +47,7 @@ export function ActivityComposer({ anchor }: { anchor: TimelineAnchor }) {
 	const cache = useCrmCache();
 
 	const [type, setType] = useState<ComposableType>("NOTE");
+	const [direction, setDirection] = useState<"OUT" | "IN">("OUT");
 	const [draft, setDraft] = useState("");
 	const [dueAt, setDueAt] = useState<Date | undefined>(undefined);
 
@@ -73,6 +74,7 @@ export function ActivityComposer({ anchor }: { anchor: TimelineAnchor }) {
 		create.mutate({
 			...anchor,
 			type,
+			direction: type === "EMAIL" ? direction : undefined,
 			subject: isTask ? text : undefined,
 			body: isTask ? undefined : text,
 			dueAt: isTask ? (dueAt?.toISOString() ?? null) : undefined,
@@ -120,6 +122,22 @@ export function ActivityComposer({ anchor }: { anchor: TimelineAnchor }) {
 							</ToggleGroupItem>
 						))}
 					</ToggleGroup>
+
+					{type === "EMAIL" ? (
+						<ToggleGroup
+							type="single"
+							value={direction}
+							onValueChange={(next) => {
+								if (next === "OUT" || next === "IN") setDirection(next);
+							}}
+							size="sm"
+							spacing={0}
+							aria-label="Email direction"
+						>
+							<ToggleGroupItem value="OUT">Sent</ToggleGroupItem>
+							<ToggleGroupItem value="IN">Received</ToggleGroupItem>
+						</ToggleGroup>
+					) : null}
 
 					{isTask ? (
 						<Popover>

@@ -7,6 +7,7 @@ import type { CalendarSyncResume } from "@crm/validation/calendar-sync-resume";
 import type { EventsPage, EventsQuery } from "../src/google/calendar.client";
 import { CalendarSyncService } from "../src/google/calendar-sync.service";
 import { type Deadline, deadlineIn } from "../src/mailbox/deadline";
+import { noContactEvents } from "./contact-events.stub";
 
 const timeMin = "2026-01-01T00:00:00.000Z";
 const timeMax = "2026-06-30T00:00:00.000Z";
@@ -89,6 +90,7 @@ function build(
 		match as never,
 		state as never,
 		{} as never,
+		noContactEvents,
 		{} as never,
 	);
 }

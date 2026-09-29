@@ -1,10 +1,17 @@
-import { ActivityType, type Db, type Prisma, RecordSource } from "@crm/db";
+import {
+	ActivityType,
+	ContactDirection,
+	type Db,
+	type Prisma,
+	RecordSource,
+} from "@crm/db";
 import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import type { InstantlyWebhookEvent } from "@crm/validation/instantly-webhook";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
 import { isMachineDomain } from "../companies/domain";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { racedContact, suppressionReason } from "../crm/contact-intake";
 import { normalizeEmail } from "../crm/values";
@@ -41,7 +48,6 @@ export type InstantlySend = {
 };
 
 type TimelineEntry = {
-	type: ActivityType;
 	subject: string;
 	body: string;
 	eventType: string;
@@ -51,7 +57,10 @@ type TimelineEntry = {
 	uniboxUrl?: string | null;
 	mailbox: string | null;
 	occurredAt: Date;
-};
+} & (
+	| { type: typeof ActivityType.EMAIL; direction: ContactDirection }
+	| { type: typeof ActivityType.NOTE; direction?: undefined }
+);
 
 export type InstantlyReply = {
 	leadEmail: string;
@@ -91,6 +100,7 @@ export class InstantlyFilingService {
 		private readonly companies: CompanyDirectoryService,
 		private readonly agent: AgentTriggerService,
 		private readonly stamp: ActivityStampService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async resolveContact(
@@ -239,6 +249,7 @@ export class InstantlyFilingService {
 		const campaign = `"${send.campaignName ?? "campaign"}"`;
 		return this.attach(resolved.id, {
 			type: ActivityType.EMAIL,
+			direction: ContactDirection.OUT,
 			subject: send.subject || `Sent ${campaign} on Instantly`,
 			body: send.text,
 			eventType: "email_sent",
@@ -264,6 +275,7 @@ export class InstantlyFilingService {
 		const campaign = `"${reply.campaignName ?? "campaign"}"`;
 		const outcome = await this.attach(resolved.id, {
 			type: ActivityType.EMAIL,
+			direction: ContactDirection.IN,
 			subject: reply.subject || `Replied to ${campaign} on Instantly`,
 			body: stripQuotedHistory(reply.text),
 			eventType: "reply_received",
@@ -326,9 +338,10 @@ export class InstantlyFilingService {
 		if (!author) return "skipped";
 		const deal = await this.openDealFor(contactId, contact.companyId);
 
-		await this.db.activity.create({
+		const activity = await this.db.activity.create({
 			data: {
 				type: entry.type,
+				direction: entry.direction,
 				subject: entry.subject,
 				body: entry.body,
 				contactId,
@@ -354,6 +367,7 @@ export class InstantlyFilingService {
 			{ contactId, companyId: contact.companyId, dealId: deal?.id ?? null },
 			entry.occurredAt,
 		);
+		await this.contactEvents.recordActivity(activity.id);
 		return "filed";
 	}
 

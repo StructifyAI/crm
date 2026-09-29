@@ -2,10 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { db, type MailboxSyncModel as MailboxSync } from "@crm/db";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
+import { ContactClockService } from "../src/contact-events/contact-clock.service";
+import { ContactEventsService } from "../src/contact-events/contact-events.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
 import { deadlineIn } from "../src/mailbox/deadline";
 import type { DealLinkService } from "../src/mailbox/deal-link.service";
+import { EmailClassificationService } from "../src/mailbox/email-classification.service";
 import type { EmailTriageService } from "../src/mailbox/email-triage.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import {
@@ -23,8 +26,12 @@ const rootId = `<root-${suffix}@mail.test>`;
 const movedRoot = `outlook-conversation:${suffix}`;
 const addressedRoot = `<addressed-${suffix}@mail.test>`;
 const promotionRoot = `<promotion-${suffix}@mail.test>`;
+const suppressedRoot = `<suppressed-${suffix}@mail.test>`;
+const machineReminderRoot = `<machine-reminder-${suffix}@mail.test>`;
 const reminder = `reminder@superhuman-${suffix}.test`;
+const machineReminder = "reminder@superhuman.com";
 const stranger = "stranger@unknown-co.com";
+const suppressedAddress = `suppressed-${suffix}@unknown-co.com`;
 const instantlyMailbox = "ronak@getstructify.org";
 const instantlySender = "taichi@getstructify.org";
 
@@ -36,6 +43,7 @@ const agent = {
 } as unknown as AgentTriggerService;
 
 const stamp = new ActivityStampService(db);
+const contactEvents = new ContactEventsService(db, new ContactClockService(db));
 const directory = new CompanyDirectoryService(agent);
 const log = new EnrichmentLogService(db, stamp);
 const match = new MailboxMatchService(db, directory, agent, log);
@@ -49,7 +57,15 @@ const dealLink = {
 		return null;
 	},
 } as unknown as DealLinkService;
-const threads = new ThreadWriterService(db, match, stamp, triage, dealLink);
+const threads = new ThreadWriterService(
+	db,
+	match,
+	stamp,
+	triage,
+	dealLink,
+	new EmailClassificationService(db),
+	contactEvents,
+);
 
 let row: MailboxSync;
 
@@ -79,11 +95,22 @@ async function clean() {
 	await db.emailThread.deleteMany({
 		where: {
 			rootMessageId: {
-				in: [rootId, movedRoot, addressedRoot, promotionRoot],
+				in: [
+					rootId,
+					movedRoot,
+					addressedRoot,
+					promotionRoot,
+					suppressedRoot,
+					machineReminderRoot,
+				],
 			},
 		},
 	});
 	await db.contact.deleteMany({ where: { email: person } });
+	await db.contact.deleteMany({ where: { email: suppressedAddress } });
+	await db.suppressedContact.deleteMany({
+		where: { email: suppressedAddress },
+	});
 	await db.company.deleteMany({ where: { domain } });
 	await db.instantlyMailbox.deleteMany({
 		where: { emailAccount: instantlyMailbox },
@@ -292,10 +319,11 @@ describe("storing a synced email", () => {
 
 		const notice = await db.emailMessage.findUniqueOrThrow({
 			where: { rfcMessageId: `<reminder-${suffix}@mail.test>` },
-			select: { correspondence: true, direction: true },
+			select: { correspondence: true, direction: true, classification: true },
 		});
 		expect(notice.correspondence).toBe(false);
 		expect(notice.direction).toBe("INBOUND");
+		expect(notice.classification).toBe("UNKNOWN");
 
 		const after = await db.emailThread.findUniqueOrThrow({
 			where: { rootMessageId: rootId },
@@ -308,6 +336,83 @@ describe("storing a synced email", () => {
 		expect(after.messageCount).toBe(3);
 		expect(after.lastMessageAt).toEqual(before.lastMessageAt);
 		expect(after.activity?.occurredAt).toEqual(before.activity?.occurredAt);
+	});
+
+	it("stores an unknown inbound human message without moving thread clocks", async () => {
+		const before = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: {
+				lastMessageAt: true,
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		const unknownHuman = message(
+			`<human-${suffix}@mail.test>`,
+			new Date("2026-01-20T10:00:00Z"),
+			rootId,
+			{ email: `human@outside-${suffix}.test`, name: "Morgan" },
+		);
+		unknownHuman.recipients = [
+			{ email: mailbox, name: "Test Rep", kind: "to" },
+		];
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			unknownHuman,
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		expect(stored).toBe(true);
+		const human = await db.emailMessage.findUniqueOrThrow({
+			where: { rfcMessageId: `<human-${suffix}@mail.test>` },
+			select: { correspondence: true, direction: true, classification: true },
+		});
+		expect(human).toEqual({
+			correspondence: false,
+			direction: "INBOUND",
+			classification: "UNKNOWN",
+		});
+		const after = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: {
+				messageCount: true,
+				lastMessageAt: true,
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(after.messageCount).toBe(4);
+		expect(after.lastMessageAt).toEqual(before.lastMessageAt);
+		expect(after.activity?.occurredAt).toEqual(before.activity?.occurredAt);
+	});
+
+	it("keeps an unaddressed Superhuman reminder automated", async () => {
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<superhuman-outbound-${suffix}@mail.test>`,
+				new Date("2026-01-20T10:00:00Z"),
+				machineReminderRoot,
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<superhuman-reminder-${suffix}@mail.test>`,
+				new Date("2026-01-20T11:00:00Z"),
+				machineReminderRoot,
+				{ email: machineReminder, name: "Superhuman" },
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const reminderMessage = await db.emailMessage.findUniqueOrThrow({
+			where: { rfcMessageId: `<superhuman-reminder-${suffix}@mail.test>` },
+			select: { classification: true },
+		});
+		expect(reminderMessage.classification).toBe("AUTOMATED");
 	});
 
 	it("moves the clocks for a reply from a known contact", async () => {
@@ -337,14 +442,21 @@ describe("storing a synced email", () => {
 			},
 		});
 		expect(thread.messages[0]?.correspondence).toBe(true);
-		expect(thread.messageCount).toBe(4);
+		expect(thread.messageCount).toBe(5);
 		expect(thread.lastMessageAt).toEqual(sentAt);
 		expect(thread.activity?.occurredAt).toEqual(sentAt);
 	});
 
-	it("treats an Instantly mailbox domain as internal correspondence", async () => {
+	it("keeps internal Instantly mail out of correspondence clocks", async () => {
 		await db.instantlyMailbox.create({
 			data: { emailAccount: instantlyMailbox },
+		});
+		const before = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: {
+				lastMessageAt: true,
+				activity: { select: { occurredAt: true } },
+			},
 		});
 		const sentAt = new Date("2026-01-22T09:00:00Z");
 
@@ -366,14 +478,17 @@ describe("storing a synced email", () => {
 				lastMessageAt: true,
 				messages: {
 					where: { rfcMessageId: `<instantly-${suffix}@mail.test>` },
-					select: { correspondence: true },
+					select: { correspondence: true, classification: true },
 				},
 				activity: { select: { occurredAt: true } },
 			},
 		});
-		expect(thread.messages[0]?.correspondence).toBe(true);
-		expect(thread.lastMessageAt).toEqual(sentAt);
-		expect(thread.activity?.occurredAt).toEqual(sentAt);
+		expect(thread.messages[0]).toEqual({
+			correspondence: true,
+			classification: "INTERNAL",
+		});
+		expect(thread.lastMessageAt).toEqual(before.lastMessageAt);
+		expect(thread.activity?.occurredAt).toEqual(before.activity?.occurredAt);
 	});
 
 	it("treats an inbound reply to an outbound participant as correspondence", async () => {
@@ -428,17 +543,86 @@ describe("storing a synced email", () => {
 				lastMessageAt: true,
 				messages: {
 					where: { rfcMessageId: `<addressed-inbound-${suffix}@mail.test>` },
-					select: { correspondence: true },
+					select: { correspondence: true, classification: true },
 				},
 				activity: { select: { occurredAt: true } },
 			},
 		});
-		expect(thread.messages[0]?.correspondence).toBe(true);
+		expect(thread.messages[0]).toEqual({
+			correspondence: true,
+			classification: "THEIRS",
+		});
 		expect(thread.lastMessageAt).toEqual(sentAt);
 		expect(thread.activity?.occurredAt).toEqual(sentAt);
 	});
 
-	it("promotes an earlier notice when a known contact addresses its sender", async () => {
+	it("does not classify a suppressed addressed stranger as theirs", async () => {
+		const company = await db.company.findUniqueOrThrow({
+			where: { domain },
+			select: { id: true },
+		});
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: person },
+			select: { id: true },
+		});
+		await db.suppressedContact.create({
+			data: { email: suppressedAddress },
+		});
+		await db.contact.create({
+			data: {
+				firstName: "Suppressed",
+				lastName: "Sender",
+				email: suppressedAddress,
+				companyId: company.id,
+			},
+		});
+		await db.emailThread.create({
+			data: {
+				rootMessageId: suppressedRoot,
+				subject: "Pricing",
+				companyId: company.id,
+				contactId: contact.id,
+				firstMessageAt: new Date("2026-02-03T09:00:00Z"),
+				lastMessageAt: new Date("2026-02-03T09:00:00Z"),
+			},
+		});
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<suppressed-outbound-${suffix}@mail.test>`,
+				new Date("2026-02-03T09:00:00Z"),
+				suppressedRoot,
+				{ email: mailbox, name: "Test Rep" },
+				[{ email: suppressedAddress, name: "Suppressed", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<suppressed-inbound-${suffix}@mail.test>`,
+				new Date("2026-02-03T10:00:00Z"),
+				suppressedRoot,
+				{ email: suppressedAddress, name: "Suppressed" },
+				[{ email: mailbox, name: "Test Rep", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const inbound = await db.emailMessage.findUniqueOrThrow({
+			where: { rfcMessageId: `<suppressed-inbound-${suffix}@mail.test>` },
+			select: { classification: true, correspondence: true },
+		});
+		expect(inbound).toEqual({
+			classification: "UNKNOWN",
+			correspondence: false,
+		});
+	});
+
+	it("promotes an earlier notice when a rep addresses its sender", async () => {
 		const company = await db.company.findUniqueOrThrow({
 			where: { domain },
 			select: { id: true },
@@ -488,7 +672,7 @@ describe("storing a synced email", () => {
 				`<promotion-reply-${suffix}@mail.test>`,
 				sentAt,
 				promotionRoot,
-				{ email: person, name: "A Buyer" },
+				{ email: mailbox, name: "Test Rep" },
 				[{ email: stranger, name: "Stranger", kind: "to" }],
 			),
 			await threads.context(deadlineIn(60_000)),
@@ -501,15 +685,36 @@ describe("storing a synced email", () => {
 				lastMessageAt: true,
 				messages: {
 					orderBy: { sentAt: "asc" },
-					select: { fromEmail: true, correspondence: true },
+					select: {
+						id: true,
+						fromEmail: true,
+						correspondence: true,
+						classification: true,
+					},
 				},
 				activity: { select: { occurredAt: true } },
 			},
 		});
-		expect(thread.messages).toEqual([
-			{ fromEmail: stranger, correspondence: true },
-			{ fromEmail: person, correspondence: true },
+		expect(
+			thread.messages.map(({ fromEmail, correspondence, classification }) => ({
+				fromEmail,
+				correspondence,
+				classification,
+			})),
+		).toEqual([
+			{
+				fromEmail: stranger,
+				correspondence: true,
+				classification: "THEIRS",
+			},
+			{ fromEmail: mailbox, correspondence: true, classification: "OURS" },
 		]);
+		const promotedMessageId = thread.messages[0]?.id;
+		const promotedEvent = await db.contactEvent.findUniqueOrThrow({
+			where: { sourceKey: `msg:${promotedMessageId}` },
+			select: { sourceMessageId: true },
+		});
+		expect(promotedEvent.sourceMessageId).toBe(promotedMessageId ?? null);
 		expect(thread.firstMessageAt).toEqual(noticeAt);
 		expect(thread.lastMessageAt).toEqual(sentAt);
 		expect(thread.activity?.occurredAt).toEqual(sentAt);
