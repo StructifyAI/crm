@@ -18,6 +18,7 @@ export type CorrespondenceBackfill = {
 	reclassified: number;
 	restamped: number;
 	next: string | null;
+	complete: boolean;
 };
 
 @Injectable()
@@ -127,6 +128,9 @@ export class CorrespondenceBackfillService {
 			targets.contactIds.length +
 			targets.dealIds.length;
 		if (restamped > 0) await this.stamp.recomputeMany(targets);
+		const exhausted =
+			processed === page.length &&
+			page.length < MAILBOX_CORRESPONDENCE.backfillPage;
 
 		this.logger.log({
 			message: "Email classification backfill processed a page of threads",
@@ -139,11 +143,8 @@ export class CorrespondenceBackfillService {
 			examined,
 			reclassified,
 			restamped,
-			next:
-				processed === page.length &&
-				page.length < MAILBOX_CORRESPONDENCE.backfillPage
-					? null
-					: last,
+			next: exhausted ? null : last,
+			complete: exhausted,
 		};
 	}
 

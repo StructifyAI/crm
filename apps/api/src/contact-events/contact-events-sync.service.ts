@@ -52,23 +52,23 @@ export class ContactEventsSyncService {
 		const extraction = await this.extraction.tick(deadline);
 		if (!overdue(deadline)) await this.clocks.refreshRecentlyDue();
 
+		const activityExhausted =
+			activityExamined === activities.length &&
+			activities.length < CONTACT_EVENTS.backfill.pageSize;
+		const messageExhausted =
+			messageExamined === messages.length &&
+			messages.length < CONTACT_EVENTS.backfill.pageSize;
+
 		return {
 			activityExamined,
 			messageExamined,
 			recordedActivities,
 			recordedMessages,
 			extraction,
+			complete: activityExhausted && messageExhausted,
 			next: {
-				activityCursor:
-					activityExamined === activities.length &&
-					activities.length === CONTACT_EVENTS.backfill.pageSize
-						? lastActivity
-						: null,
-				messageCursor:
-					messageExamined === messages.length &&
-					messages.length === CONTACT_EVENTS.backfill.pageSize
-						? lastMessage
-						: null,
+				activityCursor: activityExhausted ? null : lastActivity,
+				messageCursor: messageExhausted ? null : lastMessage,
 			},
 		};
 	}

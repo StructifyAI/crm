@@ -49,6 +49,7 @@ const correspondence = {
 			reclassified: 2,
 			restamped: 1,
 			next: cursor ? null : "page-2",
+			complete: cursor !== null,
 		};
 	},
 } as unknown as CorrespondenceBackfillService;
@@ -71,6 +72,7 @@ const contactEvents = {
 			recordedMessages: 0,
 			extraction: { examined: 0, extracted: 0, failed: 0 },
 			next: { activityCursor: null, messageCursor: null },
+			complete: true,
 		};
 	},
 } as unknown as ContactEventsSyncService;
@@ -227,10 +229,17 @@ describe("GET /internal/sync/correspondence", () => {
 			reclassified: 2,
 			restamped: 1,
 			next: "page-2",
+			complete: false,
 		});
 		expect(
 			await subject.correspondenceViaPost(`Bearer ${SECRET}`, "page-2"),
-		).toEqual({ examined: 5, reclassified: 2, restamped: 1, next: null });
+		).toEqual({
+			examined: 5,
+			reclassified: 2,
+			restamped: 1,
+			next: null,
+			complete: true,
+		});
 		expect(cursors).toEqual([null, "page-2"]);
 
 		await expect(

@@ -79,11 +79,13 @@ async function clean() {
 async function runToEnd(all = false) {
 	let cursor: string | null = null;
 	let reclassified = 0;
+	let complete = false;
 	do {
 		const page = await backfill.backfill(cursor, all);
 		reclassified += page.reclassified;
 		cursor = page.next;
-	} while (cursor);
+		complete = page.complete;
+	} while (!complete);
 	return reclassified;
 }
 
