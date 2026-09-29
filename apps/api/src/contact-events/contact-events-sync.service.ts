@@ -39,18 +39,22 @@ export class ContactEventsSyncService {
 			if (overdue(deadline)) break;
 			lastActivity = activity.id;
 			activityExamined += 1;
-			recordedActivities += await this.events.recordActivity(activity.id);
+			recordedActivities += await this.events.recordActivity(activity.id, {
+				refreshClocks: !all,
+			});
 		}
 
 		for (const message of messages) {
 			if (overdue(deadline)) break;
 			lastMessage = message.id;
 			messageExamined += 1;
-			recordedMessages += await this.events.recordMessage(message.id);
+			recordedMessages += await this.events.recordMessage(message.id, {
+				refreshClocks: !all,
+			});
 		}
 
 		const extraction = await this.extraction.tick(deadline);
-		if (!overdue(deadline)) await this.clocks.refreshRecentlyDue();
+		if (!all && !overdue(deadline)) await this.clocks.refreshRecentlyDue();
 
 		const activityExhausted =
 			activityExamined === activities.length &&

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import {
 	ActivityType,
 	ContactChannel,
@@ -714,6 +714,68 @@ describe("email classification", () => {
 });
 
 describe("contact event ledger", () => {
+	it("records activity and message events without refreshing clocks when disabled", async () => {
+		const fixture = await createFixture("no-clock-refresh");
+		const activity = await createActivity(fixture, {
+			type: ActivityType.EMAIL,
+			direction: ContactDirection.OUT,
+			occurredAt: ago(48),
+		});
+		const messageId = await createMessage(fixture, {
+			classification: EmailClassification.OURS,
+			sentAt: ago(24),
+		});
+		const refresh = spyOn(clocks, "refreshAffectedMany").mockResolvedValue(
+			undefined,
+		);
+
+		try {
+			expect(
+				await events.recordActivity(activity.id, { refreshClocks: false }),
+			).toBe(1);
+			expect(
+				await events.recordMessage(messageId, { refreshClocks: false }),
+			).toBe(1);
+			expect(
+				await db.contactEvent.findUnique({
+					where: { sourceKey: `act:${activity.id}` },
+				}),
+			).not.toBeNull();
+			expect(
+				await db.contactEvent.findUnique({
+					where: { sourceKey: `msg:${messageId}` },
+				}),
+			).not.toBeNull();
+			expect(refresh).not.toHaveBeenCalled();
+		} finally {
+			refresh.mockRestore();
+		}
+	});
+
+	it("refreshes clocks by default when recording activity and message events", async () => {
+		const fixture = await createFixture("default-clock-refresh");
+		const activity = await createActivity(fixture, {
+			type: ActivityType.EMAIL,
+			direction: ContactDirection.OUT,
+			occurredAt: ago(48),
+		});
+		const messageId = await createMessage(fixture, {
+			classification: EmailClassification.OURS,
+			sentAt: ago(24),
+		});
+		const refresh = spyOn(clocks, "refreshAffectedMany").mockResolvedValue(
+			undefined,
+		);
+
+		try {
+			await events.recordActivity(activity.id);
+			await events.recordMessage(messageId);
+			expect(refresh).toHaveBeenCalledTimes(2);
+		} finally {
+			refresh.mockRestore();
+		}
+	});
+
 	it("records idempotent activity and message events and rolls up scoped clocks", async () => {
 		const fixture = await createFixture("ledger");
 		const outbound: string[] = [];

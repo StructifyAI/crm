@@ -306,7 +306,8 @@ export class SyncController {
 	@Get("contact-events")
 	@AllowAnonymous()
 	@ApiOperation({
-		summary: "Backfill recorded contact events and extract activity events",
+		summary:
+			"Backfill recorded contact events and extract activity events; all=1 skips clock refresh, so run contact-clocks afterwards.",
 	})
 	@ApiQuery({ name: "activityCursor", required: false })
 	@ApiQuery({ name: "messageCursor", required: false })

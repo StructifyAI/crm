@@ -39,6 +39,10 @@ type EventValues = {
 	needsReview?: boolean;
 };
 
+type ContactEventRecordOptions = {
+	refreshClocks?: boolean;
+};
+
 @Injectable()
 export class ContactEventsService {
 	constructor(
@@ -353,7 +357,10 @@ export class ContactEventsService {
 		};
 	}
 
-	async recordActivity(activityId: string): Promise<number> {
+	async recordActivity(
+		activityId: string,
+		options: ContactEventRecordOptions = {},
+	): Promise<number> {
 		const activity = await this.db.activity.findUnique({
 			where: { id: activityId },
 			select: {
@@ -384,27 +391,28 @@ export class ContactEventsService {
 			activity.occurredAt &&
 			(activity.contactId || activity.companyId)
 		) {
-			written += await this.supersede(baseKey);
+			written += await this.supersede(baseKey, options);
 			for (const direction of [ContactDirection.OUT, ContactDirection.IN]) {
-				written += await this.upsert({
-					sourceKey: `${baseKey}:${direction}`,
-					dealId: activity.dealId,
-					contactId: activity.contactId,
-					companyId: activity.companyId,
-					occurredAt: activity.occurredAt,
-					datePrecision: ContactDatePrecision.EXACT,
-					channel: ContactChannel.MEETING,
-					direction,
-					origin: ContactEventOrigin.RECORDED,
-					sourceActivityId: activity.id,
-					sourceMessageId: null,
-					confidence: null,
-				});
+				written += await this.upsert(
+					{
+						sourceKey: `${baseKey}:${direction}`,
+						dealId: activity.dealId,
+						contactId: activity.contactId,
+						companyId: activity.companyId,
+						occurredAt: activity.occurredAt,
+						datePrecision: ContactDatePrecision.EXACT,
+						channel: ContactChannel.MEETING,
+						direction,
+						origin: ContactEventOrigin.RECORDED,
+						sourceActivityId: activity.id,
+						sourceMessageId: null,
+						confidence: null,
+					},
+					options,
+				);
 			}
 		} else if (!activity.emailThreadId && activity.direction && channel) {
-			for (const sourceKey of splitKeys) {
-				written += await this.supersede(sourceKey);
-			}
+			written += await this.supersedeMany(splitKeys, options);
 			const occurredAt = activity.occurredAt ?? activity.createdAt;
 			const duplicate =
 				activity.type === ActivityType.EMAIL && activity.contactId
@@ -431,33 +439,37 @@ export class ContactEventsService {
 						})
 					: null;
 			if (duplicate) {
-				written += await this.supersede(baseKey);
+				written += await this.supersede(baseKey, options);
 			} else {
-				written += await this.upsert({
-					sourceKey: baseKey,
-					dealId: activity.dealId,
-					contactId: activity.contactId,
-					companyId: activity.companyId,
-					occurredAt,
-					datePrecision: ContactDatePrecision.EXACT,
-					channel,
-					direction: activity.direction,
-					origin: ContactEventOrigin.RECORDED,
-					sourceActivityId: activity.id,
-					sourceMessageId: null,
-				});
+				written += await this.upsert(
+					{
+						sourceKey: baseKey,
+						dealId: activity.dealId,
+						contactId: activity.contactId,
+						companyId: activity.companyId,
+						occurredAt,
+						datePrecision: ContactDatePrecision.EXACT,
+						channel,
+						direction: activity.direction,
+						origin: ContactEventOrigin.RECORDED,
+						sourceActivityId: activity.id,
+						sourceMessageId: null,
+					},
+					options,
+				);
 			}
 		} else {
-			for (const sourceKey of [baseKey, ...splitKeys]) {
-				written += await this.supersede(sourceKey);
-			}
+			written += await this.supersedeMany([baseKey, ...splitKeys], options);
 		}
 
-		written += await this.recordLinkedinTranscript(activity);
+		written += await this.recordLinkedinTranscript(activity, options);
 		return written;
 	}
 
-	async recordMessage(messageId: string): Promise<number> {
+	async recordMessage(
+		messageId: string,
+		options: ContactEventRecordOptions = {},
+	): Promise<number> {
 		const message = await this.db.emailMessage.findUnique({
 			where: { id: messageId },
 			select: {
@@ -486,7 +498,7 @@ export class ContactEventsService {
 			message.classification !== EmailClassification.OURS &&
 			message.classification !== EmailClassification.THEIRS
 		) {
-			return this.supersede(`msg:${message.id}`);
+			return this.supersede(`msg:${message.id}`, options);
 		}
 
 		const target = message.thread.activity;
@@ -495,19 +507,22 @@ export class ContactEventsService {
 			message.classification === EmailClassification.OURS
 				? ContactDirection.OUT
 				: ContactDirection.IN;
-		let written = await this.upsert({
-			sourceKey: `msg:${message.id}`,
-			dealId: target?.dealId ?? null,
-			contactId,
-			companyId: target?.companyId ?? message.thread.companyId,
-			occurredAt: message.sentAt,
-			datePrecision: ContactDatePrecision.EXACT,
-			channel: ContactChannel.EMAIL,
-			direction,
-			origin: ContactEventOrigin.RECORDED,
-			sourceActivityId: null,
-			sourceMessageId: message.id,
-		});
+		let written = await this.upsert(
+			{
+				sourceKey: `msg:${message.id}`,
+				dealId: target?.dealId ?? null,
+				contactId,
+				companyId: target?.companyId ?? message.thread.companyId,
+				occurredAt: message.sentAt,
+				datePrecision: ContactDatePrecision.EXACT,
+				channel: ContactChannel.EMAIL,
+				direction,
+				origin: ContactEventOrigin.RECORDED,
+				sourceActivityId: null,
+				sourceMessageId: message.id,
+			},
+			options,
+		);
 		if (!contactId) return written;
 
 		const matchingActivities = await this.db.contactEvent.findMany({
@@ -531,28 +546,32 @@ export class ContactEventsService {
 			},
 			select: { sourceKey: true },
 		});
-		for (const event of matchingActivities) {
-			written += await this.supersede(event.sourceKey);
-		}
+		written += await this.supersedeMany(
+			matchingActivities.map((event) => event.sourceKey),
+			options,
+		);
 		return written;
 	}
 
-	private async recordLinkedinTranscript(activity: {
-		id: string;
-		subject: string | null;
-		body: string | null;
-		companyId: string | null;
-		contactId: string | null;
-		dealId: string | null;
-		meta: Prisma.JsonValue | null;
-	}): Promise<number> {
+	private async recordLinkedinTranscript(
+		activity: {
+			id: string;
+			subject: string | null;
+			body: string | null;
+			companyId: string | null;
+			contactId: string | null;
+			dealId: string | null;
+			meta: Prisma.JsonValue | null;
+		},
+		options: ContactEventRecordOptions,
+	): Promise<number> {
 		const parsed = parseExtrovertActivityMeta(activity.meta);
 		const authorName =
 			parsed?.extrovert.kind === "dm" && activity.body
 				? activity.subject?.match(/^LinkedIn messages with (.+)$/)?.[1]
 				: null;
 		if (!authorName || !activity.body) {
-			return this.supersedeLinkedinTranscript(activity.id);
+			return this.supersedeLinkedinTranscript(activity.id, options);
 		}
 
 		const lines = activity.body.split(/\r?\n/);
@@ -576,33 +595,40 @@ export class ContactEventsService {
 				author === authorName ? ContactDirection.OUT : ContactDirection.IN;
 			const sourceKey = `li:${activity.id}:${iso}:${direction}`;
 			sourceKeys.add(sourceKey);
-			written += await this.upsert({
-				sourceKey,
-				dealId: activity.dealId,
-				contactId: activity.contactId,
-				companyId: activity.companyId,
-				occurredAt,
-				datePrecision: ContactDatePrecision.EXACT,
-				channel: ContactChannel.LINKEDIN,
-				direction,
-				origin: ContactEventOrigin.RECORDED,
-				sourceActivityId: activity.id,
-				sourceMessageId: null,
-				quote,
-			});
+			written += await this.upsert(
+				{
+					sourceKey,
+					dealId: activity.dealId,
+					contactId: activity.contactId,
+					companyId: activity.companyId,
+					occurredAt,
+					datePrecision: ContactDatePrecision.EXACT,
+					channel: ContactChannel.LINKEDIN,
+					direction,
+					origin: ContactEventOrigin.RECORDED,
+					sourceActivityId: activity.id,
+					sourceMessageId: null,
+					quote,
+				},
+				options,
+			);
 		}
 
 		const stale = await this.db.contactEvent.findMany({
 			where: linkedinStaleEventsWhere(activity.id, sourceKeys),
 			select: { sourceKey: true },
 		});
-		for (const event of stale) {
-			written += await this.supersede(event.sourceKey);
-		}
+		written += await this.supersedeMany(
+			stale.map((event) => event.sourceKey),
+			options,
+		);
 		return written;
 	}
 
-	private async upsert(values: EventValues): Promise<number> {
+	private async upsert(
+		values: EventValues,
+		options: ContactEventRecordOptions = {},
+	): Promise<number> {
 		const previous = await this.db.contactEvent.findUnique({
 			where: { sourceKey: values.sourceKey },
 			select: { dealId: true, contactId: true, companyId: true },
@@ -613,15 +639,20 @@ export class ContactEventsService {
 			create: { sourceKey, ...data },
 			update: { ...data, supersededAt: null },
 		});
-		await this.clocks.refreshAffectedMany(
-			previous
-				? [clockTargets(previous), clockTargets(values)]
-				: [clockTargets(values)],
-		);
+		if (options.refreshClocks !== false) {
+			await this.clocks.refreshAffectedMany(
+				previous
+					? [clockTargets(previous), clockTargets(values)]
+					: [clockTargets(values)],
+			);
+		}
 		return previous ? 0 : 1;
 	}
 
-	private async supersede(sourceKey: string): Promise<number> {
+	private async supersede(
+		sourceKey: string,
+		options: ContactEventRecordOptions = {},
+	): Promise<number> {
 		const existing = await this.db.contactEvent.findUnique({
 			where: { sourceKey },
 			select: {
@@ -637,12 +668,26 @@ export class ContactEventsService {
 			where: { sourceKey },
 			data: { supersededAt: new Date() },
 		});
-		await this.clocks.refreshAffected(clockTargets(existing));
+		if (options.refreshClocks !== false) {
+			await this.clocks.refreshAffected(clockTargets(existing));
+		}
 		return 1;
+	}
+
+	private async supersedeMany(
+		sourceKeys: readonly string[],
+		options: ContactEventRecordOptions = {},
+	): Promise<number> {
+		let written = 0;
+		for (const sourceKey of sourceKeys) {
+			written += await this.supersede(sourceKey, options);
+		}
+		return written;
 	}
 
 	private async supersedeLinkedinTranscript(
 		activityId: string,
+		options: ContactEventRecordOptions,
 	): Promise<number> {
 		const existing = await this.db.contactEvent.findMany({
 			where: {
@@ -653,10 +698,10 @@ export class ContactEventsService {
 			},
 			select: { sourceKey: true },
 		});
-		let superseded = 0;
-		for (const event of existing)
-			superseded += await this.supersede(event.sourceKey);
-		return superseded;
+		return this.supersedeMany(
+			existing.map((event) => event.sourceKey),
+			options,
+		);
 	}
 }
 

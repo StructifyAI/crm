@@ -23,16 +23,27 @@ function contactEventsBackfill(
 	} as unknown as Db;
 	const recordedActivityIds: string[] = [];
 	const recordedMessageIds: string[] = [];
+	const activityOptions: ({ refreshClocks?: boolean } | undefined)[] = [];
+	const messageOptions: ({ refreshClocks?: boolean } | undefined)[] = [];
+	const clockRefreshes = { count: 0 };
 	const events = {
-		recordActivity: async (id: string) => {
+		recordActivity: async (
+			id: string,
+			options?: { refreshClocks?: boolean },
+		) => {
 			recordedActivityIds.push(id);
+			activityOptions.push(options);
 			if (expireAfterFirstActivity && recordedActivityIds.length === 1) {
 				time.value = SYNC_TICK.budgetMs;
 			}
 			return 1;
 		},
-		recordMessage: async (id: string) => {
+		recordMessage: async (
+			id: string,
+			options?: { refreshClocks?: boolean },
+		) => {
 			recordedMessageIds.push(id);
+			messageOptions.push(options);
 			return 1;
 		},
 	} as unknown as ContactEventsService;
@@ -40,13 +51,18 @@ function contactEventsBackfill(
 		tick: async () => ({ examined: 0, extracted: 0, failed: 0 }),
 	} as unknown as ContactExtractionService;
 	const clocks = {
-		refreshRecentlyDue: async () => {},
+		refreshRecentlyDue: async () => {
+			clockRefreshes.count += 1;
+		},
 	} as unknown as ContactClockService;
 
 	return {
 		service: new ContactEventsSyncService(fakeDb, events, extraction, clocks),
 		recordedActivityIds,
 		recordedMessageIds,
+		activityOptions,
+		messageOptions,
+		clockRefreshes,
 	};
 }
 
@@ -140,6 +156,48 @@ describe("contact-event backfill pagination", () => {
 				messageCursor: null,
 			});
 			expect(result.complete).toBe(true);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it("skips contact-clock refreshes during a full re-record", async () => {
+		const time = { value: 0 };
+		const clock = spyOn(Date, "now").mockImplementation(() => time.value);
+		try {
+			const { service, activityOptions, messageOptions, clockRefreshes } =
+				contactEventsBackfill(
+					time,
+					[{ id: "activity-1" }],
+					[{ id: "message-1" }],
+				);
+
+			await service.backfill(null, null, true);
+
+			expect(activityOptions).toEqual([{ refreshClocks: false }]);
+			expect(messageOptions).toEqual([{ refreshClocks: false }]);
+			expect(clockRefreshes.count).toBe(0);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it("keeps contact-clock refreshes on the default backfill", async () => {
+		const time = { value: 0 };
+		const clock = spyOn(Date, "now").mockImplementation(() => time.value);
+		try {
+			const { service, activityOptions, messageOptions, clockRefreshes } =
+				contactEventsBackfill(
+					time,
+					[{ id: "activity-1" }],
+					[{ id: "message-1" }],
+				);
+
+			await service.backfill(null, null);
+
+			expect(activityOptions).toEqual([{ refreshClocks: true }]);
+			expect(messageOptions).toEqual([{ refreshClocks: true }]);
+			expect(clockRefreshes.count).toBe(1);
 		} finally {
 			clock.mockRestore();
 		}
