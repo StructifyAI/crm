@@ -5,7 +5,10 @@ import { parseExtrovertEngagementResume } from "@crm/validation/extrovert-engage
 import { normalizeLinkedinUrl } from "@crm/validation/linkedin-url";
 import { Injectable, Logger } from "@nestjs/common";
 import { ContactEventsService } from "../contact-events/contact-events.service";
-import { ActivityStampService } from "../crm/activity-stamp.service";
+import {
+	ActivityStampService,
+	activityTime,
+} from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { ExtrovertClient } from "./extrovert.client";
 import { EXTROVERT } from "./extrovert-config";
@@ -317,9 +320,9 @@ export class ExtrovertEngagementSyncService {
 					},
 				},
 			},
-			select: { createdAt: true },
+			select: { createdAt: true, occurredAt: true },
 		});
-		await this.stamp.touch({ contactId: match.id }, activity.createdAt);
+		await this.stamp.touch({ contactId: match.id }, activityTime(activity));
 		existing.add(key);
 		return "created";
 	}
@@ -380,9 +383,9 @@ export class ExtrovertEngagementSyncService {
 					occurredAt: new Date(lastMessage.sentAt),
 					meta: metadata,
 				},
-				select: { id: true, createdAt: true },
+				select: { id: true, createdAt: true, occurredAt: true },
 			});
-			await this.stamp.touch({ contactId: match.id }, activity.createdAt);
+			await this.stamp.touch({ contactId: match.id }, activityTime(activity));
 			await this.contactEvents.recordActivity(activity.id);
 		} else {
 			const activity = await this.db.activity.create({
@@ -395,9 +398,9 @@ export class ExtrovertEngagementSyncService {
 					createdById: author,
 					meta: metadata,
 				},
-				select: { id: true, createdAt: true },
+				select: { id: true, createdAt: true, occurredAt: true },
 			});
-			await this.stamp.touch({ contactId: match.id }, activity.createdAt);
+			await this.stamp.touch({ contactId: match.id }, activityTime(activity));
 			await this.contactEvents.recordActivity(activity.id);
 			existing.set(conversation.connectionId, {
 				id: activity.id,

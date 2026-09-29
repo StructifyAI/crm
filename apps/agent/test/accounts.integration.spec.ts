@@ -1,5 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { ActivityType, DealStage, db, EmailDirection } from "@crm/db";
+import {
+	ActivityType,
+	ContactChannel,
+	ContactDatePrecision,
+	ContactDirection,
+	ContactEventOrigin,
+	DealStage,
+	db,
+	EmailDirection,
+} from "@crm/db";
 import { readCompanyHistory, readDealHistory } from "../agent/lib/accounts";
 
 const suffix = process.env.TEST_RUN_ID ?? "accounts-spec";
@@ -10,6 +19,8 @@ let dealId: string;
 let paulaId: string;
 let placeholderId: string;
 let userId: string;
+let lastContactedAt: Date;
+let lastRepliedAt: Date;
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
 const daysAhead = (days: number) => new Date(Date.now() + days * 86_400_000);
@@ -80,6 +91,57 @@ beforeAll(async () => {
 		select: { id: true },
 	});
 	dealId = deal.id;
+
+	lastContactedAt = daysAgo(2);
+	lastRepliedAt = daysAgo(3);
+	const lastContactedEvent = await db.contactEvent.create({
+		data: {
+			sourceKey: `accounts-contact-${suffix}`,
+			dealId,
+			contactId: paulaId,
+			companyId,
+			occurredAt: lastContactedAt,
+			datePrecision: ContactDatePrecision.EXACT,
+			channel: ContactChannel.EMAIL,
+			direction: ContactDirection.OUT,
+			origin: ContactEventOrigin.RECORDED,
+		},
+		select: { id: true },
+	});
+	const lastRepliedEvent = await db.contactEvent.create({
+		data: {
+			sourceKey: `accounts-reply-${suffix}`,
+			dealId,
+			contactId: paulaId,
+			companyId,
+			occurredAt: lastRepliedAt,
+			datePrecision: ContactDatePrecision.EXACT,
+			channel: ContactChannel.EMAIL,
+			direction: ContactDirection.IN,
+			origin: ContactEventOrigin.RECORDED,
+		},
+		select: { id: true },
+	});
+	await Promise.all([
+		db.company.update({
+			where: { id: companyId },
+			data: {
+				lastContactedAt,
+				lastContactedEventId: lastContactedEvent.id,
+				lastRepliedAt,
+				lastRepliedEventId: lastRepliedEvent.id,
+			},
+		}),
+		db.deal.update({
+			where: { id: dealId },
+			data: {
+				lastContactedAt,
+				lastContactedEventId: lastContactedEvent.id,
+				lastRepliedAt,
+				lastRepliedEventId: lastRepliedEvent.id,
+			},
+		}),
+	]);
 
 	await db.activity.createMany({
 		data: [
@@ -157,6 +219,21 @@ beforeAll(async () => {
 				sentAt: daysAgo(3),
 			},
 		],
+	});
+
+	await db.emailMessage.create({
+		data: {
+			threadId: thread.id,
+			rfcMessageId: `<colleague.${suffix}@example.test>`,
+			direction: EmailDirection.INBOUND,
+			fromEmail: `colleague.${suffix}@example.test`,
+			fromName: "Company colleague",
+			recipients: [],
+			subject: "Internal note",
+			body: "A colleague filed an internal note.",
+			sentAt: daysAgo(1),
+			correspondence: true,
+		},
 	});
 
 	await db.calendarEvent.create({
@@ -241,11 +318,18 @@ describe("readCompanyHistory", () => {
 
 		expect(history?.threads[0]?.subject).toBe("Re: Contract");
 		expect(history?.threads[0]?.contact?.id).toBe(paulaId);
-		expect(history?.threads[0]?.messages[0]?.body).toContain(
-			"Growth Specialist",
-		);
+		expect(
+			history?.threads[0]?.messages.find(
+				(message) => message.fromName === "Paula Marchetti",
+			)?.body,
+		).toContain("Growth Specialist");
 		expect(history?.stats.theyReplied).toBe(true);
 		expect(history?.stats.lastReplyFrom).toBe("Paula Marchetti");
+		expect(history?.stats.lastReplyAt).toBe(lastRepliedAt.toISOString());
+		expect(history?.stats.lastContactedAt).toBe(lastContactedAt.toISOString());
+		expect(history?.stats.lastReplyChannel).toBe(ContactChannel.EMAIL);
+		expect(history?.stats.lastContactChannel).toBe(ContactChannel.EMAIL);
+		expect(history?.stats.awaitingReply).toBe(true);
 		expect(history?.stats.nextMeetingAt).not.toBeNull();
 	});
 
@@ -267,7 +351,9 @@ describe("readCompanyHistory", () => {
 		expect(history?.meetings).toEqual([]);
 		expect(history?.stats.emails).toBe(0);
 		expect(history?.stats.meetings).toBe(0);
-		expect(history?.stats.lastReplyAt).toBeNull();
+		expect(history?.stats.lastReplyAt).not.toBeNull();
+		expect(history?.stats.lastReplyFrom).toBeNull();
+		expect(history?.stats.lastReplyChannel).toBeNull();
 		expect(history?.stats.nextMeetingAt).toBeNull();
 		expect(
 			history?.people.every(
@@ -319,6 +405,10 @@ describe("readDealHistory", () => {
 
 		expect(history?.threads).toHaveLength(1);
 		expect(history?.stats.theyReplied).toBe(true);
+		expect(history?.stats.lastReplyFrom).toBe("Paula Marchetti");
+		expect(history?.stats.lastReplyChannel).toBe(ContactChannel.EMAIL);
+		expect(history?.stats.lastContactChannel).toBe(ContactChannel.EMAIL);
+		expect(history?.stats.awaitingReply).toBe(true);
 		expect(history?.note).toContain("never against a deal");
 	});
 
@@ -330,7 +420,10 @@ describe("readDealHistory", () => {
 
 		expect(history?.threads).toEqual([]);
 		expect(history?.meetings).toEqual([]);
-		expect(history?.stats.theyReplied).toBe(false);
+		expect(history?.stats.theyReplied).toBe(true);
+		expect(history?.stats.lastReplyAt).not.toBeNull();
+		expect(history?.stats.lastReplyFrom).toBeNull();
+		expect(history?.stats.lastReplyChannel).toBeNull();
 		expect(history?.stats.nextMeetingAt).toBeNull();
 		expect(history?.note).toContain("outside this agent version");
 	});

@@ -8,6 +8,7 @@ import type { ConfigService } from "@nestjs/config";
 import type { EnvironmentVariables } from "../src/config/env.validation";
 import type { ContactClockService } from "../src/contact-events/contact-clock.service";
 import type { ContactEventsSyncService } from "../src/contact-events/contact-events-sync.service";
+import type { ActivityStampService } from "../src/crm/activity-stamp.service";
 import type { ExtrovertEngagementSyncService } from "../src/extrovert/extrovert-engagement-sync.service";
 import type { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
 import type { InstantlyEmailSyncService } from "../src/instantly/instantly-email-sync.service";
@@ -27,6 +28,7 @@ import { SyncController } from "../src/sync/sync.controller";
 const SECRET = "cron-secret-for-tests";
 
 let cursors: Array<string | null> = [];
+let activityStampRuns = 0;
 
 const dealLinks = {
 	backfill: async (cursor: string | null): Promise<DealLinkBackfill> => {
@@ -45,6 +47,11 @@ const correspondence = {
 		};
 	},
 } as unknown as CorrespondenceBackfillService;
+const activityStamps = {
+	recomputeAll: async () => {
+		activityStampRuns += 1;
+	},
+} as unknown as ActivityStampService;
 
 const unused = {} as unknown as MailboxSyncService &
 	InstantlySyncService &
@@ -71,12 +78,38 @@ function controller(secret: string | undefined): SyncController {
 		unused,
 		unused,
 		unused,
+		activityStamps,
 		config,
 	);
 }
 
 beforeEach(() => {
 	cursors = [];
+	activityStampRuns = 0;
+});
+
+describe("GET /internal/sync/activity-stamps", () => {
+	it("refuses without the cron secret", async () => {
+		await expect(
+			controller(SECRET).activityStampsViaGet("Bearer wrong"),
+		).rejects.toBeInstanceOf(ForbiddenException);
+		await expect(
+			controller(undefined).activityStampsViaPost(`Bearer ${SECRET}`),
+		).rejects.toBeInstanceOf(ServiceUnavailableException);
+		expect(activityStampRuns).toBe(0);
+	});
+
+	it("recomputes all activity stamps once for each route", async () => {
+		const subject = controller(SECRET);
+
+		await expect(
+			subject.activityStampsViaGet(`Bearer ${SECRET}`),
+		).resolves.toEqual({ ok: true });
+		await expect(
+			subject.activityStampsViaPost(`Bearer ${SECRET}`),
+		).resolves.toEqual({ ok: true });
+		expect(activityStampRuns).toBe(2);
+	});
 });
 
 describe("GET /internal/sync/deal-links", () => {

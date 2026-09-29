@@ -103,6 +103,8 @@ export async function listDeals(options: DealListOptions = {}) {
 			currency: true,
 			createdAt: true,
 			lastActivityAt: true,
+			lastContactedAt: true,
+			lastRepliedAt: true,
 			expectedCloseDate: true,
 			company: {
 				select: {
@@ -147,6 +149,21 @@ export async function listDeals(options: DealListOptions = {}) {
 				),
 				neverActive: deal.lastActivityAt === null,
 				expectedCloseDate: deal.expectedCloseDate?.toISOString() ?? null,
+				lastContactedAt: deal.lastContactedAt?.toISOString() ?? null,
+				lastRepliedAt: deal.lastRepliedAt?.toISOString() ?? null,
+				daysSinceLastContact:
+					deal.lastContactedAt === null
+						? null
+						: Math.max(
+								0,
+								Math.floor(
+									(now.getTime() - deal.lastContactedAt.getTime()) / 86_400_000,
+								),
+							),
+				awaitingReply:
+					deal.lastContactedAt !== null &&
+					(deal.lastRepliedAt === null ||
+						deal.lastContactedAt > deal.lastRepliedAt),
 			};
 		}),
 		hasMore,

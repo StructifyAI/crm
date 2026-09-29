@@ -36,5 +36,6 @@ export const CONTACT_EVENTS = {
 		concurrency: 10,
 		duplicateSuppressionSeconds: 36 * 60 * 60,
 		pageSize: 100,
+		recordedDuplicateWindowMs: 5 * MINUTE_MS,
 	},
 } as const;

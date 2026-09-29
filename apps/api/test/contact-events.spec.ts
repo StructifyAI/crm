@@ -255,23 +255,25 @@ async function createActivity(
 	input: {
 		type: ActivityType;
 		direction?: ContactDirection | null;
-		occurredAt?: Date;
+		occurredAt?: Date | null;
 		subject?: string;
 		body?: string | null;
 		meta?: Prisma.InputJsonValue;
 		dealId?: string | null;
+		contactId?: string | null;
 	},
 ) {
 	const activity = await db.activity.create({
 		data: {
 			type: input.type,
 			direction: input.direction ?? null,
-			occurredAt: input.occurredAt ?? ago(24),
+			occurredAt: input.occurredAt === undefined ? ago(24) : input.occurredAt,
 			subject: input.subject ?? "Contact",
 			body: input.body ?? null,
 			meta: input.meta,
 			companyId: fixture.companyId,
-			contactId: fixture.contactId,
+			contactId:
+				input.contactId === undefined ? fixture.contactId : input.contactId,
 			dealId: input.dealId ?? null,
 			createdById: userId,
 		},
@@ -279,6 +281,53 @@ async function createActivity(
 	});
 	activityIds.push(activity.id);
 	return activity;
+}
+
+async function createMessage(
+	fixture: Awaited<ReturnType<typeof createFixture>>,
+	input: {
+		contactId?: string | null;
+		classification: EmailClassification;
+		sentAt: Date;
+	},
+): Promise<string> {
+	const rootMessageId = `<recorded-${crypto.randomUUID()}@mail.test>`;
+	threadRoots.push(rootMessageId);
+	const direction =
+		input.classification === EmailClassification.OURS
+			? EmailDirection.OUTBOUND
+			: EmailDirection.INBOUND;
+	const thread = await db.emailThread.create({
+		data: {
+			rootMessageId,
+			subject: "Recorded email",
+			companyId: fixture.companyId,
+			contactId:
+				input.contactId === undefined ? fixture.contactId : input.contactId,
+			firstMessageAt: input.sentAt,
+			lastMessageAt: input.sentAt,
+			messages: {
+				create: {
+					rfcMessageId: `<${crypto.randomUUID()}@mail.test>`,
+					syncedByUserId: userId,
+					direction,
+					classification: input.classification,
+					fromEmail:
+						direction === EmailDirection.OUTBOUND
+							? "rep@structify.ai"
+							: "buyer@buyer.test",
+					recipients: [],
+					subject: "Recorded email",
+					sentAt: input.sentAt,
+				},
+			},
+		},
+		select: { messages: { select: { id: true } } },
+	});
+	const messageId = thread.messages[0]?.id;
+	if (!messageId) throw new Error("Recorded test email was not created.");
+	messageIds.push(messageId);
+	return messageId;
 }
 
 async function clean() {
@@ -865,6 +914,266 @@ describe("contact event ledger", () => {
 		});
 		expect(messageEvent.direction).toBe(ContactDirection.IN);
 		expect(messageEvent.sourceMessageId).toBe(knownMessage.id);
+	});
+
+	it("records directionless meetings in both directions and replaces them when direction arrives", async () => {
+		const fixture = await createFixture("meeting-both-ways");
+		const occurredAt = ago(4);
+		const meeting = await createActivity(fixture, {
+			type: ActivityType.MEETING,
+			direction: null,
+			occurredAt,
+			dealId: fixture.dealId,
+		});
+
+		expect(await events.recordActivity(meeting.id)).toBe(2);
+		const splitEvents = await db.contactEvent.findMany({
+			where: { sourceActivityId: meeting.id, supersededAt: null },
+			select: {
+				sourceKey: true,
+				channel: true,
+				direction: true,
+				datePrecision: true,
+				occurredAt: true,
+				confidence: true,
+			},
+			orderBy: { sourceKey: "asc" },
+		});
+		expect(splitEvents).toEqual([
+			{
+				sourceKey: `act:${meeting.id}:IN`,
+				channel: ContactChannel.MEETING,
+				direction: ContactDirection.IN,
+				datePrecision: ContactDatePrecision.EXACT,
+				occurredAt,
+				confidence: null,
+			},
+			{
+				sourceKey: `act:${meeting.id}:OUT`,
+				channel: ContactChannel.MEETING,
+				direction: ContactDirection.OUT,
+				datePrecision: ContactDatePrecision.EXACT,
+				occurredAt,
+				confidence: null,
+			},
+		]);
+		const [contact, deal] = await Promise.all([
+			db.contact.findUniqueOrThrow({
+				where: { id: fixture.contactId },
+				select: { lastContactedAt: true, lastRepliedAt: true },
+			}),
+			db.deal.findUniqueOrThrow({
+				where: { id: fixture.dealId },
+				select: { lastContactedAt: true, lastRepliedAt: true },
+			}),
+		]);
+		expect(contact).toEqual({
+			lastContactedAt: occurredAt,
+			lastRepliedAt: occurredAt,
+		});
+		expect(deal).toEqual({
+			lastContactedAt: occurredAt,
+			lastRepliedAt: occurredAt,
+		});
+
+		await db.activity.update({
+			where: { id: meeting.id },
+			data: { direction: ContactDirection.OUT },
+		});
+		await events.recordActivity(meeting.id);
+		const eventsAfterDirection = await db.contactEvent.findMany({
+			where: { sourceActivityId: meeting.id },
+			select: { sourceKey: true, direction: true, supersededAt: true },
+			orderBy: { sourceKey: "asc" },
+		});
+		expect(
+			eventsAfterDirection
+				.filter((event) => event.supersededAt === null)
+				.map(({ sourceKey, direction }) => ({ sourceKey, direction })),
+		).toEqual([
+			{
+				sourceKey: `act:${meeting.id}`,
+				direction: ContactDirection.OUT,
+			},
+		]);
+		expect(
+			eventsAfterDirection
+				.filter((event) => event.sourceKey !== `act:${meeting.id}`)
+				.every((event) => event.supersededAt !== null),
+		).toBe(true);
+	});
+
+	it("does not move contact clocks for a future directionless meeting", async () => {
+		const fixture = await createFixture("meeting-future");
+		const meeting = await createActivity(fixture, {
+			type: ActivityType.MEETING,
+			occurredAt: new Date(Date.now() + 60 * 60 * 1_000),
+		});
+
+		await events.recordActivity(meeting.id);
+
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { id: fixture.contactId },
+			select: { lastContactedAt: true, lastRepliedAt: true },
+		});
+		expect(contact).toEqual({
+			lastContactedAt: null,
+			lastRepliedAt: null,
+		});
+	});
+
+	it("deduplicates matching activity and message events in either arrival order", async () => {
+		const fixture = await createFixture("email-deduplicate");
+		const outboundAt = ago(3);
+		const outboundActivity = await createActivity(fixture, {
+			type: ActivityType.EMAIL,
+			direction: ContactDirection.OUT,
+			occurredAt: outboundAt,
+		});
+		const outboundMessageId = await createMessage(fixture, {
+			classification: EmailClassification.OURS,
+			sentAt: outboundAt,
+		});
+
+		await events.recordMessage(outboundMessageId);
+		await events.recordActivity(outboundActivity.id);
+		const outboundEvents = await db.contactEvent.findMany({
+			where: {
+				sourceKey: {
+					in: [`act:${outboundActivity.id}`, `msg:${outboundMessageId}`],
+				},
+				supersededAt: null,
+			},
+			select: { sourceKey: true },
+		});
+		expect(outboundEvents).toEqual([{ sourceKey: `msg:${outboundMessageId}` }]);
+
+		const inboundAt = ago(2);
+		const inboundActivity = await createActivity(fixture, {
+			type: ActivityType.EMAIL,
+			direction: ContactDirection.IN,
+			occurredAt: inboundAt,
+		});
+		const inboundMessageId = await createMessage(fixture, {
+			classification: EmailClassification.THEIRS,
+			sentAt: inboundAt,
+		});
+
+		await events.recordActivity(inboundActivity.id);
+		await events.recordMessage(inboundMessageId);
+		const inboundEvents = await db.contactEvent.findMany({
+			where: {
+				sourceKey: {
+					in: [`act:${inboundActivity.id}`, `msg:${inboundMessageId}`],
+				},
+				supersededAt: null,
+			},
+			select: { sourceKey: true },
+		});
+		expect(inboundEvents).toEqual([{ sourceKey: `msg:${inboundMessageId}` }]);
+	});
+
+	it("does not deduplicate recorded emails for different contacts", async () => {
+		const fixture = await createFixture("email-different-contact");
+		const other = await db.contact.create({
+			data: {
+				firstName: "Other",
+				lastName: "Buyer",
+				email: `other-${suffix}@different.test`,
+				companyId: fixture.companyId,
+			},
+			select: { id: true },
+		});
+		extraContactIds.push(other.id);
+		const sentAt = ago(1);
+		const activity = await createActivity(fixture, {
+			type: ActivityType.EMAIL,
+			direction: ContactDirection.OUT,
+			occurredAt: sentAt,
+		});
+		const messageId = await createMessage(fixture, {
+			contactId: other.id,
+			classification: EmailClassification.OURS,
+			sentAt,
+		});
+
+		await events.recordActivity(activity.id);
+		await events.recordMessage(messageId);
+
+		const liveEvents = await db.contactEvent.findMany({
+			where: {
+				sourceKey: { in: [`act:${activity.id}`, `msg:${messageId}`] },
+				supersededAt: null,
+			},
+			select: { sourceKey: true },
+			orderBy: { sourceKey: "asc" },
+		});
+		expect(liveEvents).toEqual([
+			{ sourceKey: `act:${activity.id}` },
+			{ sourceKey: `msg:${messageId}` },
+		]);
+	});
+
+	it("does not deduplicate recorded emails without a contact", async () => {
+		const fixture = await createFixture("email-no-contact");
+		const sentAt = ago(1);
+		const activity = await createActivity(fixture, {
+			type: ActivityType.EMAIL,
+			direction: ContactDirection.OUT,
+			occurredAt: sentAt,
+			contactId: null,
+		});
+		const messageId = await createMessage(fixture, {
+			contactId: null,
+			classification: EmailClassification.OURS,
+			sentAt,
+		});
+
+		await events.recordActivity(activity.id);
+		await events.recordMessage(messageId);
+
+		const liveEvents = await db.contactEvent.findMany({
+			where: {
+				sourceKey: { in: [`act:${activity.id}`, `msg:${messageId}`] },
+				supersededAt: null,
+			},
+			select: { sourceKey: true },
+			orderBy: { sourceKey: "asc" },
+		});
+		expect(liveEvents).toEqual([
+			{ sourceKey: `act:${activity.id}` },
+			{ sourceKey: `msg:${messageId}` },
+		]);
+	});
+
+	it("does not deduplicate recorded emails ten minutes apart", async () => {
+		const fixture = await createFixture("email-separated");
+		const activityAt = ago(2);
+		const activity = await createActivity(fixture, {
+			type: ActivityType.EMAIL,
+			direction: ContactDirection.OUT,
+			occurredAt: activityAt,
+		});
+		const messageId = await createMessage(fixture, {
+			classification: EmailClassification.OURS,
+			sentAt: new Date(activityAt.getTime() + 10 * 60 * 1_000),
+		});
+
+		await events.recordActivity(activity.id);
+		await events.recordMessage(messageId);
+
+		const liveEvents = await db.contactEvent.findMany({
+			where: {
+				sourceKey: { in: [`act:${activity.id}`, `msg:${messageId}`] },
+				supersededAt: null,
+			},
+			select: { sourceKey: true },
+			orderBy: { sourceKey: "asc" },
+		});
+		expect(liveEvents).toEqual([
+			{ sourceKey: `act:${activity.id}` },
+			{ sourceKey: `msg:${messageId}` },
+		]);
 	});
 
 	it("records Extrovert DM transcript lines as LinkedIn events", async () => {

@@ -6,7 +6,10 @@ import {
 } from "@crm/validation/linkedin-url";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
-import { ActivityStampService } from "../crm/activity-stamp.service";
+import {
+	ActivityStampService,
+	activityTime,
+} from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 
 type ResolveContactInput = {
@@ -200,9 +203,9 @@ export class ExtrovertFilingService {
 					createdById: author,
 					meta: { automated: true, source: "extrovert" },
 				},
-				select: { createdAt: true },
+				select: { createdAt: true, occurredAt: true },
 			});
-			await this.stamp.touch({ contactId }, activity.createdAt);
+			await this.stamp.touch({ contactId }, activityTime(activity));
 		} catch (error) {
 			this.logger.error({
 				message: "Extrovert engagement note was not filed",

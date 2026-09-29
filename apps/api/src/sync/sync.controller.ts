@@ -24,6 +24,7 @@ import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { EnvironmentVariables } from "../config/env.validation";
 import { ContactClockService } from "../contact-events/contact-clock.service";
 import { ContactEventsSyncService } from "../contact-events/contact-events-sync.service";
+import { ActivityStampService } from "../crm/activity-stamp.service";
 import { ExtrovertEngagementSyncService } from "../extrovert/extrovert-engagement-sync.service";
 import { ExtrovertSyncService } from "../extrovert/extrovert-sync.service";
 import { InstantlyEmailSyncService } from "../instantly/instantly-email-sync.service";
@@ -58,6 +59,7 @@ export class SyncController {
 		private readonly activityDirections: ActivityDirectionBackfillService,
 		private readonly contactEvents: ContactEventsSyncService,
 		private readonly contactClocks: ContactClockService,
+		private readonly activityStamps: ActivityStampService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -284,6 +286,23 @@ export class SyncController {
 		return this.runActivityDirection(authorization);
 	}
 
+	@Get("activity-stamps")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "Recompute activity timestamps from event time" })
+	@ApiOkResponse({ description: "Activity stamps were recomputed." })
+	async activityStampsViaGet(@Headers("authorization") authorization?: string) {
+		return this.runActivityStamps(authorization);
+	}
+
+	@Post("activity-stamps")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async activityStampsViaPost(
+		@Headers("authorization") authorization?: string,
+	) {
+		return this.runActivityStamps(authorization);
+	}
+
 	@Get("contact-events")
 	@AllowAnonymous()
 	@ApiOperation({
@@ -384,6 +403,12 @@ export class SyncController {
 	private async runActivityDirection(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.activityDirections.backfill();
+	}
+
+	private async runActivityStamps(authorization?: string) {
+		this.assertSecret(authorization);
+		await this.activityStamps.recomputeAll();
+		return { ok: true };
 	}
 
 	private async runContactEvents(

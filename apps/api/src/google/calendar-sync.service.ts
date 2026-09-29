@@ -11,7 +11,10 @@ import {
 } from "@crm/validation/calendar-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
-import { ActivityStampService } from "../crm/activity-stamp.service";
+import {
+	ActivityStampService,
+	activityTime,
+} from "../crm/activity-stamp.service";
 import { singleOpenDealId } from "../crm/single-open-deal";
 import { InjectDatabase } from "../database/database.constants";
 import { type Deadline, overdue } from "../mailbox/deadline";
@@ -452,7 +455,7 @@ export class CalendarSyncService {
 				contactId: summary.contactId,
 				dealId: summary.dealId,
 			},
-			select: { createdAt: true },
+			select: { createdAt: true, occurredAt: true },
 		});
 
 		await this.stamp.touch(
@@ -461,7 +464,7 @@ export class CalendarSyncService {
 				contactId: summary.contactId,
 				dealId: summary.dealId,
 			},
-			activity.createdAt,
+			activityTime(activity),
 		);
 	}
 

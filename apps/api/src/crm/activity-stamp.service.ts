@@ -1,37 +1,6 @@
-import {
-	ActivityType,
-	type Db,
-	EmailClassification,
-	type Prisma,
-	Prisma as PrismaNamespace,
-} from "@crm/db";
+import { type Db, type Prisma, Prisma as PrismaNamespace } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
-
-const COUNTED_ACTIVITY_WHERE: Prisma.ActivityWhereInput = {
-	OR: [
-		{ type: { not: ActivityType.EMAIL } },
-		{ emailThreadId: null },
-		{
-			emailThread: {
-				is: {
-					messages: {
-						some: {
-							OR: [
-								{
-									classification: {
-										in: [EmailClassification.OURS, EmailClassification.THEIRS],
-									},
-								},
-								{ classification: null, correspondence: true },
-							],
-						},
-					},
-				},
-			},
-		},
-	],
-};
 
 const COUNTED_ACTIVITY_SQL = PrismaNamespace.sql`
 	(
@@ -49,6 +18,11 @@ const COUNTED_ACTIVITY_SQL = PrismaNamespace.sql`
 	)
 `;
 
+const ACTIVITY_TIME_SQL = PrismaNamespace.sql`
+	CASE WHEN a."occurredAt" IS NULL OR a."occurredAt" > NOW()
+		THEN a."createdAt" ELSE a."occurredAt" END
+`;
+
 export type ActivityTarget = {
 	companyId?: string | null;
 	contactId?: string | null;
@@ -60,6 +34,15 @@ export type StampTargets = {
 	contactIds: string[];
 	dealIds: string[];
 };
+
+export function activityTime(
+	activity: { occurredAt: Date | null; createdAt: Date },
+	now = new Date(),
+): Date {
+	return activity.occurredAt && activity.occurredAt <= now
+		? activity.occurredAt
+		: activity.createdAt;
+}
 
 function present(ids: (string | null)[]): string[] {
 	return ids.filter((id): id is string => id !== null);
@@ -99,38 +82,11 @@ export class ActivityStampService {
 	}
 
 	async recompute(target: ActivityTarget): Promise<void> {
-		if (target.companyId) {
-			const { _max } = await this.db.activity.aggregate({
-				where: { ...COUNTED_ACTIVITY_WHERE, companyId: target.companyId },
-				_max: { createdAt: true },
-			});
-			await this.db.company.update({
-				where: { id: target.companyId },
-				data: { lastActivityAt: _max.createdAt },
-			});
-		}
-
-		if (target.contactId) {
-			const { _max } = await this.db.activity.aggregate({
-				where: { ...COUNTED_ACTIVITY_WHERE, contactId: target.contactId },
-				_max: { createdAt: true },
-			});
-			await this.db.contact.update({
-				where: { id: target.contactId },
-				data: { lastActivityAt: _max.createdAt },
-			});
-		}
-
-		if (target.dealId) {
-			const { _max } = await this.db.activity.aggregate({
-				where: { ...COUNTED_ACTIVITY_WHERE, dealId: target.dealId },
-				_max: { createdAt: true },
-			});
-			await this.db.deal.update({
-				where: { id: target.dealId },
-				data: { lastActivityAt: _max.createdAt },
-			});
-		}
+		await this.recomputeMany({
+			companyIds: target.companyId ? [target.companyId] : [],
+			contactIds: target.contactId ? [target.contactId] : [],
+			dealIds: target.dealId ? [target.dealId] : [],
+		});
 	}
 
 	async targetsOf(
@@ -189,7 +145,7 @@ export class ActivityStampService {
 		return this.db.$executeRaw`
 			UPDATE ${record} r
 			SET "lastActivityAt" = (
-				SELECT MAX(a."createdAt")
+				SELECT MAX(${ACTIVITY_TIME_SQL})
 				FROM "activity" a
 				WHERE a.${key} = r.id AND ${COUNTED_ACTIVITY_SQL}
 			)
@@ -202,7 +158,7 @@ export class ActivityStampService {
 				UPDATE "company" c
 				SET "lastActivityAt" = a.max
 				FROM (
-					SELECT a."companyId" AS id, MAX(a."createdAt") AS max
+					SELECT a."companyId" AS id, MAX(${ACTIVITY_TIME_SQL}) AS max
 					FROM "activity" a
 					WHERE a."companyId" IS NOT NULL AND ${COUNTED_ACTIVITY_SQL}
 					GROUP BY a."companyId"
@@ -219,7 +175,7 @@ export class ActivityStampService {
 				UPDATE "contact" c
 				SET "lastActivityAt" = a.max
 				FROM (
-					SELECT a."contactId" AS id, MAX(a."createdAt") AS max
+					SELECT a."contactId" AS id, MAX(${ACTIVITY_TIME_SQL}) AS max
 					FROM "activity" a
 					WHERE a."contactId" IS NOT NULL AND ${COUNTED_ACTIVITY_SQL}
 					GROUP BY a."contactId"
@@ -236,7 +192,7 @@ export class ActivityStampService {
 				UPDATE "deal" d
 				SET "lastActivityAt" = a.max
 				FROM (
-					SELECT a."dealId" AS id, MAX(a."createdAt") AS max
+					SELECT a."dealId" AS id, MAX(${ACTIVITY_TIME_SQL}) AS max
 					FROM "activity" a
 					WHERE a."dealId" IS NOT NULL AND ${COUNTED_ACTIVITY_SQL}
 					GROUP BY a."dealId"

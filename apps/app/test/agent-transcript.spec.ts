@@ -193,6 +193,10 @@ describe("deal list presentation", () => {
 		daysSinceLastActivity: 201,
 		neverActive: true,
 		expectedCloseDate: "2026-09-03T19:50:06.111Z",
+		lastContactedAt: "2026-08-01T12:00:00.000Z",
+		lastRepliedAt: "2026-07-29T12:00:00.000Z",
+		daysSinceLastContact: 5,
+		awaitingReply: true,
 	};
 
 	const output = {
@@ -214,6 +218,10 @@ describe("deal list presentation", () => {
 				{
 					id: "deal-1",
 					daysSinceLastActivity: 201,
+					lastContactedAt: "2026-08-01T12:00:00.000Z",
+					lastRepliedAt: "2026-07-29T12:00:00.000Z",
+					daysSinceLastContact: 5,
+					awaitingReply: true,
 					company: {
 						iconUrl: "https://cdn.example.test/notion.png",
 					},

@@ -375,22 +375,82 @@ export class ContactEventsService {
 
 		let written = 0;
 		const channel = ACTIVITY_CHANNELS[activity.type];
-		if (!activity.emailThreadId && activity.direction && channel) {
-			written += await this.upsert({
-				sourceKey: `act:${activity.id}`,
-				dealId: activity.dealId,
-				contactId: activity.contactId,
-				companyId: activity.companyId,
-				occurredAt: activity.occurredAt ?? activity.createdAt,
-				datePrecision: ContactDatePrecision.EXACT,
-				channel,
-				direction: activity.direction,
-				origin: ContactEventOrigin.RECORDED,
-				sourceActivityId: activity.id,
-				sourceMessageId: null,
-			});
+		const baseKey = `act:${activity.id}`;
+		const splitKeys = [`${baseKey}:OUT`, `${baseKey}:IN`];
+		if (
+			activity.type === ActivityType.MEETING &&
+			!activity.emailThreadId &&
+			!activity.direction &&
+			activity.occurredAt &&
+			(activity.contactId || activity.companyId)
+		) {
+			written += await this.supersede(baseKey);
+			for (const direction of [ContactDirection.OUT, ContactDirection.IN]) {
+				written += await this.upsert({
+					sourceKey: `${baseKey}:${direction}`,
+					dealId: activity.dealId,
+					contactId: activity.contactId,
+					companyId: activity.companyId,
+					occurredAt: activity.occurredAt,
+					datePrecision: ContactDatePrecision.EXACT,
+					channel: ContactChannel.MEETING,
+					direction,
+					origin: ContactEventOrigin.RECORDED,
+					sourceActivityId: activity.id,
+					sourceMessageId: null,
+					confidence: null,
+				});
+			}
+		} else if (!activity.emailThreadId && activity.direction && channel) {
+			for (const sourceKey of splitKeys) {
+				written += await this.supersede(sourceKey);
+			}
+			const occurredAt = activity.occurredAt ?? activity.createdAt;
+			const duplicate =
+				activity.type === ActivityType.EMAIL && activity.contactId
+					? await this.db.contactEvent.findFirst({
+							where: {
+								origin: ContactEventOrigin.RECORDED,
+								sourceKey: { startsWith: "msg:" },
+								contactId: activity.contactId,
+								direction: activity.direction,
+								channel: ContactChannel.EMAIL,
+								supersededAt: null,
+								occurredAt: {
+									gte: new Date(
+										occurredAt.getTime() -
+											CONTACT_EVENTS.clock.recordedDuplicateWindowMs,
+									),
+									lte: new Date(
+										occurredAt.getTime() +
+											CONTACT_EVENTS.clock.recordedDuplicateWindowMs,
+									),
+								},
+							},
+							select: { sourceKey: true },
+						})
+					: null;
+			if (duplicate) {
+				written += await this.supersede(baseKey);
+			} else {
+				written += await this.upsert({
+					sourceKey: baseKey,
+					dealId: activity.dealId,
+					contactId: activity.contactId,
+					companyId: activity.companyId,
+					occurredAt,
+					datePrecision: ContactDatePrecision.EXACT,
+					channel,
+					direction: activity.direction,
+					origin: ContactEventOrigin.RECORDED,
+					sourceActivityId: activity.id,
+					sourceMessageId: null,
+				});
+			}
 		} else {
-			written += await this.supersede(`act:${activity.id}`);
+			for (const sourceKey of [baseKey, ...splitKeys]) {
+				written += await this.supersede(sourceKey);
+			}
 		}
 
 		written += await this.recordLinkedinTranscript(activity);
@@ -430,22 +490,51 @@ export class ContactEventsService {
 		}
 
 		const target = message.thread.activity;
-		return this.upsert({
+		const contactId = target?.contactId ?? message.thread.contactId;
+		const direction =
+			message.classification === EmailClassification.OURS
+				? ContactDirection.OUT
+				: ContactDirection.IN;
+		let written = await this.upsert({
 			sourceKey: `msg:${message.id}`,
 			dealId: target?.dealId ?? null,
-			contactId: target?.contactId ?? message.thread.contactId,
+			contactId,
 			companyId: target?.companyId ?? message.thread.companyId,
 			occurredAt: message.sentAt,
 			datePrecision: ContactDatePrecision.EXACT,
 			channel: ContactChannel.EMAIL,
-			direction:
-				message.classification === EmailClassification.OURS
-					? ContactDirection.OUT
-					: ContactDirection.IN,
+			direction,
 			origin: ContactEventOrigin.RECORDED,
 			sourceActivityId: null,
 			sourceMessageId: message.id,
 		});
+		if (!contactId) return written;
+
+		const matchingActivities = await this.db.contactEvent.findMany({
+			where: {
+				origin: ContactEventOrigin.RECORDED,
+				sourceKey: { startsWith: "act:" },
+				contactId,
+				direction,
+				channel: ContactChannel.EMAIL,
+				supersededAt: null,
+				occurredAt: {
+					gte: new Date(
+						message.sentAt.getTime() -
+							CONTACT_EVENTS.clock.recordedDuplicateWindowMs,
+					),
+					lte: new Date(
+						message.sentAt.getTime() +
+							CONTACT_EVENTS.clock.recordedDuplicateWindowMs,
+					),
+				},
+			},
+			select: { sourceKey: true },
+		});
+		for (const event of matchingActivities) {
+			written += await this.supersede(event.sourceKey);
+		}
+		return written;
 	}
 
 	private async recordLinkedinTranscript(activity: {

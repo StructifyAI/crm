@@ -10,7 +10,10 @@ import { parseGranolaSyncResume } from "@crm/validation/granola-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { EnvironmentVariables } from "../config/env.validation";
-import { ActivityStampService } from "../crm/activity-stamp.service";
+import {
+	ActivityStampService,
+	activityTime,
+} from "../crm/activity-stamp.service";
 import { singleOpenDealId } from "../crm/single-open-deal";
 import { InjectDatabase } from "../database/database.constants";
 import {
@@ -268,12 +271,12 @@ export class GranolaSyncService {
 				createdById: author.id,
 				meta: this.meta(null, note),
 			},
-			select: { createdAt: true },
+			select: { createdAt: true, occurredAt: true },
 		});
 
 		await this.stamp.touch(
 			{ companyId: match.companyId, contactId: match.contactId, dealId },
-			activity.createdAt,
+			activityTime(activity),
 		);
 		return "created";
 	}

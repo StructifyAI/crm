@@ -238,4 +238,44 @@ describe("listDeals", () => {
 		});
 		expect(second.deals[0]?.id).not.toBe(first.deals[0]?.id);
 	});
+
+	it("returns maintained contact clocks and computes follow-up status", async () => {
+		const lastContactedAt = new Date("2026-08-01T12:00:00.000Z");
+		await db.deal.update({
+			where: { id: dealId },
+			data: { lastContactedAt, lastRepliedAt: null },
+		});
+		const result = await listDeals({
+			status: "all",
+			companyId: northwindId,
+			now: new Date("2026-08-05T12:00:00.000Z"),
+		});
+		const deal = result.deals.find((row) => row.id === dealId);
+
+		expect(deal).toMatchObject({
+			lastContactedAt: lastContactedAt.toISOString(),
+			lastRepliedAt: null,
+			daysSinceLastContact: 4,
+			awaitingReply: true,
+		});
+		expect(result.deals.find((row) => row.id === freshDealId)).toMatchObject({
+			lastContactedAt: null,
+			lastRepliedAt: null,
+			daysSinceLastContact: null,
+			awaitingReply: false,
+		});
+
+		await db.deal.update({
+			where: { id: dealId },
+			data: { lastRepliedAt: new Date("2026-08-02T12:00:00.000Z") },
+		});
+		const replied = await listDeals({
+			status: "all",
+			companyId: northwindId,
+			now: new Date("2026-08-05T12:00:00.000Z"),
+		});
+		expect(replied.deals.find((row) => row.id === dealId)?.awaitingReply).toBe(
+			false,
+		);
+	});
 });
