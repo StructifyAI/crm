@@ -21,6 +21,7 @@ import { ContactClockService } from "../src/contact-events/contact-clock.service
 import { contactEventScopeQueryInput } from "../src/contact-events/contact-events.contracts";
 import { parseContactEventScope } from "../src/contact-events/contact-events.router";
 import { ContactEventsService } from "../src/contact-events/contact-events.service";
+import { ContactEventsSyncService } from "../src/contact-events/contact-events-sync.service";
 import { ContactExtractionService } from "../src/contact-events/contact-extraction.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { deadlineIn } from "../src/mailbox/deadline";
@@ -261,10 +262,12 @@ async function createActivity(
 		meta?: Prisma.InputJsonValue;
 		dealId?: string | null;
 		contactId?: string | null;
+		id?: string;
 	},
 ) {
 	const activity = await db.activity.create({
 		data: {
+			id: input.id,
 			type: input.type,
 			direction: input.direction ?? null,
 			occurredAt: input.occurredAt === undefined ? ago(24) : input.occurredAt,
@@ -289,6 +292,7 @@ async function createMessage(
 		contactId?: string | null;
 		classification: EmailClassification;
 		sentAt: Date;
+		id?: string;
 	},
 ): Promise<string> {
 	const rootMessageId = `<recorded-${crypto.randomUUID()}@mail.test>`;
@@ -308,6 +312,7 @@ async function createMessage(
 			lastMessageAt: input.sentAt,
 			messages: {
 				create: {
+					id: input.id,
 					rfcMessageId: `<${crypto.randomUUID()}@mail.test>`,
 					syncedByUserId: userId,
 					direction,
@@ -328,6 +333,31 @@ async function createMessage(
 	if (!messageId) throw new Error("Recorded test email was not created.");
 	messageIds.push(messageId);
 	return messageId;
+}
+
+function contactEventsBackfill(...sourceIds: string[]) {
+	const queryRaw = db.$queryRaw.bind(db) as unknown as (
+		...args: unknown[]
+	) => Promise<{ id: string }[]>;
+	const selectedIds = new Set(sourceIds);
+	const scopedDb = {
+		$queryRaw: (...args: unknown[]) =>
+			queryRaw(...args).then((rows) =>
+				rows.filter((row) => selectedIds.has(row.id)),
+			),
+	} as unknown as Db;
+	const extraction = {
+		tick: async () => ({ examined: 0, extracted: 0, failed: 0 }),
+	} as unknown as ContactExtractionService;
+	const refreshClocks = {
+		refreshRecentlyDue: async () => undefined,
+	} as unknown as ContactClockService;
+	return new ContactEventsSyncService(
+		scopedDb,
+		events,
+		extraction,
+		refreshClocks,
+	);
 }
 
 async function clean() {
@@ -1001,6 +1031,110 @@ describe("contact event ledger", () => {
 				.filter((event) => event.sourceKey !== `act:${meeting.id}`)
 				.every((event) => event.supersededAt !== null),
 		).toBe(true);
+	});
+
+	it("backfills a directionless meeting with a contact in both directions", async () => {
+		const fixture = await createFixture("meeting-backfill");
+		const meeting = await createActivity(fixture, {
+			id: `zzzzzzzzzzzzzzzzzzzzzzzz${suffix}`,
+			type: ActivityType.MEETING,
+			direction: null,
+			occurredAt: ago(4),
+			dealId: fixture.dealId,
+		});
+
+		const result = await contactEventsBackfill(meeting.id).backfill(null, null);
+
+		expect(result.activityExamined).toBe(1);
+		expect(result.recordedActivities).toBe(2);
+		expect(
+			await db.contactEvent.findMany({
+				where: { sourceActivityId: meeting.id, supersededAt: null },
+				select: { sourceKey: true, direction: true },
+				orderBy: { sourceKey: "asc" },
+			}),
+		).toEqual([
+			{
+				sourceKey: `act:${meeting.id}:IN`,
+				direction: ContactDirection.IN,
+			},
+			{
+				sourceKey: `act:${meeting.id}:OUT`,
+				direction: ContactDirection.OUT,
+			},
+		]);
+	});
+
+	it("skips recorded sources by default and reprocesses them idempotently with all", async () => {
+		const fixture = await createFixture("all-backfill");
+		const sentAt = ago(3);
+		const activity = await createActivity(fixture, {
+			id: `zzzzzzzzzzzzzzzzzzzzzzzzact${suffix}`,
+			type: ActivityType.EMAIL,
+			direction: ContactDirection.IN,
+			occurredAt: sentAt,
+			meta: { source: "instantly", eventType: "reply_received" },
+		});
+		const messageId = await createMessage(fixture, {
+			id: `zzzzzzzzzzzzzzzzzzzzzzzzmsg${suffix}`,
+			classification: EmailClassification.THEIRS,
+			sentAt,
+		});
+		await db.contactEvent.createMany({
+			data: [
+				{
+					sourceKey: `act:${activity.id}`,
+					contactId: fixture.contactId,
+					companyId: fixture.companyId,
+					occurredAt: sentAt,
+					datePrecision: ContactDatePrecision.EXACT,
+					channel: ContactChannel.EMAIL,
+					direction: ContactDirection.IN,
+					origin: ContactEventOrigin.RECORDED,
+					sourceActivityId: activity.id,
+				},
+				{
+					sourceKey: `msg:${messageId}`,
+					contactId: fixture.contactId,
+					companyId: fixture.companyId,
+					occurredAt: sentAt,
+					datePrecision: ContactDatePrecision.EXACT,
+					channel: ContactChannel.EMAIL,
+					direction: ContactDirection.IN,
+					origin: ContactEventOrigin.RECORDED,
+					sourceMessageId: messageId,
+				},
+			],
+		});
+		const backfill = contactEventsBackfill(activity.id, messageId);
+
+		const skipped = await backfill.backfill(null, null);
+		expect(skipped.activityExamined).toBe(0);
+		expect(skipped.messageExamined).toBe(0);
+
+		const reprocessed = await backfill.backfill(null, null, true);
+		expect(reprocessed.activityExamined).toBe(1);
+		expect(reprocessed.messageExamined).toBe(1);
+		expect(reprocessed.recordedActivities).toBe(1);
+		expect(
+			(
+				await db.contactEvent.findUniqueOrThrow({
+					where: { sourceKey: `act:${activity.id}` },
+					select: { supersededAt: true },
+				})
+			).supersededAt,
+		).toEqual(expect.any(Date));
+
+		const beforeSecondRun = await db.contactEvent.count({
+			where: { sourceKey: { in: [`act:${activity.id}`, `msg:${messageId}`] } },
+		});
+		const secondRun = await backfill.backfill(null, null, true);
+		const afterSecondRun = await db.contactEvent.count({
+			where: { sourceKey: { in: [`act:${activity.id}`, `msg:${messageId}`] } },
+		});
+		expect(secondRun.recordedActivities).toBe(0);
+		expect(secondRun.recordedMessages).toBe(0);
+		expect(afterSecondRun).toBe(beforeSecondRun);
 	});
 
 	it("does not move contact clocks for a future directionless meeting", async () => {

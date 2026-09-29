@@ -17,11 +17,15 @@ export class ContactEventsSyncService {
 		private readonly clocks: ContactClockService,
 	) {}
 
-	async backfill(activityCursor: string | null, messageCursor: string | null) {
+	async backfill(
+		activityCursor: string | null,
+		messageCursor: string | null,
+		all = false,
+	) {
 		const deadline = deadlineIn(SYNC_TICK.budgetMs);
 		const [activities, messages] = await Promise.all([
-			this.activityIds(activityCursor),
-			this.messageIds(messageCursor),
+			this.activityIds(activityCursor, all),
+			this.messageIds(messageCursor, all),
 		]);
 
 		let recordedActivities = 0;
@@ -69,10 +73,23 @@ export class ContactEventsSyncService {
 		};
 	}
 
-	private activityIds(cursor: string | null): Promise<{ id: string }[]> {
+	private activityIds(
+		cursor: string | null,
+		all: boolean,
+	): Promise<{ id: string }[]> {
 		const cursorWhere = cursor
 			? Prisma.sql`AND activity."id" < ${cursor}`
 			: Prisma.empty;
+		const recordedWhere = all
+			? Prisma.empty
+			: Prisma.sql`
+				AND NOT EXISTS (
+					SELECT 1
+					FROM "contactEvent" event
+					WHERE event."sourceActivityId" = activity."id"
+						AND event."origin" = 'RECORDED'::"ContactEventOrigin"
+				)
+			`;
 		return this.db.$queryRaw<{ id: string }[]>`
 			SELECT activity."id"
 			FROM "activity" activity
@@ -83,27 +100,45 @@ export class ContactEventsSyncService {
 					AND activity."emailThreadId" IS NULL
 				)
 				OR (
+					activity."type"::text = 'MEETING'
+					AND activity."direction" IS NULL
+					AND activity."emailThreadId" IS NULL
+					AND activity."occurredAt" IS NOT NULL
+					AND (
+						activity."contactId" IS NOT NULL
+						OR activity."companyId" IS NOT NULL
+					)
+				)
+				OR (
 					activity."meta"->>'source' = 'extrovert'
 					AND activity."meta"->'extrovert'->>'kind' = 'dm'
 					AND activity."body" IS NOT NULL
 				)
 			)
-			AND NOT EXISTS (
-				SELECT 1
-				FROM "contactEvent" event
-				WHERE event."sourceActivityId" = activity."id"
-					AND event."origin" = 'RECORDED'::"ContactEventOrigin"
-			)
+			${recordedWhere}
 			${cursorWhere}
 			ORDER BY activity."id" DESC
 			LIMIT ${CONTACT_EVENTS.backfill.pageSize}
 		`;
 	}
 
-	private messageIds(cursor: string | null): Promise<{ id: string }[]> {
+	private messageIds(
+		cursor: string | null,
+		all: boolean,
+	): Promise<{ id: string }[]> {
 		const cursorWhere = cursor
 			? Prisma.sql`AND message."id" < ${cursor}`
 			: Prisma.empty;
+		const recordedWhere = all
+			? Prisma.empty
+			: Prisma.sql`
+				AND NOT EXISTS (
+					SELECT 1
+					FROM "contactEvent" event
+					WHERE event."sourceMessageId" = message."id"
+						AND event."origin" = 'RECORDED'::"ContactEventOrigin"
+				)
+			`;
 		return this.db.$queryRaw<{ id: string }[]>`
 			SELECT message."id"
 			FROM "emailMessage" message
@@ -111,12 +146,7 @@ export class ContactEventsSyncService {
 				'OURS'::"EmailClassification",
 				'THEIRS'::"EmailClassification"
 			)
-			AND NOT EXISTS (
-				SELECT 1
-				FROM "contactEvent" event
-				WHERE event."sourceMessageId" = message."id"
-					AND event."origin" = 'RECORDED'::"ContactEventOrigin"
-			)
+			${recordedWhere}
 			${cursorWhere}
 			ORDER BY message."id" DESC
 			LIMIT ${CONTACT_EVENTS.backfill.pageSize}

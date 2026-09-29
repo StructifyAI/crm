@@ -310,12 +310,19 @@ export class SyncController {
 	})
 	@ApiQuery({ name: "activityCursor", required: false })
 	@ApiQuery({ name: "messageCursor", required: false })
+	@ApiQuery({ name: "all", required: false })
 	async contactEventsViaGet(
 		@Headers("authorization") authorization?: string,
 		@Query("activityCursor") activityCursor?: string,
 		@Query("messageCursor") messageCursor?: string,
+		@Query("all") all?: string,
 	) {
-		return this.runContactEvents(authorization, activityCursor, messageCursor);
+		return this.runContactEvents(
+			authorization,
+			activityCursor,
+			messageCursor,
+			all === "1",
+		);
 	}
 
 	@Post("contact-events")
@@ -325,8 +332,14 @@ export class SyncController {
 		@Headers("authorization") authorization?: string,
 		@Query("activityCursor") activityCursor?: string,
 		@Query("messageCursor") messageCursor?: string,
+		@Query("all") all?: string,
 	) {
-		return this.runContactEvents(authorization, activityCursor, messageCursor);
+		return this.runContactEvents(
+			authorization,
+			activityCursor,
+			messageCursor,
+			all === "1",
+		);
 	}
 
 	@Get("contact-clocks")
@@ -415,11 +428,13 @@ export class SyncController {
 		authorization?: string,
 		activityCursor?: string,
 		messageCursor?: string,
+		all = false,
 	) {
 		this.assertSecret(authorization);
 		return this.contactEvents.backfill(
 			this.parseCursor(activityCursor),
 			this.parseCursor(messageCursor),
+			all,
 		);
 	}
 

@@ -10,6 +10,7 @@ import { parseGranolaSyncResume } from "@crm/validation/granola-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { EnvironmentVariables } from "../config/env.validation";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
 	ActivityStampService,
 	activityTime,
@@ -54,6 +55,7 @@ export class GranolaSyncService {
 		private readonly api: GranolaApiClient,
 		private readonly match: MailboxMatchService,
 		private readonly stamp: ActivityStampService,
+		private readonly contactEvents: ContactEventsService,
 		private readonly config: ConfigService<EnvironmentVariables, true>,
 	) {}
 
@@ -271,13 +273,14 @@ export class GranolaSyncService {
 				createdById: author.id,
 				meta: this.meta(null, note),
 			},
-			select: { createdAt: true, occurredAt: true },
+			select: { id: true, createdAt: true, occurredAt: true },
 		});
 
 		await this.stamp.touch(
 			{ companyId: match.companyId, contactId: match.contactId, dealId },
 			activityTime(activity),
 		);
+		await this.contactEvents.recordActivity(activity.id);
 		return "created";
 	}
 

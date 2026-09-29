@@ -11,6 +11,7 @@ import {
 } from "@crm/validation/calendar-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
 	ActivityStampService,
 	activityTime,
@@ -54,6 +55,7 @@ export class CalendarSyncService {
 		private readonly match: MailboxMatchService,
 		private readonly state: SyncStateService,
 		private readonly stamp: ActivityStampService,
+		private readonly contactEvents: ContactEventsService,
 		private readonly agent: AgentTriggerService,
 	) {}
 
@@ -455,7 +457,7 @@ export class CalendarSyncService {
 				contactId: summary.contactId,
 				dealId: summary.dealId,
 			},
-			select: { createdAt: true, occurredAt: true },
+			select: { id: true, createdAt: true, occurredAt: true },
 		});
 
 		await this.stamp.touch(
@@ -466,6 +468,7 @@ export class CalendarSyncService {
 			},
 			activityTime(activity),
 		);
+		await this.contactEvents.recordActivity(activity.id);
 	}
 
 	private participantsOf(event: GoogleEvent): Participant[] {

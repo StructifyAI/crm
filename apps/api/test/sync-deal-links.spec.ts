@@ -29,6 +29,11 @@ const SECRET = "cron-secret-for-tests";
 
 let cursors: Array<string | null> = [];
 let activityStampRuns = 0;
+let contactEventCalls: {
+	activityCursor: string | null;
+	messageCursor: string | null;
+	all: boolean;
+}[] = [];
 
 const dealLinks = {
 	backfill: async (cursor: string | null): Promise<DealLinkBackfill> => {
@@ -52,6 +57,23 @@ const activityStamps = {
 		activityStampRuns += 1;
 	},
 } as unknown as ActivityStampService;
+const contactEvents = {
+	backfill: async (
+		activityCursor: string | null,
+		messageCursor: string | null,
+		all = false,
+	) => {
+		contactEventCalls.push({ activityCursor, messageCursor, all });
+		return {
+			activityExamined: 0,
+			messageExamined: 0,
+			recordedActivities: 0,
+			recordedMessages: 0,
+			extraction: { examined: 0, extracted: 0, failed: 0 },
+			next: { activityCursor: null, messageCursor: null },
+		};
+	},
+} as unknown as ContactEventsSyncService;
 
 const unused = {} as unknown as MailboxSyncService &
 	InstantlySyncService &
@@ -76,7 +98,7 @@ function controller(secret: string | undefined): SyncController {
 		dealLinks,
 		correspondence,
 		unused,
-		unused,
+		contactEvents,
 		unused,
 		activityStamps,
 		config,
@@ -86,6 +108,7 @@ function controller(secret: string | undefined): SyncController {
 beforeEach(() => {
 	cursors = [];
 	activityStampRuns = 0;
+	contactEventCalls = [];
 });
 
 describe("GET /internal/sync/activity-stamps", () => {
@@ -109,6 +132,38 @@ describe("GET /internal/sync/activity-stamps", () => {
 			subject.activityStampsViaPost(`Bearer ${SECRET}`),
 		).resolves.toEqual({ ok: true });
 		expect(activityStampRuns).toBe(2);
+	});
+});
+
+describe("/internal/sync/contact-events", () => {
+	it("forwards cursors and the all flag on GET and POST", async () => {
+		const subject = controller(SECRET);
+
+		await subject.contactEventsViaGet(
+			`Bearer ${SECRET}`,
+			"activity-1",
+			"message-1",
+			"1",
+		);
+		await subject.contactEventsViaPost(
+			`Bearer ${SECRET}`,
+			"activity-2",
+			"message-2",
+			"0",
+		);
+
+		expect(contactEventCalls).toEqual([
+			{
+				activityCursor: "activity-1",
+				messageCursor: "message-1",
+				all: true,
+			},
+			{
+				activityCursor: "activity-2",
+				messageCursor: "message-2",
+				all: false,
+			},
+		]);
 	});
 });
 
