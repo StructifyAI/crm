@@ -27,6 +27,11 @@ export function classifyEmail(
 	const at = email.lastIndexOf("@");
 	const local = email.slice(0, at);
 	const domain = normalizeDomain(email.slice(at + 1));
+	const isMachineSender = (): boolean =>
+		domain !== null &&
+		(isMachineDomain(domain) ||
+			EXPLICIT_MACHINE_DOMAINS.has(domain) ||
+			MACHINE_LOCAL_PART.test(local));
 
 	if (
 		context.ourAddresses.has(email) ||
@@ -39,7 +44,9 @@ export function classifyEmail(
 		context.suppressedEmails?.has(email) ||
 		(domain !== null && context.suppressedDomains?.has(domain))
 	) {
-		return EmailClassification.UNKNOWN;
+		return isMachineSender()
+			? EmailClassification.AUTOMATED
+			: EmailClassification.UNKNOWN;
 	}
 
 	if (context.scopedContactEmails.has(email)) {
@@ -50,12 +57,7 @@ export function classifyEmail(
 		return EmailClassification.THEIRS;
 	}
 
-	if (
-		domain !== null &&
-		(isMachineDomain(domain) ||
-			EXPLICIT_MACHINE_DOMAINS.has(domain) ||
-			MACHINE_LOCAL_PART.test(local))
-	) {
+	if (isMachineSender()) {
 		return EmailClassification.AUTOMATED;
 	}
 

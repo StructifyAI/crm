@@ -536,6 +536,52 @@ describe("email classification", () => {
 		).toBe(EmailClassification.THEIRS);
 	});
 
+	it("keeps suppressed Superhuman reminders automated", () => {
+		expect(
+			classifyEmail(
+				{
+					direction: EmailDirection.INBOUND,
+					fromEmail: "reminder@superhuman.com",
+				},
+				{
+					...classificationContext,
+					suppressedDomains: new Set(["superhuman.com"]),
+				},
+			),
+		).toBe(EmailClassification.AUTOMATED);
+	});
+
+	it("keeps suppressed human senders unknown even on the company domain", () => {
+		expect(
+			classifyEmail(
+				{
+					direction: EmailDirection.INBOUND,
+					fromEmail: "jordan@buyer.test",
+				},
+				{
+					...classificationContext,
+					suppressedDomains: new Set(["buyer.test"]),
+				},
+			),
+		).toBe(EmailClassification.UNKNOWN);
+	});
+
+	it("keeps suppressed addressed senders unknown", () => {
+		expect(
+			classifyEmail(
+				{
+					direction: EmailDirection.INBOUND,
+					fromEmail: "jordan@buyer.test",
+				},
+				{
+					...classificationContext,
+					suppressedEmails: new Set(["jordan@buyer.test"]),
+				},
+				new Set(["jordan@buyer.test"]),
+			),
+		).toBe(EmailClassification.UNKNOWN);
+	});
+
 	it("includes the thread contact alongside active company and deal contacts", async () => {
 		const target = await createFixture("scope-target");
 		const other = await createFixture("scope-other");
