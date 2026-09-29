@@ -202,7 +202,7 @@ describe("correspondence backfill", () => {
 			where: { id: dealId },
 			select: { lastActivityAt: true },
 		});
-		expect(deal.lastActivityAt).toEqual(thread.activity?.createdAt ?? null);
+		expect(deal.lastActivityAt).toEqual(thread.activity?.occurredAt ?? null);
 	});
 
 	it("changes nothing on a rerun", async () => {
@@ -215,7 +215,7 @@ describe("correspondence backfill", () => {
 			select: {
 				companyId: true,
 				contactId: true,
-				activity: { select: { createdAt: true } },
+				activity: { select: { occurredAt: true } },
 			},
 		});
 		const machine = await db.emailThread.create({
@@ -275,7 +275,7 @@ describe("correspondence backfill", () => {
 			where: { id: dealId },
 			select: { lastActivityAt: true },
 		});
-		expect(deal.lastActivityAt).toEqual(existing.activity?.createdAt ?? null);
+		expect(deal.lastActivityAt).toEqual(existing.activity?.occurredAt ?? null);
 	});
 
 	it("promotes the sender once a rep adds them as a contact", async () => {
