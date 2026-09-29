@@ -2,12 +2,14 @@ import { timingSafeEqual } from "node:crypto";
 import { EnrichmentStatus, Prisma } from "@crm/db";
 import { MAX_ATTEMPTS } from "@crm/db/agent-tasks";
 import { schemas } from "@crm/validation";
+import { contactEventExtractionRequest } from "@crm/validation/contact-events";
 import { dealLinkRequest } from "@crm/validation/deal-link";
 import { emailTriageRequest } from "@crm/validation/email-triage";
 import { eveTurnFailure } from "@crm/validation/eve-stream";
 import { defineChannel, GET, POST } from "eve/channels";
 import { z } from "zod";
 import { persistBuilderInputRequest } from "../lib/builder-input";
+import { extractContactEvents } from "../lib/contact-events";
 import { verifyKey } from "../lib/context-dev";
 import {
 	builderIdFromToken,
@@ -278,6 +280,31 @@ export default defineChannel({
 			}
 
 			return Response.json(await linkDeal(parsed.data));
+		}),
+
+		POST("/internal/crm/extract-contact-events", async (request) => {
+			if (!authorised(request)) {
+				return new Response("Unauthorized", { status: 401 });
+			}
+
+			const parsed = contactEventExtractionRequest.safeParse(
+				await request.json().catch(() => null),
+			);
+			if (!parsed.success) {
+				return Response.json(
+					{ error: "The activity was not readable." },
+					{ status: 400 },
+				);
+			}
+
+			try {
+				return Response.json(await extractContactEvents(parsed.data));
+			} catch {
+				return Response.json(
+					{ error: "The activity events could not be extracted." },
+					{ status: 503 },
+				);
+			}
 		}),
 	],
 
