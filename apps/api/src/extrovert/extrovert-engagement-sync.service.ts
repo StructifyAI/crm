@@ -4,6 +4,7 @@ import { parseExtrovertActivityMeta } from "@crm/validation/activity-meta";
 import { parseExtrovertEngagementResume } from "@crm/validation/extrovert-engagement-resume";
 import { normalizeLinkedinUrl } from "@crm/validation/linkedin-url";
 import { Injectable, Logger } from "@nestjs/common";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { ExtrovertClient } from "./extrovert.client";
@@ -46,6 +47,7 @@ export class ExtrovertEngagementSyncService {
 		private readonly sync: ExtrovertSyncService,
 		private readonly filing: ExtrovertFilingService,
 		private readonly stamp: ActivityStampService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async run(): Promise<ExtrovertEngagementSyncResult> {
@@ -378,9 +380,10 @@ export class ExtrovertEngagementSyncService {
 					occurredAt: new Date(lastMessage.sentAt),
 					meta: metadata,
 				},
-				select: { createdAt: true },
+				select: { id: true, createdAt: true },
 			});
 			await this.stamp.touch({ contactId: match.id }, activity.createdAt);
+			await this.contactEvents.recordActivity(activity.id);
 		} else {
 			const activity = await this.db.activity.create({
 				data: {
@@ -395,6 +398,7 @@ export class ExtrovertEngagementSyncService {
 				select: { id: true, createdAt: true },
 			});
 			await this.stamp.touch({ contactId: match.id }, activity.createdAt);
+			await this.contactEvents.recordActivity(activity.id);
 			existing.set(conversation.connectionId, {
 				id: activity.id,
 				lastMessageAt: lastMessage.sentAt,

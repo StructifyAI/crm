@@ -2,6 +2,7 @@ import { isGoogleConfigured, signsInWithGoogle } from "@crm/auth";
 import type { Db, Prisma } from "@crm/db";
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { normalizeDomain } from "../companies/domain";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { MailboxMatchService } from "../mailbox/mailbox-match.service";
@@ -34,6 +35,7 @@ export class GoogleConnectionService {
 		private readonly state: SyncStateService,
 		private readonly match: MailboxMatchService,
 		private readonly stamp: ActivityStampService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async status(userId: string): Promise<GoogleConnectionStatus> {
@@ -135,15 +137,47 @@ export class GoogleConnectionService {
 			gmailMessageId: { not: null },
 		};
 
-		const purged = await this.db.$transaction(
+		const result = await this.db.$transaction(
 			async (tx) => {
-				const touched = await tx.emailMessage.findMany({
+				const messagesBeforeDelete = await tx.emailMessage.findMany({
 					where: mine,
-					select: { threadId: true },
-					distinct: ["threadId"],
+					select: { id: true, threadId: true },
 				});
 
-				const threadIds = touched.map((row) => row.threadId);
+				const messageIds = messagesBeforeDelete.map((row) => row.id);
+				const threadIds = [
+					...new Set(messagesBeforeDelete.map((row) => row.threadId)),
+				];
+				const threadActivities = await tx.activity.findMany({
+					where: { emailThreadId: { in: threadIds } },
+					select: { id: true },
+				});
+				const calendarEvents = await tx.calendarEvent.findMany({
+					where: { syncedByUserId: userId },
+					select: { activity: { select: { id: true } } },
+				});
+				const activityIds = [
+					...threadActivities.map((activity) => activity.id),
+					...calendarEvents.flatMap((event) =>
+						event.activity ? [event.activity.id] : [],
+					),
+				];
+				const contactEventTargets =
+					messageIds.length > 0 || activityIds.length > 0
+						? await this.contactEvents.targetsForEvents(
+								{
+									OR: [
+										...(messageIds.length > 0
+											? [{ sourceMessageId: { in: messageIds } }]
+											: []),
+										...(activityIds.length > 0
+											? [{ sourceActivityId: { in: activityIds } }]
+											: []),
+									],
+								},
+								tx,
+							)
+						: [];
 				const messages = await tx.emailMessage.deleteMany({ where: mine });
 
 				await tx.emailThread.deleteMany({
@@ -152,20 +186,28 @@ export class GoogleConnectionService {
 
 				await rebuildThreads(tx, threadIds);
 
-				const events = await tx.calendarEvent.deleteMany({
+				const calendar = await tx.calendarEvent.deleteMany({
 					where: { syncedByUserId: userId },
 				});
 
-				return messages.count + events.count;
+				return {
+					purged: messages.count + calendar.count,
+					contactEventTargets,
+				};
 			},
 			{ timeout: PURGE_TIMEOUT_MS },
 		);
 
 		await this.stamp.recomputeAll();
+		await this.contactEvents.refreshAffected(result.contactEventTargets);
 
-		this.logger.log({ message: "Google data purged", userId, purged });
+		this.logger.log({
+			message: "Google data purged",
+			userId,
+			purged: result.purged,
+		});
 
-		return { purged };
+		return { purged: result.purged };
 	}
 
 	async revoke(userId: string): Promise<RevokeAccessOutput> {
@@ -221,20 +263,80 @@ export class GoogleConnectionService {
 
 		if (!company) return { domain: normalised, purged: 0 };
 
-		const [threads, events] = await this.db.$transaction([
-			this.db.emailThread.deleteMany({ where: { companyId: company.id } }),
-			this.db.calendarEvent.deleteMany({ where: { companyId: company.id } }),
-		]);
+		const result = await this.db.$transaction(async (tx) => {
+			const threads = await tx.emailThread.findMany({
+				where: { companyId: company.id },
+				select: { id: true },
+			});
+			const threadIds = threads.map((thread) => thread.id);
+			const messages = threadIds.length
+				? await tx.emailMessage.findMany({
+						where: { threadId: { in: threadIds } },
+						select: { id: true },
+					})
+				: [];
+			const calendarEvents = await tx.calendarEvent.findMany({
+				where: { companyId: company.id },
+				select: { id: true, activity: { select: { id: true } } },
+			});
+			const threadActivities =
+				threadIds.length > 0
+					? await tx.activity.findMany({
+							where: { emailThreadId: { in: threadIds } },
+							select: { id: true },
+						})
+					: [];
+			const activityIds = [
+				...threadActivities.map((activity) => activity.id),
+				...calendarEvents.flatMap((event) =>
+					event.activity ? [event.activity.id] : [],
+				),
+			];
+			const contactEventTargets =
+				messages.length > 0 || activityIds.length > 0
+					? await this.contactEvents.targetsForEvents(
+							{
+								OR: [
+									...(messages.length > 0
+										? [
+												{
+													sourceMessageId: {
+														in: messages.map((message) => message.id),
+													},
+												},
+											]
+										: []),
+									...(activityIds.length > 0
+										? [{ sourceActivityId: { in: activityIds } }]
+										: []),
+								],
+							},
+							tx,
+						)
+					: [];
+			const deletedThreads = await tx.emailThread.deleteMany({
+				where: { companyId: company.id },
+			});
+			const deletedCalendarEvents = await tx.calendarEvent.deleteMany({
+				where: { companyId: company.id },
+			});
+
+			return {
+				purged: deletedThreads.count + deletedCalendarEvents.count,
+				contactEventTargets,
+			};
+		});
 
 		await this.stamp.recomputeAll();
+		await this.contactEvents.refreshAffected(result.contactEventTargets);
 
 		this.logger.log({
 			message: "Domain suppressed",
 			domain: normalised,
-			purged: threads.count + events.count,
+			purged: result.purged,
 		});
 
-		return { domain: normalised, purged: threads.count + events.count };
+		return { domain: normalised, purged: result.purged };
 	}
 }
 

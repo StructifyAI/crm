@@ -13,21 +13,22 @@ import { z } from "zod";
 
 const t = initTRPC.create();
 const publicProcedure = t.procedure;
-import { timelineInput, timelineOutput, timelineCountsInput, timelineCountsOutput, myTasksInput, myTasksOutput, activityCreateInput, activityCreateOutput, completeInput, completeOutput } from "../activities/activities.contracts";
+import { timelineInput, timelineOutput, timelineCountsInput, timelineCountsOutput, myTasksInput, myTasksOutput, activityCreateInput, activityCreateOutput, activityUpdateInput, activityEntryOutput, completeInput, completeOutput, activityDeleteInput, activityDeleteOutput } from "../activities/activities.contracts";
 import { agentListOutput, agentReviseInput, agentReviseOutput, agentIdInput, agentFilesOutput, agentSaveFileInput, agentSaveFileOutput, agentByIdOutput, agentHistoryInput, agentHistoryOutput, agentActivityOutput, agentUpdateInput, agentUpdateOutput, agentDeployInput, agentDeployOutput, agentPauseOutput, agentResumeOutput, agentArchiveOutput, agentRestoreOutput, agentRemoveOutput, agentRunNowInput, agentRunNowOutput, agentRetryRunInput, agentRetryRunOutput, agentCancelRunInput, agentCancelRunOutput } from "../agent/agents.contracts";
 import { apiKeyListInput, apiKeyListOutput, createApiKeyInput, createApiKeyOutput, revokeApiKeyInput, revokeApiKeyOutput } from "../api-keys/api-keys.contracts";
 import { companyListInput, companyListOutput, companyIdInput, companyDetailOutput, companyOptionsInput, companyOptionOutput, companyCreateInput, companySummaryOutput, companyUpdateArgs, companyArchiveResultOutput, companyBulkOwnerInput, companyBulkResultOutput, companyBulkInput, companyEnrichOutput, companyResearchOutput, setPrimaryContactInput, companySetPrimaryContactOutput } from "../companies/companies.contracts";
+import { contactEventScopeQueryInput, contactEventsListOutput, unclassifiedInboundOutput, unclassifiedInboundQueueOutput, contactEventReviewOutput } from "../contact-events/contact-events.contracts";
 import { contactListInput, contactListOutput, contactIdInput, contactByIdOutput, contactCreateInput, contactBasicOutput, contactUpdateArgs, contactNameOutput, contactEnrichOutput, contactBulkOwnerInput, bulkResultOutput, contactBulkCompanyInput, contactBulkInput, factDecisionInput, decideFactOutput } from "../contacts/contacts.contracts";
 import { conversationListInput, conversationListOutput, builderListOutput, builderResourceSearchInput, builderResourcesOutput, conversationIdInput, builderConversationDetailOutput, conversationEventsInput, conversationEventsOutput, conversationSaveInput, conversationIdOutput, builderConversationCreateInput, builderConversationSubmitInput, builderQuestionResponseInput, builderResponseRatingInput, builderResponseRatingOutput, conversationShareStatusOutput, conversationShareTokenOutput, sharedConversationInput, sharedConversationOutput } from "../conversations/conversations.contracts";
 import { currencySettingsOutput, setReportingCurrencyInput, setManualRateInput, removeManualRateInput } from "../currency/currency.contracts";
 import { dashboardSummaryInput, dashboardSummaryOutput } from "../dashboard/dashboard.contracts";
 import { dealListInput, dealListOutput, dealIdInput, dealDetailOutput, dealCreateInput, dealCreateOutput, dealUpdateArgs, dealMutateOutput, setStageInput, dealSetStageOutput, dealContactsInput, dealContactOptionsOutput, dealAttachContactInput, dealContactLinkOutput, dealDetachContactInput, dealContactRoleInput, dealContactRoleOutput, dealBulkOwnerInput, dealBulkResultOutput, dealBulkStageInput, dealBulkInput } from "../deals/deals.contracts";
 import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
+import { extrovertStatusOutput, extrovertApiKeyInput, extrovertSyncOutput, extrovertSetConnectionFieldInput, extrovertMembersOutput, extrovertSetMemberOwnerInput, extrovertMemberOutput, extrovertRemoveMemberInput } from "../extrovert/extrovert.contracts";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
 import { googleConnectionStatusOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
-import { instantlyStatusOutput, instantlyMailboxesOutput, instantlyAddMailboxInput, instantlySetMailboxOwnerInput, instantlyRemoveMailboxInput, instantlyMailboxOutput, instantlyApiKeyInput, instantlySyncOutput } from "../instantly/instantly.contracts";
-import { extrovertStatusOutput, extrovertMembersOutput, extrovertSetMemberOwnerInput, extrovertRemoveMemberInput, extrovertMemberOutput, extrovertApiKeyInput, extrovertSyncOutput, extrovertSetConnectionFieldInput } from "../extrovert/extrovert.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
+import { instantlyStatusOutput, instantlyApiKeyInput, instantlySyncOutput, instantlyMailboxesOutput, instantlyAddMailboxInput, instantlyMailboxOutput, instantlySetMailboxOwnerInput, instantlyRemoveMailboxInput } from "../instantly/instantly.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput } from "../settings/settings.contracts";
 import { slackStatusOutput, slackMatchesOutput, slackChannelsInput, slackChannelsOutput, slackJoinChannelInput, slackJoinChannelOutput, slackRefreshPeopleOutput, slackCreateChannelInput, slackCreateChannelOutput, slackDisconnectOutput } from "../slack/slack.contracts";
@@ -54,9 +55,17 @@ const appRouter = t.router({
       .input(activityCreateInput)
       .output(activityCreateOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    update: publicProcedure
+      .input(activityUpdateInput)
+      .output(activityEntryOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     complete: publicProcedure
       .input(completeInput)
       .output(completeOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    delete: publicProcedure
+      .input(activityDeleteInput)
+      .output(activityDeleteOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   agents: t.router({
@@ -207,6 +216,24 @@ const appRouter = t.router({
       .input(setPrimaryContactInput)
       .output(companySetPrimaryContactOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  contactEvents: t.router({
+    list: publicProcedure
+      .input(contactEventScopeQueryInput)
+      .output(contactEventsListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    unclassifiedInbound: publicProcedure
+      .input(contactEventScopeQueryInput)
+      .output(unclassifiedInboundOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    unclassifiedInboundQueue: publicProcedure
+      .input(z.object({}).strict())
+      .output(unclassifiedInboundQueueOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    review: publicProcedure
+      .input(z.object({}).strict())
+      .output(contactEventReviewOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   contacts: t.router({
     list: publicProcedure
@@ -484,6 +511,42 @@ const appRouter = t.router({
 }))
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
+  extrovert: t.router({
+    status: publicProcedure
+      .output(extrovertStatusOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    connect: publicProcedure
+      .output(extrovertStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    disconnect: publicProcedure
+      .output(extrovertStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setApiKey: publicProcedure
+      .input(extrovertApiKeyInput)
+      .output(extrovertStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    clearApiKey: publicProcedure
+      .output(extrovertStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    sync: publicProcedure
+      .output(extrovertSyncOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setConnectionField: publicProcedure
+      .input(extrovertSetConnectionFieldInput)
+      .output(extrovertStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    listMembers: publicProcedure
+      .output(extrovertMembersOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setMemberOwner: publicProcedure
+      .input(extrovertSetMemberOwnerInput)
+      .output(extrovertMemberOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    removeMember: publicProcedure
+      .input(extrovertRemoveMemberInput)
+      .output(z.void())
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
   fields: t.router({
     list: publicProcedure
       .input(fieldListInput)
@@ -560,6 +623,42 @@ const appRouter = t.router({
       .output(calendarEventOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
+  instantly: t.router({
+    status: publicProcedure
+      .output(instantlyStatusOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    connect: publicProcedure
+      .output(instantlyStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    disconnect: publicProcedure
+      .output(instantlyStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setApiKey: publicProcedure
+      .input(instantlyApiKeyInput)
+      .output(instantlyStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    clearApiKey: publicProcedure
+      .output(instantlyStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    sync: publicProcedure
+      .output(instantlySyncOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    listMailboxes: publicProcedure
+      .output(instantlyMailboxesOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    addMailbox: publicProcedure
+      .input(instantlyAddMailboxInput)
+      .output(instantlyMailboxOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setMailboxOwner: publicProcedure
+      .input(instantlySetMailboxOwnerInput)
+      .output(instantlyMailboxOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    removeMailbox: publicProcedure
+      .input(instantlyRemoveMailboxInput)
+      .output(z.void())
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
   microsoft: t.router({
     status: publicProcedure
       .output(microsoftConnectionStatusOutput)
@@ -635,78 +734,6 @@ const appRouter = t.router({
     setArchiveRetention: publicProcedure
       .input(setArchiveRetentionDaysInput)
       .output(archiveRetentionOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
-    }),
-  instantly: t.router({
-    status: publicProcedure
-      .output(instantlyStatusOutput)
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    connect: publicProcedure
-      .output(instantlyStatusOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    disconnect: publicProcedure
-      .output(instantlyStatusOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    setApiKey: publicProcedure
-      .input(instantlyApiKeyInput)
-      .output(instantlyStatusOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    clearApiKey: publicProcedure
-      .output(instantlyStatusOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    sync: publicProcedure
-      .output(instantlySyncOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    listMailboxes: publicProcedure
-      .output(instantlyMailboxesOutput)
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    addMailbox: publicProcedure
-      .input(instantlyAddMailboxInput)
-      .output(instantlyMailboxOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    setMailboxOwner: publicProcedure
-      .input(instantlySetMailboxOwnerInput)
-      .output(instantlyMailboxOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    removeMailbox: publicProcedure
-      .input(instantlyRemoveMailboxInput)
-      .output(z.void())
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
-    }),
-  extrovert: t.router({
-    status: publicProcedure
-      .output(extrovertStatusOutput)
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    connect: publicProcedure
-      .output(extrovertStatusOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    disconnect: publicProcedure
-      .output(extrovertStatusOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    setApiKey: publicProcedure
-      .input(extrovertApiKeyInput)
-      .output(extrovertStatusOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    clearApiKey: publicProcedure
-      .output(extrovertStatusOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    sync: publicProcedure
-      .output(extrovertSyncOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    setConnectionField: publicProcedure
-      .input(extrovertSetConnectionFieldInput)
-      .output(extrovertStatusOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    listMembers: publicProcedure
-      .output(extrovertMembersOutput)
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    setMemberOwner: publicProcedure
-      .input(extrovertSetMemberOwnerInput)
-      .output(extrovertMemberOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
-    removeMember: publicProcedure
-      .input(extrovertRemoveMemberInput)
-      .output(z.void())
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   slack: t.router({

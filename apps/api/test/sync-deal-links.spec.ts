@@ -6,6 +6,8 @@ import {
 } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
 import type { EnvironmentVariables } from "../src/config/env.validation";
+import type { ContactClockService } from "../src/contact-events/contact-clock.service";
+import type { ContactEventsSyncService } from "../src/contact-events/contact-events-sync.service";
 import type { ExtrovertEngagementSyncService } from "../src/extrovert/extrovert-engagement-sync.service";
 import type { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
 import type { InstantlyEmailSyncService } from "../src/instantly/instantly-email-sync.service";
@@ -18,6 +20,7 @@ import type {
 	DealLinkBackfill,
 	DealLinkService,
 } from "../src/mailbox/deal-link.service";
+import type { ActivityDirectionBackfillService } from "../src/sync/activity-direction-backfill.service";
 import type { MailboxSyncService } from "../src/sync/mailbox-sync.service";
 import { SyncController } from "../src/sync/sync.controller";
 
@@ -47,7 +50,10 @@ const unused = {} as unknown as MailboxSyncService &
 	InstantlySyncService &
 	InstantlyEmailSyncService &
 	ExtrovertSyncService &
-	ExtrovertEngagementSyncService;
+	ExtrovertEngagementSyncService &
+	ActivityDirectionBackfillService &
+	ContactEventsSyncService &
+	ContactClockService;
 
 function controller(secret: string | undefined): SyncController {
 	const config = {
@@ -62,6 +68,9 @@ function controller(secret: string | undefined): SyncController {
 		unused,
 		dealLinks,
 		correspondence,
+		unused,
+		unused,
+		unused,
 		config,
 	);
 }

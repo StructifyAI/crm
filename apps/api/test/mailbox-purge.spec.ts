@@ -1,5 +1,16 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
-import { ActivityType, db, EmailDirection, GoogleSyncStatus } from "@crm/db";
+import {
+	ActivityType,
+	ContactChannel,
+	ContactDatePrecision,
+	ContactDirection,
+	ContactEventOrigin,
+	db,
+	EmailDirection,
+	GoogleSyncStatus,
+} from "@crm/db";
+import { ContactClockService } from "../src/contact-events/contact-clock.service";
+import { ContactEventsService } from "../src/contact-events/contact-events.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { GoogleConnectionService } from "../src/google/google-connection.service";
 import {
@@ -29,6 +40,8 @@ const roots = [shared, solo, theirs];
 const tokens = new MailboxTokenService(db);
 const state = new SyncStateService(db);
 const stamp = new ActivityStampService(db);
+const clocks = new ContactClockService(db);
+const contactEvents = new ContactEventsService(db, clocks);
 
 const google = new GoogleConnectionService(
 	db,
@@ -36,8 +49,15 @@ const google = new GoogleConnectionService(
 	state,
 	{} as unknown as MailboxMatchService,
 	stamp,
+	contactEvents,
 );
-const microsoft = new MicrosoftConnectionService(db, tokens, state, stamp);
+const microsoft = new MicrosoftConnectionService(
+	db,
+	tokens,
+	state,
+	stamp,
+	contactEvents,
+);
 
 function at(hour: number): Date {
 	return new Date(Date.UTC(2026, 0, 1, hour));
@@ -187,6 +207,32 @@ async function messagesOn(rootMessageId: string): Promise<string[]> {
 	return rows.map((row) => row.snippet ?? "");
 }
 
+async function createMessageEvent(rootMessageId: string): Promise<string> {
+	const [company, message] = await Promise.all([
+		db.company.findFirst({ where: { domain }, select: { id: true } }),
+		db.emailMessage.findFirst({
+			where: { thread: { rootMessageId } },
+			select: { id: true },
+		}),
+	]);
+	if (!company || !message) throw new Error("The purge fixture is incomplete.");
+
+	await db.contactEvent.create({
+		data: {
+			sourceKey: `purge:${suffix}:${rootMessageId}`,
+			companyId: company.id,
+			sourceMessageId: message.id,
+			occurredAt: at(8),
+			datePrecision: ContactDatePrecision.EXACT,
+			channel: ContactChannel.EMAIL,
+			direction: ContactDirection.OUT,
+			origin: ContactEventOrigin.RECORDED,
+		},
+	});
+	await clocks.refresh({ companyIds: [company.id] });
+	return company.id;
+}
+
 async function threadState(rootMessageId: string) {
 	return db.emailThread.findUnique({
 		where: { rootMessageId },
@@ -243,6 +289,34 @@ describe("purging Gmail data", () => {
 		);
 	});
 
+	it("refreshes contact clocks after Gmail message events cascade", async () => {
+		const companyId = await createMessageEvent(solo);
+		expect(
+			(
+				await db.company.findUnique({
+					where: { id: companyId },
+					select: { lastContactedAt: true },
+				})
+			)?.lastContactedAt,
+		).toEqual(at(8));
+
+		await google.purgeSyncedData(gmailRep);
+
+		expect(
+			await db.contactEvent.findFirst({
+				where: { sourceKey: `purge:${suffix}:${solo}` },
+			}),
+		).toBeNull();
+		expect(
+			(
+				await db.company.findUnique({
+					where: { id: companyId },
+					select: { lastContactedAt: true },
+				})
+			)?.lastContactedAt,
+		).toBeNull();
+	});
+
 	it("cannot reach a thread the caller never synced into", async () => {
 		await google.purgeSyncedData(gmailRep);
 
@@ -282,6 +356,48 @@ describe("purging Outlook data", () => {
 		expect(
 			await db.calendarEvent.count({ where: { iCalUid: `ical-${suffix}` } }),
 		).toBe(1);
+	});
+
+	it("refreshes contact clocks after Outlook message events cascade", async () => {
+		const companyId = await createMessageEvent(shared);
+		const message = await db.emailMessage.findFirst({
+			where: {
+				thread: { rootMessageId: shared },
+				syncedByUserId: outlookRep,
+			},
+			select: { id: true },
+		});
+		if (!message) throw new Error("The Outlook purge fixture is incomplete.");
+
+		await db.contactEvent.update({
+			where: { sourceKey: `purge:${suffix}:${shared}` },
+			data: { sourceMessageId: message.id },
+		});
+
+		expect(
+			(
+				await db.company.findUnique({
+					where: { id: companyId },
+					select: { lastContactedAt: true },
+				})
+			)?.lastContactedAt,
+		).toEqual(at(8));
+
+		await microsoft.purgeSyncedData(outlookRep);
+
+		expect(
+			await db.contactEvent.findFirst({
+				where: { sourceKey: `purge:${suffix}:${shared}` },
+			}),
+		).toBeNull();
+		expect(
+			(
+				await db.company.findUnique({
+					where: { id: companyId },
+					select: { lastContactedAt: true },
+				})
+			)?.lastContactedAt,
+		).toBeNull();
 	});
 });
 

@@ -26,6 +26,7 @@ import { ExtrovertIngestService } from "../src/extrovert/extrovert-ingest.servic
 import { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
 import type { FieldsService } from "../src/fields/fields.service";
 import { withDiscardedCrmEvents } from "./agent-trigger.stub";
+import { noContactEvents } from "./contact-events.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "extrovert-spec";
 const ownerId = `extrovert-owner-${suffix}`;
@@ -1027,6 +1028,7 @@ describe("Extrovert engagement sync", () => {
 			memberLoader,
 			filing,
 			stamp,
+			noContactEvents,
 		);
 
 		await expect(run.run()).resolves.toMatchObject({
@@ -1172,6 +1174,7 @@ describe("Extrovert engagement sync", () => {
 				memberLoader,
 				filing,
 				stamp,
+				noContactEvents,
 			);
 			await expect(run.run()).resolves.toMatchObject({
 				complete: true,
@@ -1226,6 +1229,7 @@ describe("Extrovert engagement sync", () => {
 			{} as ExtrovertSyncService,
 			filing,
 			stamp,
+			noContactEvents,
 		);
 		const budget = EXTROVERT.engagement.tickBudgetMs;
 		Object.defineProperty(EXTROVERT.engagement, "tickBudgetMs", { value: 0 });

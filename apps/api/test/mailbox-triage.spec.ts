@@ -10,6 +10,7 @@ import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
 import { deadlineIn } from "../src/mailbox/deadline";
 import type { DealLinkService } from "../src/mailbox/deal-link.service";
+import { EmailClassificationService } from "../src/mailbox/email-classification.service";
 import type { EmailTriageService } from "../src/mailbox/email-triage.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import {
@@ -17,6 +18,7 @@ import {
 	ThreadWriterService,
 } from "../src/mailbox/thread-writer.service";
 import { withDiscardedCrmEvents } from "./agent-trigger.stub";
+import { noContactEvents } from "./contact-events.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "triage-spec";
 const userId = `user-triage-${suffix}`;
@@ -57,7 +59,15 @@ const directory = new CompanyDirectoryService(agent);
 const log = new EnrichmentLogService(db, stamp);
 const match = new MailboxMatchService(db, directory, agent, log);
 const dealLink = { attach: async () => null } as unknown as DealLinkService;
-const threads = new ThreadWriterService(db, match, stamp, triage, dealLink);
+const threads = new ThreadWriterService(
+	db,
+	match,
+	stamp,
+	triage,
+	dealLink,
+	new EmailClassificationService(db),
+	noContactEvents,
+);
 
 let row: MailboxSync;
 

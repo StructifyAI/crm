@@ -7,7 +7,13 @@ import {
 	expect,
 	it,
 } from "bun:test";
-import { ActivityType, DealStage, db, EmailDirection } from "@crm/db";
+import {
+	ActivityType,
+	DealStage,
+	db,
+	EmailClassification,
+	EmailDirection,
+} from "@crm/db";
 import type { DealLinkRequest } from "@crm/validation/deal-link";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { deadlineIn } from "../src/mailbox/deadline";
@@ -17,6 +23,7 @@ import {
 	type DealLinkTarget,
 } from "../src/mailbox/deal-link.service";
 import { MAILBOX_DEAL_LINK } from "../src/mailbox/mailbox-config";
+import { noContactEvents } from "./contact-events.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "deal-link-spec";
 const domain = `deal-link-${suffix}.test`;
@@ -26,7 +33,11 @@ const buyer = `buyer@${domain}`;
 const realFetch = globalThis.fetch;
 const realSecret = process.env.AGENT_BRIDGE_SECRET;
 
-const service = new DealLinkService(db, new ActivityStampService(db));
+const service = new DealLinkService(
+	db,
+	new ActivityStampService(db),
+	noContactEvents,
+);
 
 let asked: DealLinkRequest[] = [];
 let companyId: string;
@@ -234,6 +245,44 @@ describe("linking a synced thread to an open deal", () => {
 			select: { lastActivityAt: true },
 		});
 		expect(deal.lastActivityAt?.toISOString()).toBe("2026-02-01T10:00:00.000Z");
+	});
+
+	it("does not move the deal activity clock for an automated-only thread", async () => {
+		const threadId = await thread("automated");
+		const baseline = new Date("2026-01-01T00:00:00Z");
+		await db.emailMessage.updateMany({
+			where: { threadId },
+			data: {
+				classification: EmailClassification.AUTOMATED,
+				correspondence: true,
+			},
+		});
+		await db.deal.update({
+			where: { id: openDealId },
+			data: { lastActivityAt: baseline },
+		});
+		agentAnswers(
+			200,
+			JSON.stringify({
+				verdict: "linked",
+				dealId: openDealId,
+				reason: "The thread identifies the deal.",
+			}),
+		);
+
+		expect(
+			await service.attach(
+				threadId,
+				{ companyId, contactId },
+				deadlineIn(60_000),
+			),
+		).toBe(openDealId);
+
+		const deal = await db.deal.findUniqueOrThrow({
+			where: { id: openDealId },
+			select: { lastActivityAt: true },
+		});
+		expect(deal.lastActivityAt).toEqual(baseline);
 	});
 
 	it("leaves the thread alone when the agent says none", async () => {

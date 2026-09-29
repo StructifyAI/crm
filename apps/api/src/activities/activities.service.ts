@@ -6,12 +6,14 @@ import {
 	Logger,
 	NotFoundException,
 } from "@nestjs/common";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { blankToNull } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
 import type {
 	ActivityCreateInput,
 	ActivityEntry,
+	ActivityUpdateInput,
 	MyTasksInput,
 	TimelineCounts,
 	TimelineFilter,
@@ -29,6 +31,7 @@ const AUTHOR_SELECT = {
 const ENTRY_SELECT = {
 	id: true,
 	type: true,
+	direction: true,
 	subject: true,
 	body: true,
 	occurredAt: true,
@@ -75,6 +78,7 @@ export class ActivitiesService {
 	constructor(
 		@InjectDatabase() private readonly db: Db,
 		private readonly stamp: ActivityStampService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async timeline(input: TimelineInput): Promise<TimelineResult> {
@@ -138,6 +142,7 @@ export class ActivitiesService {
 		const activity = await this.db.activity.create({
 			data: {
 				type: input.type,
+				direction: input.direction ?? null,
 				subject: blankToNull(input.subject ?? ""),
 				body: blankToNull(input.body ?? ""),
 				occurredAt: parseDate(input.occurredAt) ?? new Date(),
@@ -154,6 +159,7 @@ export class ActivitiesService {
 			{ companyId, contactId: input.contactId, dealId: input.dealId },
 			activity.createdAt,
 		);
+		await this.contactEvents.recordActivity(activity.id);
 
 		this.logger.log({
 			message: "Activity logged",
@@ -184,7 +190,80 @@ export class ActivitiesService {
 			select: ENTRY_SELECT,
 		});
 
+		await this.contactEvents.recordActivity(updated.id);
 		return serializeEntry(updated);
+	}
+
+	async update(input: ActivityUpdateInput): Promise<ActivityEntry> {
+		const activity = await this.db.activity.findUnique({
+			where: { id: input.id },
+			select: {
+				type: true,
+				direction: true,
+				companyId: true,
+				contactId: true,
+				dealId: true,
+			},
+		});
+		if (!activity) {
+			throw new NotFoundException(`No activity with id ${input.id}.`);
+		}
+		if (
+			input.type === ActivityType.EMAIL &&
+			input.direction === undefined &&
+			activity.direction === null
+		) {
+			throw new BadRequestException(
+				"Say whether the email was sent or received.",
+			);
+		}
+
+		const data: Prisma.ActivityUpdateInput = {};
+		if (input.type !== undefined) data.type = input.type;
+		if (input.direction !== undefined) data.direction = input.direction;
+
+		const updated = await this.db.activity.update({
+			where: { id: input.id },
+			data,
+			select: ENTRY_SELECT,
+		});
+
+		await this.stamp.recomputeMany({
+			companyIds: activity.companyId ? [activity.companyId] : [],
+			contactIds: activity.contactId ? [activity.contactId] : [],
+			dealIds: activity.dealId ? [activity.dealId] : [],
+		});
+		await this.contactEvents.recordActivity(updated.id);
+		return serializeEntry(updated);
+	}
+
+	async delete(id: string): Promise<{ id: string }> {
+		const deleted = await this.db.$transaction(async (tx) => {
+			const activity = await tx.activity.findUnique({
+				where: { id },
+				select: { companyId: true, contactId: true, dealId: true },
+			});
+			if (!activity) {
+				throw new NotFoundException(`No activity with id ${id}.`);
+			}
+
+			const [targets, contactEventTargets] = await Promise.all([
+				this.stamp.targetsOf({ id }, tx),
+				this.contactEvents.targetsForEvents({ sourceActivityId: id }, tx),
+			]);
+
+			await tx.activity.delete({ where: { id } });
+
+			return { activity, targets, contactEventTargets };
+		});
+
+		await this.stamp.recomputeAfterDelete(deleted.targets, {
+			companyId: deleted.activity.companyId,
+			contactId: deleted.activity.contactId,
+			dealId: deleted.activity.dealId,
+		});
+		await this.contactEvents.refreshAffected(deleted.contactEventTargets);
+		return { id };
 	}
 
 	async myTasks(

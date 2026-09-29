@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AgentModule } from "../agent/agent.module";
+import { ContactEventsModule } from "../contact-events/contact-events.module";
 import { CurrencyModule } from "../currency/currency.module";
 import { FieldsModule } from "../fields/fields.module";
 import { TrpcModule } from "../trpc/trpc.module";
@@ -9,7 +10,13 @@ import { CompanyDirectoryService } from "./company-directory.service";
 import { FaviconService } from "./favicon.service";
 
 @Module({
-	imports: [FieldsModule, TrpcModule, AgentModule, CurrencyModule],
+	imports: [
+		FieldsModule,
+		TrpcModule,
+		AgentModule,
+		ContactEventsModule,
+		CurrencyModule,
+	],
 	providers: [
 		CompaniesService,
 		CompanyDirectoryService,

@@ -7,6 +7,7 @@ import {
 } from "@crm/db";
 import { FIELD_ENTITIES, FIELD_TYPES } from "@crm/db/fields";
 import { z } from "zod";
+import { contactClockOutput } from "../contact-events/contact-events.contracts";
 import { bulkIdsInput } from "../crm/bulk";
 import { recordFieldValues } from "../fields/fields.contracts";
 import { activityFacetInput, listInput } from "../trpc/list-input";
@@ -143,6 +144,8 @@ export const contactRowOutput = z.object({
 	company: contactCompanyOutput.nullable(),
 	owner: contactOwnerOutput.nullable(),
 	lastActivityAt: z.string().nullable(),
+	lastContacted: contactClockOutput.nullable(),
+	lastReplied: contactClockOutput.nullable(),
 	createdAt: z.string(),
 	archivedAt: z.string().nullable(),
 	fields: z.record(z.string(), fieldValueOutput),
@@ -251,6 +254,9 @@ export const contactByIdOutput = z.object({
 	fields: z.array(recordFieldOutput),
 	queued: z.boolean(),
 	createdAt: z.string(),
+	lastContacted: contactClockOutput.nullable(),
+	lastReplied: contactClockOutput.nullable(),
+	unclassifiedInbound: z.number(),
 	archivedAt: z.string().nullable(),
 	brief: contactBriefOutput.nullable(),
 	facts: z.array(contactFactOutput),

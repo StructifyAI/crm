@@ -1,6 +1,7 @@
 import { DealStage } from "@crm/db";
 import { FIELD_ENTITIES, FIELD_TYPES } from "@crm/db/fields";
 import { z } from "zod";
+import { contactClockOutput } from "../contact-events/contact-events.contracts";
 import { bulkIdsInput } from "../crm/bulk";
 import { currencyCode } from "../currency/currency.contracts";
 import { recordFieldValues } from "../fields/fields.contracts";
@@ -205,6 +206,8 @@ const dealListRowOutput = z.object({
 	expectedCloseDate: z.string().nullable(),
 	closedAt: z.string().nullable(),
 	lastActivityAt: z.string().nullable(),
+	lastContacted: contactClockOutput.nullable(),
+	lastReplied: contactClockOutput.nullable(),
 	createdAt: z.string(),
 	archivedAt: z.string().nullable(),
 	fields: z.record(z.string(), fieldValueOutput),
@@ -243,6 +246,9 @@ export const dealDetailOutput = z.object({
 	expectedCloseDate: z.string().nullable(),
 	closedAt: z.string().nullable(),
 	createdAt: z.string(),
+	lastContacted: contactClockOutput.nullable(),
+	lastReplied: contactClockOutput.nullable(),
+	unclassifiedInbound: z.number(),
 	archivedAt: z.string().nullable(),
 	contacts: z.array(dealContactOutput),
 });

@@ -14,6 +14,10 @@ import { restMeta } from "../trpc/openapi";
 import {
 	activityCreateInput,
 	activityCreateOutput,
+	activityDeleteInput,
+	activityDeleteOutput,
+	activityEntryOutput,
+	activityUpdateInput,
 	completeInput,
 	completeOutput,
 	myTasksInput,
@@ -75,11 +79,29 @@ export class ActivitiesRouter {
 	}
 
 	@Mutation({
+		input: activityUpdateInput,
+		output: activityEntryOutput,
+		meta: restMeta("PATCH", "/activities/{id}", ["Activities"]),
+	})
+	async update(@Input() input: z.infer<typeof activityUpdateInput>) {
+		return this.activities.update(input);
+	}
+
+	@Mutation({
 		input: completeInput,
 		output: completeOutput,
 		meta: restMeta("PATCH", "/activities/{id}/complete", ["Activities"]),
 	})
 	async complete(@Input() input: z.infer<typeof completeInput>) {
 		return this.activities.complete(input.id, input.completed);
+	}
+
+	@Mutation({
+		input: activityDeleteInput,
+		output: activityDeleteOutput,
+		meta: restMeta("DELETE", "/activities/{id}", ["Activities"]),
+	})
+	async delete(@Input() input: z.infer<typeof activityDeleteInput>) {
+		return this.activities.delete(input.id);
 	}
 }

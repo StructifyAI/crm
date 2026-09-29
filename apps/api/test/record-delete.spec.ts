@@ -12,6 +12,7 @@ import { ConversionService } from "../src/currency/conversion.service";
 import { FieldsService } from "../src/fields/fields.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import { withDiscardedCrmEvents } from "./agent-trigger.stub";
+import { noContactEvents } from "./contact-events.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "record-delete-spec";
 const domain = `delete-${suffix}.test`;
@@ -44,6 +45,7 @@ const contacts = new ContactsService(
 	queue,
 	stamp,
 	fields,
+	noContactEvents,
 );
 const companies = new CompaniesService(
 	db,
@@ -53,6 +55,7 @@ const companies = new CompaniesService(
 	stamp,
 	conversion,
 	fields,
+	noContactEvents,
 );
 const match = new MailboxMatchService(db, directory, agent, log);
 

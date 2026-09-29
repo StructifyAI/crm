@@ -21,6 +21,12 @@ import {
 } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ARCHIVE } from "../archive/archive-config";
+import type { ContactClockTargets } from "../contact-events/contact-clock.service";
+import {
+	CONTACT_CLOCK_EVENT_SELECT,
+	serializeContactClock,
+} from "../contact-events/contact-clock-output";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
 	ActivityStampService,
 	type StampTargets,
@@ -96,6 +102,8 @@ const SORTABLE: OrderByColumns<Prisma.DealOrderByWithRelationInput[]> = {
 	createdAt: (dir) => [{ createdAt: dir }],
 	owner: (dir) => [{ owner: { name: dir } }, { name: "asc" }],
 	lastActivity: (dir) => [{ lastActivityAt: { sort: dir, nulls: "last" } }],
+	lastContacted: (dir) => [{ lastContactedAt: { sort: dir, nulls: "last" } }],
+	lastReplied: (dir) => [{ lastRepliedAt: { sort: dir, nulls: "last" } }],
 	archivedAt: (dir) => [{ archivedAt: { sort: dir, nulls: "last" } }],
 };
 
@@ -109,6 +117,7 @@ export class DealsService {
 		private readonly stamp: ActivityStampService,
 		private readonly conversion: ConversionService,
 		private readonly fields: FieldsService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async list(input: DealListInput) {
@@ -138,6 +147,10 @@ export class DealsService {
 						company: { select: COMPANY_SELECT },
 						owner: { select: OWNER_SELECT },
 						lastActivityAt: true,
+						lastContactedAt: true,
+						lastContactedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
+						lastRepliedAt: true,
+						lastRepliedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
 						createdAt: true,
 						archivedAt: true,
 					},
@@ -164,6 +177,10 @@ export class DealsService {
 					expectedCloseDate,
 					closedAt,
 					lastActivityAt,
+					lastContactedAt,
+					lastContactedEvent,
+					lastRepliedAt,
+					lastRepliedEvent,
 					createdAt,
 					archivedAt,
 					...row
@@ -174,6 +191,11 @@ export class DealsService {
 					expectedCloseDate: expectedCloseDate?.toISOString() ?? null,
 					closedAt: closedAt?.toISOString() ?? null,
 					lastActivityAt: lastActivityAt?.toISOString() ?? null,
+					lastContacted: serializeContactClock(
+						lastContactedAt,
+						lastContactedEvent,
+					),
+					lastReplied: serializeContactClock(lastRepliedAt, lastRepliedEvent),
 					createdAt: createdAt.toISOString(),
 					archivedAt: archivedAt?.toISOString() ?? null,
 					fields: tableFields.get(row.id) ?? {},
@@ -210,6 +232,10 @@ export class DealsService {
 				closedReason: true,
 				createdAt: true,
 				archivedAt: true,
+				lastContactedAt: true,
+				lastContactedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
+				lastRepliedAt: true,
+				lastRepliedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
 				company: { select: { ...COMPANY_SELECT, industry: true } },
 				owner: { select: OWNER_SELECT },
 				contacts: {
@@ -223,6 +249,8 @@ export class DealsService {
 			throw new NotFoundException(`No deal with id ${id}.`);
 		}
 
+		const unclassifiedInbound =
+			await this.contactEvents.unclassifiedInboundCount({ dealId: id });
 		const {
 			contacts,
 			amount,
@@ -230,11 +258,18 @@ export class DealsService {
 			fxRate,
 			fxRateAt,
 			archivedAt,
+			lastContactedAt,
+			lastContactedEvent,
+			lastRepliedAt,
+			lastRepliedEvent,
 			...rest
 		} = deal;
 
 		return {
 			...rest,
+			lastContacted: serializeContactClock(lastContactedAt, lastContactedEvent),
+			lastReplied: serializeContactClock(lastRepliedAt, lastRepliedEvent),
+			unclassifiedInbound,
 			fields: await this.fields.valuesFor("DEAL", id),
 			amountCents: toCents(amount),
 			baseAmountCents: toCents(baseAmount),
@@ -411,7 +446,11 @@ export class DealsService {
 		id: string,
 		guard?: { archivedBefore: Date },
 	): Promise<{ id: string; name: string } | null> {
-		let deleted: { targets: StampTargets; name: string } | null;
+		let deleted: {
+			targets: StampTargets;
+			contactEventTargets: ContactClockTargets[];
+			name: string;
+		} | null;
 
 		try {
 			deleted = await this.db.$transaction(async (tx) => {
@@ -431,6 +470,10 @@ export class DealsService {
 				}
 
 				const targets = await this.stamp.targetsOf({ dealId: id }, tx);
+				const contactEventTargets = await this.contactEvents.targetsForEvents(
+					{ dealId: id },
+					tx,
+				);
 				await tx.agentTask.deleteMany({ where: { dealId: id } });
 
 				const deal = await tx.deal.delete({
@@ -438,7 +481,7 @@ export class DealsService {
 					select: { name: true },
 				});
 
-				return { targets, name: deal.name };
+				return { targets, contactEventTargets, name: deal.name };
 			});
 		} catch (error) {
 			throw this.translate(error, id);
@@ -447,6 +490,7 @@ export class DealsService {
 		if (!deleted) return null;
 
 		await this.stamp.recomputeAfterDelete(deleted.targets, { dealId: id });
+		await this.contactEvents.refreshAffected(deleted.contactEventTargets);
 
 		this.logger.log({
 			message: "Deal purged",

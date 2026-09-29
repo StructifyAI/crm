@@ -22,12 +22,15 @@ import {
 } from "@nestjs/swagger";
 import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { EnvironmentVariables } from "../config/env.validation";
+import { ContactClockService } from "../contact-events/contact-clock.service";
+import { ContactEventsSyncService } from "../contact-events/contact-events-sync.service";
 import { ExtrovertEngagementSyncService } from "../extrovert/extrovert-engagement-sync.service";
 import { ExtrovertSyncService } from "../extrovert/extrovert-sync.service";
 import { InstantlyEmailSyncService } from "../instantly/instantly-email-sync.service";
 import { InstantlySyncService } from "../instantly/instantly-sync.service";
 import { CorrespondenceBackfillService } from "../mailbox/correspondence-backfill.service";
 import { DealLinkService } from "../mailbox/deal-link.service";
+import { ActivityDirectionBackfillService } from "./activity-direction-backfill.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
 import { backfillCursor } from "./sync.contracts";
 
@@ -52,6 +55,9 @@ export class SyncController {
 		private readonly extrovertEngagement: ExtrovertEngagementSyncService,
 		private readonly dealLinks: DealLinkService,
 		private readonly correspondence: CorrespondenceBackfillService,
+		private readonly activityDirections: ActivityDirectionBackfillService,
+		private readonly contactEvents: ContactEventsSyncService,
+		private readonly contactClocks: ContactClockService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -219,6 +225,118 @@ export class SyncController {
 		return this.runCorrespondence(authorization, cursor);
 	}
 
+	@Get("email-classification")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary: "Classify stored email messages in one cursor page",
+	})
+	@ApiQuery({
+		name: "cursor",
+		required: false,
+		description: "The `next` value from the previous page; omit to start over.",
+	})
+	@ApiQuery({
+		name: "all",
+		required: false,
+		description: "Set to 1 to reclassify messages that already have a class.",
+	})
+	@ApiOkResponse({
+		description:
+			"`examined`, `reclassified`, `restamped` and `next`; call again with `next` until it is null.",
+	})
+	async emailClassificationViaGet(
+		@Headers("authorization") authorization?: string,
+		@Query("cursor") cursor?: string,
+		@Query("all") all?: string,
+	) {
+		return this.runEmailClassification(authorization, cursor, all === "1");
+	}
+
+	@Post("email-classification")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async emailClassificationViaPost(
+		@Headers("authorization") authorization?: string,
+		@Query("cursor") cursor?: string,
+		@Query("all") all?: string,
+	) {
+		return this.runEmailClassification(authorization, cursor, all === "1");
+	}
+
+	@Get("activity-direction")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary: "Backfill direction on known non-thread email activities",
+	})
+	@ApiOkResponse({ description: "The number of rows updated." })
+	async activityDirectionViaGet(
+		@Headers("authorization") authorization?: string,
+	) {
+		return this.runActivityDirection(authorization);
+	}
+
+	@Post("activity-direction")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async activityDirectionViaPost(
+		@Headers("authorization") authorization?: string,
+	) {
+		return this.runActivityDirection(authorization);
+	}
+
+	@Get("contact-events")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary: "Backfill recorded contact events and extract activity events",
+	})
+	@ApiQuery({ name: "activityCursor", required: false })
+	@ApiQuery({ name: "messageCursor", required: false })
+	async contactEventsViaGet(
+		@Headers("authorization") authorization?: string,
+		@Query("activityCursor") activityCursor?: string,
+		@Query("messageCursor") messageCursor?: string,
+	) {
+		return this.runContactEvents(authorization, activityCursor, messageCursor);
+	}
+
+	@Post("contact-events")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async contactEventsViaPost(
+		@Headers("authorization") authorization?: string,
+		@Query("activityCursor") activityCursor?: string,
+		@Query("messageCursor") messageCursor?: string,
+	) {
+		return this.runContactEvents(authorization, activityCursor, messageCursor);
+	}
+
+	@Get("contact-clocks")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary: "Refresh one deadline-bounded page of contact clock rollups",
+	})
+	@ApiQuery({
+		name: "cursor",
+		required: false,
+		description: "Pass the `next` value until it is null.",
+	})
+	async contactClocksViaGet(
+		@Headers("authorization") authorization?: string,
+		@Query("cursor") cursor?: string,
+	) {
+		return this.runContactClocks(authorization, cursor);
+	}
+
+	@Post("contact-clocks")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async contactClocksViaPost(
+		@Headers("authorization") authorization?: string,
+		@Query("cursor") cursor?: string,
+	) {
+		return this.runContactClocks(authorization, cursor);
+	}
+
 	private async run(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.sync.runDue();
@@ -251,7 +369,38 @@ export class SyncController {
 
 	private async runCorrespondence(authorization?: string, cursor?: string) {
 		this.assertSecret(authorization);
-		return this.correspondence.backfill(this.parseCursor(cursor));
+		return this.correspondence.backfill(this.parseCursor(cursor), true);
+	}
+
+	private async runEmailClassification(
+		authorization?: string,
+		cursor?: string,
+		all = false,
+	) {
+		this.assertSecret(authorization);
+		return this.correspondence.backfill(this.parseCursor(cursor), all);
+	}
+
+	private async runActivityDirection(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.activityDirections.backfill();
+	}
+
+	private async runContactEvents(
+		authorization?: string,
+		activityCursor?: string,
+		messageCursor?: string,
+	) {
+		this.assertSecret(authorization);
+		return this.contactEvents.backfill(
+			this.parseCursor(activityCursor),
+			this.parseCursor(messageCursor),
+		);
+	}
+
+	private runContactClocks(authorization?: string, cursor?: string) {
+		this.assertSecret(authorization);
+		return this.contactClocks.refreshPage(this.parseCursor(cursor));
 	}
 
 	private parseCursor(cursor?: string): string | null {

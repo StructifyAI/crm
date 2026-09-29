@@ -23,6 +23,7 @@ import { InstantlyIngestService } from "../src/instantly/instantly-ingest.servic
 import { instantlyState } from "../src/instantly/instantly-state";
 import { InstantlySyncService } from "../src/instantly/instantly-sync.service";
 import { withDiscardedCrmEvents } from "./agent-trigger.stub";
+import { noContactEvents } from "./contact-events.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "instantly-spec";
 const domain = `instantly-${suffix}.test`;
@@ -42,7 +43,13 @@ const agent = {
 
 const directory = new CompanyDirectoryService(agent);
 const stamp = new ActivityStampService(db);
-const filing = new InstantlyFilingService(db, directory, agent, stamp);
+const filing = new InstantlyFilingService(
+	db,
+	directory,
+	agent,
+	stamp,
+	noContactEvents,
+);
 const ingest = new InstantlyIngestService(db, filing);
 
 function event(email: string, overrides: Partial<InstantlyWebhookEvent> = {}) {

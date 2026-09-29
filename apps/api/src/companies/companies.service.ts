@@ -17,6 +17,12 @@ import {
 import { AgentQueueService } from "../agent/agent-queue.service";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ARCHIVE } from "../archive/archive-config";
+import type { ContactClockTargets } from "../contact-events/contact-clock.service";
+import {
+	CONTACT_CLOCK_EVENT_SELECT,
+	serializeContactClock,
+} from "../contact-events/contact-clock-output";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
 	ActivityStampService,
 	type StampTargets,
@@ -64,6 +70,8 @@ const SORTABLE: OrderByColumns<Prisma.CompanyOrderByWithRelationInput> = {
 	deals: (dir) => ({ deals: { _count: dir } }),
 	owner: (dir) => ({ owner: { name: dir } }),
 	lastActivity: (dir) => ({ lastActivityAt: { sort: dir, nulls: "last" } }),
+	lastContacted: (dir) => ({ lastContactedAt: { sort: dir, nulls: "last" } }),
+	lastReplied: (dir) => ({ lastRepliedAt: { sort: dir, nulls: "last" } }),
 	archivedAt: (dir) => ({ archivedAt: { sort: dir, nulls: "last" } }),
 };
 
@@ -79,6 +87,7 @@ export class CompaniesService {
 		private readonly stamp: ActivityStampService,
 		private readonly conversion: ConversionService,
 		private readonly fields: FieldsService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async list(input: CompanyListInput): Promise<ListResult<CompanyRow>> {
@@ -114,6 +123,10 @@ export class CompaniesService {
 						},
 					},
 					lastActivityAt: true,
+					lastContactedAt: true,
+					lastContactedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
+					lastRepliedAt: true,
+					lastRepliedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
 					createdAt: true,
 					archivedAt: true,
 				},
@@ -146,6 +159,14 @@ export class CompaniesService {
 				contactCount: row._count.contacts,
 				openDealCount: row._count.deals,
 				lastActivityAt: row.lastActivityAt?.toISOString() ?? null,
+				lastContacted: serializeContactClock(
+					row.lastContactedAt,
+					row.lastContactedEvent,
+				),
+				lastReplied: serializeContactClock(
+					row.lastRepliedAt,
+					row.lastRepliedEvent,
+				),
 				createdAt: row.createdAt.toISOString(),
 				archivedAt: row.archivedAt?.toISOString() ?? null,
 				fields: tableFields.get(row.id) ?? {},
@@ -189,6 +210,10 @@ export class CompaniesService {
 				source: true,
 				createdAt: true,
 				archivedAt: true,
+				lastContactedAt: true,
+				lastContactedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
+				lastRepliedAt: true,
+				lastRepliedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
 				owner: { select: OWNER_SELECT },
 				primaryContact: {
 					select: {
@@ -232,17 +257,26 @@ export class CompaniesService {
 			throw new NotFoundException(`No company with id ${id}.`);
 		}
 
+		const unclassifiedInbound =
+			await this.contactEvents.unclassifiedInboundCount({ companyId: id });
 		const {
 			deals,
 			primaryContact,
 			enrichedAt,
 			createdAt,
 			archivedAt,
+			lastContactedAt,
+			lastContactedEvent,
+			lastRepliedAt,
+			lastRepliedEvent,
 			...rest
 		} = company;
 
 		return {
 			...rest,
+			lastContacted: serializeContactClock(lastContactedAt, lastContactedEvent),
+			lastReplied: serializeContactClock(lastRepliedAt, lastRepliedEvent),
+			unclassifiedInbound,
 			fields: await this.fields.valuesFor("COMPANY", id),
 			queued: await this.queue.isQueued({ companyId: id }),
 			createdAt: createdAt.toISOString(),
@@ -434,7 +468,11 @@ export class CompaniesService {
 		id: string,
 		guard?: { archivedBefore: Date },
 	): Promise<{ id: string; name: string } | null> {
-		let deleted: { targets: StampTargets; name: string } | null;
+		let deleted: {
+			targets: StampTargets;
+			contactEventTargets: ContactClockTargets[];
+			name: string;
+		} | null;
 
 		try {
 			deleted = await this.db.$transaction(async (tx) => {
@@ -462,6 +500,17 @@ export class CompaniesService {
 					where: { companyId: id },
 					select: { id: true },
 				});
+				const contactEventTargets = await this.contactEvents.targetsForEvents(
+					{
+						OR: [
+							{ companyId: id },
+							...(deals.length > 0
+								? [{ dealId: { in: deals.map((deal) => deal.id) } }]
+								: []),
+						],
+					},
+					tx,
+				);
 
 				await tx.agentTask.deleteMany({
 					where: {
@@ -477,7 +526,7 @@ export class CompaniesService {
 					select: { name: true },
 				});
 
-				return { targets, name: company.name };
+				return { targets, contactEventTargets, name: company.name };
 			});
 		} catch (error) {
 			throw this.translate(error, id);
@@ -486,6 +535,7 @@ export class CompaniesService {
 		if (!deleted) return null;
 
 		await this.stamp.recomputeAfterDelete(deleted.targets, { companyId: id });
+		await this.contactEvents.refreshAffected(deleted.contactEventTargets);
 
 		this.logger.log({
 			message: "Company purged",

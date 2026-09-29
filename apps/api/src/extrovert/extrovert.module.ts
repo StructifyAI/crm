@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AgentModule } from "../agent/agent.module";
 import { CompaniesModule } from "../companies/companies.module";
+import { ContactEventsModule } from "../contact-events/contact-events.module";
 import { FieldsModule } from "../fields/fields.module";
 import { TrpcModule } from "../trpc/trpc.module";
 import { ExtrovertClient } from "./extrovert.client";
@@ -13,7 +14,13 @@ import { ExtrovertIngestService } from "./extrovert-ingest.service";
 import { ExtrovertSyncService } from "./extrovert-sync.service";
 
 @Module({
-	imports: [TrpcModule, AgentModule, CompaniesModule, FieldsModule],
+	imports: [
+		TrpcModule,
+		AgentModule,
+		CompaniesModule,
+		ContactEventsModule,
+		FieldsModule,
+	],
 	controllers: [ExtrovertController],
 	providers: [
 		ExtrovertFilingService,

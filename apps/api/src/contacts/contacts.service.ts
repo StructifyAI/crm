@@ -18,6 +18,12 @@ import { AgentQueueService } from "../agent/agent-queue.service";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ARCHIVE } from "../archive/archive-config";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
+import type { ContactClockTargets } from "../contact-events/contact-clock.service";
+import {
+	CONTACT_CLOCK_EVENT_SELECT,
+	serializeContactClock,
+} from "../contact-events/contact-clock-output";
+import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
 	ActivityStampService,
 	type StampTargets,
@@ -88,6 +94,8 @@ const SORTABLE: OrderByColumns<Prisma.ContactOrderByWithRelationInput[]> = {
 	createdAt: (dir) => [{ createdAt: dir }],
 	owner: (dir) => [{ owner: { name: dir } }, { lastName: "asc" }],
 	lastActivity: (dir) => [{ lastActivityAt: { sort: dir, nulls: "last" } }],
+	lastContacted: (dir) => [{ lastContactedAt: { sort: dir, nulls: "last" } }],
+	lastReplied: (dir) => [{ lastRepliedAt: { sort: dir, nulls: "last" } }],
 	archivedAt: (dir) => [{ archivedAt: { sort: dir, nulls: "last" } }],
 };
 
@@ -102,6 +110,7 @@ export class ContactsService {
 		private readonly queue: AgentQueueService,
 		private readonly stamp: ActivityStampService,
 		private readonly fields: FieldsService,
+		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async list(input: ContactListInput): Promise<ListResult<ContactRow>> {
@@ -126,6 +135,10 @@ export class ContactsService {
 					company: { select: COMPANY_SELECT },
 					owner: { select: OWNER_SELECT },
 					lastActivityAt: true,
+					lastContactedAt: true,
+					lastContactedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
+					lastRepliedAt: true,
+					lastRepliedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
 					createdAt: true,
 					archivedAt: true,
 				},
@@ -140,13 +153,26 @@ export class ContactsService {
 		);
 
 		return {
-			rows: rows.map((row) => ({
-				...row,
-				lastActivityAt: row.lastActivityAt?.toISOString() ?? null,
-				createdAt: row.createdAt.toISOString(),
-				archivedAt: row.archivedAt?.toISOString() ?? null,
-				fields: tableFields.get(row.id) ?? {},
-			})),
+			rows: rows.map(
+				({
+					lastContactedAt,
+					lastContactedEvent,
+					lastRepliedAt,
+					lastRepliedEvent,
+					...row
+				}) => ({
+					...row,
+					lastActivityAt: row.lastActivityAt?.toISOString() ?? null,
+					lastContacted: serializeContactClock(
+						lastContactedAt,
+						lastContactedEvent,
+					),
+					lastReplied: serializeContactClock(lastRepliedAt, lastRepliedEvent),
+					createdAt: row.createdAt.toISOString(),
+					archivedAt: row.archivedAt?.toISOString() ?? null,
+					fields: tableFields.get(row.id) ?? {},
+				}),
+			),
 			total,
 			facetCounts,
 		};
@@ -170,6 +196,10 @@ export class ContactsService {
 				enrichmentError: true,
 				createdAt: true,
 				archivedAt: true,
+				lastContactedAt: true,
+				lastContactedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
+				lastRepliedAt: true,
+				lastRepliedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
 				brief: {
 					select: {
 						narrative: true,
@@ -245,10 +275,10 @@ export class ContactsService {
 			throw new NotFoundException(`No contact with id ${id}.`);
 		}
 
-		const relationship = await this.relationship(
-			id,
-			contact.company?.id ?? null,
-		);
+		const [relationship, unclassifiedInbound] = await Promise.all([
+			this.relationship(id, contact.company?.id ?? null),
+			this.contactEvents.unclassifiedInboundCount({ contactId: id }),
+		]);
 
 		const {
 			deals,
@@ -259,6 +289,10 @@ export class ContactsService {
 			brief,
 			facts,
 			company,
+			lastContactedAt,
+			lastContactedEvent,
+			lastRepliedAt,
+			lastRepliedEvent,
 			...rest
 		} = contact;
 		const instantlyCampaign =
@@ -270,6 +304,9 @@ export class ContactsService {
 		return {
 			...rest,
 			company,
+			lastContacted: serializeContactClock(lastContactedAt, lastContactedEvent),
+			lastReplied: serializeContactClock(lastRepliedAt, lastRepliedEvent),
+			unclassifiedInbound,
 			fields: await this.fields.valuesFor("CONTACT", id),
 			queued: await this.queue.isQueued({ contactId: id }),
 			createdAt: createdAt.toISOString(),
@@ -453,6 +490,7 @@ export class ContactsService {
 	): Promise<{ id: string; name: string } | null> {
 		let deleted: {
 			targets: StampTargets;
+			contactEventTargets: ContactClockTargets[];
 			name: string;
 			suppressed: boolean;
 		} | null;
@@ -475,6 +513,10 @@ export class ContactsService {
 				}
 
 				const targets = await this.stamp.targetsOf({ contactId: id }, tx);
+				const contactEventTargets = await this.contactEvents.targetsForEvents(
+					{ contactId: id },
+					tx,
+				);
 
 				await tx.agentTask.deleteMany({ where: { contactId: id } });
 				await tx.agentEvent.deleteMany({ where: { contactId: id } });
@@ -498,7 +540,12 @@ export class ContactsService {
 					});
 				}
 
-				return { targets, name, suppressed: suppress !== null };
+				return {
+					targets,
+					contactEventTargets,
+					name,
+					suppressed: suppress !== null,
+				};
 			});
 		} catch (error) {
 			throw this.translate(error, id);
@@ -507,6 +554,7 @@ export class ContactsService {
 		if (!deleted) return null;
 
 		await this.stamp.recomputeAfterDelete(deleted.targets, { contactId: id });
+		await this.contactEvents.refreshAffected(deleted.contactEventTargets);
 
 		this.logger.log({
 			message: "Contact purged",

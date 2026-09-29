@@ -1,6 +1,53 @@
-import { type Db, type Prisma, Prisma as PrismaNamespace } from "@crm/db";
+import {
+	ActivityType,
+	type Db,
+	EmailClassification,
+	type Prisma,
+	Prisma as PrismaNamespace,
+} from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
+
+const COUNTED_ACTIVITY_WHERE: Prisma.ActivityWhereInput = {
+	OR: [
+		{ type: { not: ActivityType.EMAIL } },
+		{ emailThreadId: null },
+		{
+			emailThread: {
+				is: {
+					messages: {
+						some: {
+							OR: [
+								{
+									classification: {
+										in: [EmailClassification.OURS, EmailClassification.THEIRS],
+									},
+								},
+								{ classification: null, correspondence: true },
+							],
+						},
+					},
+				},
+			},
+		},
+	],
+};
+
+const COUNTED_ACTIVITY_SQL = PrismaNamespace.sql`
+	(
+		a."type" <> 'EMAIL'
+		OR a."emailThreadId" IS NULL
+		OR EXISTS (
+			SELECT 1
+			FROM "emailMessage" m
+			WHERE m."threadId" = a."emailThreadId"
+				AND (
+					m."classification" IN ('OURS', 'THEIRS')
+					OR (m."classification" IS NULL AND m."correspondence" = true)
+				)
+		)
+	)
+`;
 
 export type ActivityTarget = {
 	companyId?: string | null;
@@ -54,7 +101,7 @@ export class ActivityStampService {
 	async recompute(target: ActivityTarget): Promise<void> {
 		if (target.companyId) {
 			const { _max } = await this.db.activity.aggregate({
-				where: { companyId: target.companyId },
+				where: { ...COUNTED_ACTIVITY_WHERE, companyId: target.companyId },
 				_max: { createdAt: true },
 			});
 			await this.db.company.update({
@@ -65,7 +112,7 @@ export class ActivityStampService {
 
 		if (target.contactId) {
 			const { _max } = await this.db.activity.aggregate({
-				where: { contactId: target.contactId },
+				where: { ...COUNTED_ACTIVITY_WHERE, contactId: target.contactId },
 				_max: { createdAt: true },
 			});
 			await this.db.contact.update({
@@ -76,7 +123,7 @@ export class ActivityStampService {
 
 		if (target.dealId) {
 			const { _max } = await this.db.activity.aggregate({
-				where: { dealId: target.dealId },
+				where: { ...COUNTED_ACTIVITY_WHERE, dealId: target.dealId },
 				_max: { createdAt: true },
 			});
 			await this.db.deal.update({
@@ -142,7 +189,9 @@ export class ActivityStampService {
 		return this.db.$executeRaw`
 			UPDATE ${record} r
 			SET "lastActivityAt" = (
-				SELECT MAX(a."createdAt") FROM "activity" a WHERE a.${key} = r.id
+				SELECT MAX(a."createdAt")
+				FROM "activity" a
+				WHERE a.${key} = r.id AND ${COUNTED_ACTIVITY_SQL}
 			)
 			WHERE r.id IN (${PrismaNamespace.join(ids)})`;
 	}
@@ -153,38 +202,53 @@ export class ActivityStampService {
 				UPDATE "company" c
 				SET "lastActivityAt" = a.max
 				FROM (
-					SELECT "companyId" AS id, MAX("createdAt") AS max
-					FROM "activity" WHERE "companyId" IS NOT NULL GROUP BY "companyId"
+					SELECT a."companyId" AS id, MAX(a."createdAt") AS max
+					FROM "activity" a
+					WHERE a."companyId" IS NOT NULL AND ${COUNTED_ACTIVITY_SQL}
+					GROUP BY a."companyId"
 				) a
 				WHERE c.id = a.id AND c."lastActivityAt" IS DISTINCT FROM a.max`,
 			this.db.$executeRaw`
 				UPDATE "company" SET "lastActivityAt" = NULL
 				WHERE "lastActivityAt" IS NOT NULL
-				AND id NOT IN (SELECT "companyId" FROM "activity" WHERE "companyId" IS NOT NULL)`,
+				AND id NOT IN (
+					SELECT a."companyId" FROM "activity" a
+					WHERE a."companyId" IS NOT NULL AND ${COUNTED_ACTIVITY_SQL}
+				)`,
 			this.db.$executeRaw`
 				UPDATE "contact" c
 				SET "lastActivityAt" = a.max
 				FROM (
-					SELECT "contactId" AS id, MAX("createdAt") AS max
-					FROM "activity" WHERE "contactId" IS NOT NULL GROUP BY "contactId"
+					SELECT a."contactId" AS id, MAX(a."createdAt") AS max
+					FROM "activity" a
+					WHERE a."contactId" IS NOT NULL AND ${COUNTED_ACTIVITY_SQL}
+					GROUP BY a."contactId"
 				) a
 				WHERE c.id = a.id AND c."lastActivityAt" IS DISTINCT FROM a.max`,
 			this.db.$executeRaw`
 				UPDATE "contact" SET "lastActivityAt" = NULL
 				WHERE "lastActivityAt" IS NOT NULL
-				AND id NOT IN (SELECT "contactId" FROM "activity" WHERE "contactId" IS NOT NULL)`,
+				AND id NOT IN (
+					SELECT a."contactId" FROM "activity" a
+					WHERE a."contactId" IS NOT NULL AND ${COUNTED_ACTIVITY_SQL}
+				)`,
 			this.db.$executeRaw`
 				UPDATE "deal" d
 				SET "lastActivityAt" = a.max
 				FROM (
-					SELECT "dealId" AS id, MAX("createdAt") AS max
-					FROM "activity" WHERE "dealId" IS NOT NULL GROUP BY "dealId"
+					SELECT a."dealId" AS id, MAX(a."createdAt") AS max
+					FROM "activity" a
+					WHERE a."dealId" IS NOT NULL AND ${COUNTED_ACTIVITY_SQL}
+					GROUP BY a."dealId"
 				) a
 				WHERE d.id = a.id AND d."lastActivityAt" IS DISTINCT FROM a.max`,
 			this.db.$executeRaw`
 				UPDATE "deal" SET "lastActivityAt" = NULL
 				WHERE "lastActivityAt" IS NOT NULL
-				AND id NOT IN (SELECT "dealId" FROM "activity" WHERE "dealId" IS NOT NULL)`,
+				AND id NOT IN (
+					SELECT a."dealId" FROM "activity" a
+					WHERE a."dealId" IS NOT NULL AND ${COUNTED_ACTIVITY_SQL}
+				)`,
 		]);
 	}
 }
