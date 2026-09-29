@@ -23,9 +23,14 @@ export class ContactEventsSyncService {
 		all = false,
 	) {
 		const deadline = deadlineIn(SYNC_TICK.budgetMs);
+		const doneCursor = CONTACT_EVENTS.backfill.doneCursor;
 		const [activities, messages] = await Promise.all([
-			this.activityIds(activityCursor, all),
-			this.messageIds(messageCursor, all),
+			activityCursor === doneCursor
+				? Promise.resolve<{ id: string }[]>([])
+				: this.activityIds(activityCursor, all),
+			messageCursor === doneCursor
+				? Promise.resolve<{ id: string }[]>([])
+				: this.messageIds(messageCursor, all),
 		]);
 
 		let recordedActivities = 0;
@@ -57,11 +62,17 @@ export class ContactEventsSyncService {
 		if (!all && !overdue(deadline)) await this.clocks.refreshRecentlyDue();
 
 		const activityExhausted =
-			activityExamined === activities.length &&
-			activities.length < CONTACT_EVENTS.backfill.pageSize;
+			activityCursor === doneCursor ||
+			(activityExamined === activities.length &&
+				activities.length < CONTACT_EVENTS.backfill.pageSize);
 		const messageExhausted =
-			messageExamined === messages.length &&
-			messages.length < CONTACT_EVENTS.backfill.pageSize;
+			messageCursor === doneCursor ||
+			(messageExamined === messages.length &&
+				messages.length < CONTACT_EVENTS.backfill.pageSize);
+		const nextActivityCursor = activityExhausted ? doneCursor : lastActivity;
+		const nextMessageCursor = messageExhausted ? doneCursor : lastMessage;
+		const complete =
+			nextActivityCursor === doneCursor && nextMessageCursor === doneCursor;
 
 		return {
 			activityExamined,
@@ -69,10 +80,10 @@ export class ContactEventsSyncService {
 			recordedActivities,
 			recordedMessages,
 			extraction,
-			complete: activityExhausted && messageExhausted,
+			complete,
 			next: {
-				activityCursor: activityExhausted ? null : lastActivity,
-				messageCursor: messageExhausted ? null : lastMessage,
+				activityCursor: nextActivityCursor,
+				messageCursor: nextMessageCursor,
 			},
 		};
 	}

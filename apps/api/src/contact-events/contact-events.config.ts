@@ -6,6 +6,7 @@ const MINUTE_MS = 60 * SECOND_MS;
 export const CONTACT_EVENTS = {
 	backfill: {
 		pageSize: 100,
+		doneCursor: "done",
 		recentWindowMs: 60 * MINUTE_MS,
 		extractionLimit: 20,
 		extractionConcurrency: 4,

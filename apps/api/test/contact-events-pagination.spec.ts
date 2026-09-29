@@ -1,6 +1,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import type { Db } from "@crm/db";
 import type { ContactClockService } from "../src/contact-events/contact-clock.service";
+import { CONTACT_EVENTS } from "../src/contact-events/contact-events.config";
 import type { ContactEventsService } from "../src/contact-events/contact-events.service";
 import { ContactEventsSyncService } from "../src/contact-events/contact-events-sync.service";
 import type { ContactExtractionService } from "../src/contact-events/contact-extraction.service";
@@ -9,17 +10,23 @@ import { CorrespondenceBackfillService } from "../src/mailbox/correspondence-bac
 import type { EmailClassificationService } from "../src/mailbox/email-classification.service";
 import { SYNC_TICK } from "../src/mailbox/mailbox-config";
 import type { ThreadWriterService } from "../src/mailbox/thread-writer.service";
+import { backfillCursor } from "../src/sync/sync.contracts";
 
 function contactEventsBackfill(
 	time: { value: number },
 	activities: { id: string }[],
 	messages: { id: string }[],
 	expireAfterFirstActivity = false,
+	additionalQueries: { id: string }[][] = [],
 ) {
-	const rows = [activities, messages];
+	const rows = [activities, messages, ...additionalQueries];
 	let queryIndex = 0;
+	const queryCalls = { count: 0 };
 	const fakeDb = {
-		$queryRaw: async () => rows[queryIndex++],
+		$queryRaw: async () => {
+			queryCalls.count += 1;
+			return rows[queryIndex++] ?? [];
+		},
 	} as unknown as Db;
 	const recordedActivityIds: string[] = [];
 	const recordedMessageIds: string[] = [];
@@ -58,6 +65,7 @@ function contactEventsBackfill(
 
 	return {
 		service: new ContactEventsSyncService(fakeDb, events, extraction, clocks),
+		queryCalls,
 		recordedActivityIds,
 		recordedMessageIds,
 		activityOptions,
@@ -152,10 +160,50 @@ describe("contact-event backfill pagination", () => {
 			const result = await service.backfill(null, null, true);
 
 			expect(result.next).toEqual({
-				activityCursor: null,
-				messageCursor: null,
+				activityCursor: CONTACT_EVENTS.backfill.doneCursor,
+				messageCursor: CONTACT_EVENTS.backfill.doneCursor,
 			});
 			expect(result.complete).toBe(true);
+			expect(backfillCursor.parse(result.next.activityCursor)).toBe(
+				CONTACT_EVENTS.backfill.doneCursor,
+			);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it("skips an exhausted stream while the other stream continues", async () => {
+		const time = { value: 0 };
+		const clock = spyOn(Date, "now").mockImplementation(() => time.value);
+		try {
+			const messages = Array.from({ length: 100 }, (_, index) => ({
+				id: `message-${String(index + 1).padStart(3, "0")}`,
+			}));
+			const { service, queryCalls, recordedActivityIds, recordedMessageIds } =
+				contactEventsBackfill(time, [{ id: "activity-1" }], messages, false, [
+					[{ id: "message-101" }],
+				]);
+
+			const first = await service.backfill(null, null, true);
+			expect(first.next).toEqual({
+				activityCursor: CONTACT_EVENTS.backfill.doneCursor,
+				messageCursor: "message-100",
+			});
+			expect(first.complete).toBe(false);
+
+			const second = await service.backfill(
+				first.next.activityCursor,
+				first.next.messageCursor,
+				true,
+			);
+			expect(second.next).toEqual({
+				activityCursor: CONTACT_EVENTS.backfill.doneCursor,
+				messageCursor: CONTACT_EVENTS.backfill.doneCursor,
+			});
+			expect(second.complete).toBe(true);
+			expect(queryCalls.count).toBe(3);
+			expect(recordedActivityIds).toEqual(["activity-1"]);
+			expect(recordedMessageIds).toHaveLength(101);
 		} finally {
 			clock.mockRestore();
 		}
