@@ -9,6 +9,7 @@ import {
 import { db, type FieldEntity } from "@crm/db";
 import { AgentQueueService } from "../src/agent/agent-queue.service";
 import { AgentTriggerService } from "../src/agent/agent-trigger.service";
+import { companyListInput } from "../src/companies/companies.contracts";
 import { CompaniesService } from "../src/companies/companies.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import type { FaviconService } from "../src/companies/favicon.service";
@@ -151,6 +152,54 @@ afterAll(async () => {
 
 beforeEach(() => {
 	queued.length = 0;
+});
+
+describe("company employee data", () => {
+	it("returns employee fields and sorts exact counts before null counts", async () => {
+		const smaller = await makeCompany("employees-smaller");
+		const larger = await makeCompany("employees-larger");
+		const rangeOnly = await makeCompany("employees-range");
+
+		await db.company.update({
+			where: { id: smaller },
+			data: { employeeCount: 10, employeeRange: "1 to 10" },
+		});
+		await db.company.update({
+			where: { id: larger },
+			data: { employeeCount: 20, employeeRange: "11 to 50" },
+		});
+		await db.company.update({
+			where: { id: rangeOnly },
+			data: { employeeRange: "51 to 200" },
+		});
+
+		expect(await companies.byId(rangeOnly)).toMatchObject({
+			employeeCount: null,
+			employeeRange: "51 to 200",
+		});
+
+		const ascending = await companies.list(
+			companyListInput.parse({ sort: "employees", dir: "asc", pageSize: 100 }),
+		);
+		const descending = await companies.list(
+			companyListInput.parse({
+				sort: "employees",
+				dir: "desc",
+				pageSize: 100,
+			}),
+		);
+		const order = (rows: typeof ascending.rows) =>
+			rows
+				.filter((row) => [smaller, larger, rangeOnly].includes(row.id))
+				.map((row) => row.id);
+
+		expect(order(ascending.rows)).toEqual([smaller, larger, rangeOnly]);
+		expect(order(descending.rows)).toEqual([larger, smaller, rangeOnly]);
+		expect(ascending.rows.find((row) => row.id === smaller)).toMatchObject({
+			employeeCount: 10,
+			employeeRange: "1 to 10",
+		});
+	});
 });
 
 describe("field definitions", () => {

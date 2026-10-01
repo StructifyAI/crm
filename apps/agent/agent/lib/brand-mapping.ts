@@ -15,6 +15,8 @@ export type CompanySnapshot = {
 	brandColor: string | null;
 	industry: string | null;
 	subIndustry: string | null;
+	employeeCount: number | null;
+	employeeRange: string | null;
 	city: string | null;
 	stateCode: string | null;
 	country: string | null;
@@ -119,6 +121,12 @@ export function brandToUpdate(
 		}
 	};
 
+	const fillNumber = (value: number | null) => {
+		if (value !== null && current.employeeCount === null) {
+			update.employeeCount = value;
+		}
+	};
+
 	fill("name", clean(brand.title));
 
 	fill("description", clean(brand.description) ?? clean(brand.slogan));
@@ -136,6 +144,17 @@ export function brandToUpdate(
 	const eic = brand.industries?.eic?.[0];
 	fill("industry", clean(eic?.industry));
 	fill("subIndustry", clean(eic?.subindustry));
+
+	const exactEmployeeCount = brand.employees?.exact;
+	fillNumber(
+		exactEmployeeCount !== null &&
+			exactEmployeeCount !== undefined &&
+			Number.isInteger(exactEmployeeCount) &&
+			exactEmployeeCount > 0
+			? exactEmployeeCount
+			: null,
+	);
+	fill("employeeRange", clean(brand.employees?.range));
 
 	fill("city", clean(brand.address?.city));
 	fill("stateCode", clean(brand.address?.state_code));
@@ -156,6 +175,17 @@ export function brandToUpdate(
 	fill("careersUrl", clean(brand.links?.careers));
 
 	return update;
+}
+
+export function formatCompanyEmployees(
+	employeeCount: number | null,
+	employeeRange: string | null,
+): string | null {
+	if (employeeCount !== null) {
+		return `${employeeCount.toLocaleString("en-US")} employees`;
+	}
+	if (employeeRange !== null) return `${employeeRange} employees`;
+	return null;
 }
 
 export function stillFillable(

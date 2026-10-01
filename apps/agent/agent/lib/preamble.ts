@@ -1,5 +1,6 @@
 import { db } from "@crm/db";
 import { websiteUrl } from "@crm/db/workspace";
+import { formatCompanyEmployees } from "./brand-mapping";
 import { capabilitiesMarkdown } from "./capabilities";
 import { identity, usMarkdown, type WorkspaceIdentity } from "./workspace";
 
@@ -170,6 +171,8 @@ export async function companyPreamble(
 			name: true,
 			domain: true,
 			industry: true,
+			employeeCount: true,
+			employeeRange: true,
 			description: true,
 			contacts: {
 				orderBy: [{ lastActivityAt: "desc" }, { createdAt: "asc" }],
@@ -207,12 +210,19 @@ export async function companyPreamble(
 		.map((deal) => `${deal.name} (${deal.stage}) \`${deal.id}\``)
 		.join("; ");
 
+	const companyDetails = [
+		company.industry,
+		formatCompanyEmployees(company.employeeCount, company.employeeRange),
+	]
+		.filter((detail): detail is string => detail !== null)
+		.join(", ");
+
 	const markdown = [
 		"## This session",
 		"",
 		`You are working on **${company.name}**${
 			company.domain ? ` (${company.domain})` : ""
-		}${company.industry ? `, ${company.industry}` : ""} — company id \`${companyId}\`.`,
+		}${companyDetails ? `, ${companyDetails}` : ""} — company id \`${companyId}\`.`,
 		fieldBackfillLine(opened),
 		"",
 		opening(

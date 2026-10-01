@@ -85,6 +85,26 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 			),
 	},
 	{
+		id: "employees",
+		header: "Employees",
+		sortable: true,
+		align: "right",
+		width: "w-[10%]",
+		hideBelow: "lg",
+		cell: (row) => {
+			const employees =
+				row.employeeCount !== null
+					? row.employeeCount.toLocaleString()
+					: row.employeeRange;
+
+			return employees ? (
+				<span className="tabular-nums">{employees}</span>
+			) : (
+				<EmptyCellValue />
+			);
+		},
+	},
+	{
 		id: "owner",
 		header: "Owner",
 		sortable: true,

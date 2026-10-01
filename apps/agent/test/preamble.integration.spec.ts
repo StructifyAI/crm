@@ -139,6 +139,19 @@ describe("companyPreamble", () => {
 		expect(focus).toEqual({ companyId });
 	});
 
+	it("includes employee data in the company identity line", async () => {
+		await db.company.update({
+			where: { id: companyId },
+			data: { employeeCount: 120, employeeRange: "51 to 200" },
+		});
+
+		const { markdown } = await companyPreamble(companyId, rep);
+
+		expect(markdown).toContain(
+			", Security software, 120 employees — company id",
+		);
+	});
+
 	it("points at the company read, not the contact one", async () => {
 		const { markdown } = await companyPreamble(companyId, rep);
 
