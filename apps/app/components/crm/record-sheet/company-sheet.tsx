@@ -226,7 +226,15 @@ export function CompanySheet({ companyId }: { companyId: string }) {
 						lead={
 							<DomainLink domain={company.domain} website={company.website} />
 						}
-						parts={[location, company.industry]}
+						parts={[
+							location,
+							company.industry,
+							company.employeeCount !== null
+								? `${company.employeeCount.toLocaleString()} employees`
+								: company.employeeRange
+									? `${company.employeeRange} employees`
+									: null,
+						]}
 					/>
 				) : undefined
 			}

@@ -365,12 +365,14 @@ model Company {
   iconTone    String?
   brandColor  String?
 
-  industry    String?
-  subIndustry String?
-  city        String?
-  stateCode   String?
-  country     String?
-  countryCode String?
+  industry      String?
+  subIndustry   String?
+  employeeCount Int?
+  employeeRange String?
+  city          String?
+  stateCode     String?
+  country       String?
+  countryCode   String?
 
   phone       String?
   email       String?

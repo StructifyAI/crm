@@ -1,5 +1,6 @@
 import { ActivityType, db } from "@crm/db";
 import { z } from "zod";
+import { formatCompanyEmployees } from "./brand-mapping";
 import { isDerivedName } from "./names";
 
 const BODY_LIMIT = 4000;
@@ -70,6 +71,7 @@ export type CompanyHistory = {
 		domain: string | null;
 		website: string | null;
 		industry: string | null;
+		employees: string | null;
 		location: string | null;
 		description: string | null;
 		linkedinUrl: string | null;
@@ -117,6 +119,8 @@ export async function readCompanyHistory(
 			website: true,
 			industry: true,
 			subIndustry: true,
+			employeeCount: true,
+			employeeRange: true,
 			city: true,
 			country: true,
 			description: true,
@@ -265,6 +269,10 @@ export async function readCompanyHistory(
 			industry: [company.industry, company.subIndustry]
 				.filter(Boolean)
 				.join(" / "),
+			employees: formatCompanyEmployees(
+				company.employeeCount,
+				company.employeeRange,
+			),
 			location: [company.city, company.country].filter(Boolean).join(", "),
 			description: company.description,
 			linkedinUrl: company.linkedinUrl,

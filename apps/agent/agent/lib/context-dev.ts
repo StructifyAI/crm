@@ -47,6 +47,10 @@ export type Brand = {
 	industries?: {
 		eic?: { industry?: string | null; subindustry?: string | null }[] | null;
 	} | null;
+	employees?: {
+		exact?: number | null;
+		range?: string | null;
+	} | null;
 	links?: {
 		pricing?: string | null;
 		careers?: string | null;

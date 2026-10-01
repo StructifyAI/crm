@@ -21,6 +21,8 @@ function emptyCompany(
 		brandColor: null,
 		industry: null,
 		subIndustry: null,
+		employeeCount: null,
+		employeeRange: null,
 		city: null,
 		stateCode: null,
 		country: null,
@@ -141,6 +143,47 @@ describe("brandToUpdate", () => {
 			emptyCompany(),
 		);
 		expect(update.description).toBe("Payments, simplified.");
+	});
+
+	it("maps exact and ranged employee counts", () => {
+		expect(
+			brandToUpdate(
+				{ employees: { exact: 84, range: "51 to 200" } },
+				emptyCompany(),
+			),
+		).toMatchObject({
+			employeeCount: 84,
+			employeeRange: "51 to 200",
+		});
+	});
+
+	it("does not add employee fields when Context.dev has no employees", () => {
+		const update = brandToUpdate(brand, emptyCompany());
+
+		expect(update.employeeCount).toBeUndefined();
+		expect(update.employeeRange).toBeUndefined();
+	});
+
+	it("does not replace an existing exact count", () => {
+		const update = brandToUpdate(
+			{ employees: { exact: 84, range: "51 to 200" } },
+			emptyCompany({ employeeCount: 300 }),
+		);
+
+		expect(update.employeeCount).toBeUndefined();
+		expect(update.employeeRange).toBe("51 to 200");
+	});
+
+	it("ignores zero and non-integer exact employee counts", () => {
+		for (const exact of [0, 84.5]) {
+			const update = brandToUpdate(
+				{ employees: { exact, range: "51 to 200" } },
+				emptyCompany(),
+			);
+
+			expect(update.employeeCount).toBeUndefined();
+			expect(update.employeeRange).toBe("51 to 200");
+		}
 	});
 });
 

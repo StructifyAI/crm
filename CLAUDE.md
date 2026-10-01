@@ -61,6 +61,9 @@ two commits that are submitted upstream and not yet released:
   `/internal/sync/instantly-emails` reads `GET /api/v2/emails?email_type=sent`, migrations
   `instantly_email_sync` and `instantly_email_sync_lease` and
   `instantly_reply_sync`.
+- `feat(db,agent,api,app): promote the Context.dev employee count onto the company` —
+  `Company.employeeCount`/`employeeRange`, migration `company_employees` backfills from
+  `companyEnrichment.raw`.
 
 Rules for this branch:
 

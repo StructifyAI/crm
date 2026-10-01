@@ -287,6 +287,17 @@ describe("readCompanyHistory", () => {
 		);
 	});
 
+	it("formats company employee data for agent history", async () => {
+		await db.company.update({
+			where: { id: companyId },
+			data: { employeeRange: "51 to 200" },
+		});
+
+		const history = await readCompanyHistory(companyId);
+
+		expect(history?.company.employees).toBe("51 to 200 employees");
+	});
+
 	it("flags a contact still named after their email address", async () => {
 		const history = await readCompanyHistory(companyId);
 		const people = Object.fromEntries(

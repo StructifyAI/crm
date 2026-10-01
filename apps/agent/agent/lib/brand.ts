@@ -29,6 +29,8 @@ const COMPANY_FIELDS = {
 	brandColor: true,
 	industry: true,
 	subIndustry: true,
+	employeeCount: true,
+	employeeRange: true,
 	city: true,
 	stateCode: true,
 	country: true,
