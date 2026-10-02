@@ -43,8 +43,8 @@ export const DISPATCH = {
 	},
 
 	companySize: {
-		batch: 20,
-		concurrency: 5,
+		batch: 10,
+		concurrency: 1,
 	},
 
 	sweep: {

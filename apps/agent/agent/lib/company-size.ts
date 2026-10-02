@@ -132,6 +132,7 @@ export async function sweepCompanySize(
 		empty: 0,
 		failed: 0,
 	};
+	const failures = new Map<string, number>();
 	const lookup = options.lookup ?? lookupCompanySize;
 
 	await runLimited(
@@ -163,6 +164,7 @@ export async function sweepCompanySize(
 					data: { employeeCheckedAt: null },
 				});
 				summary.failed += 1;
+				failures.set(result.reason, (failures.get(result.reason) ?? 0) + 1);
 				return;
 			}
 
@@ -192,8 +194,11 @@ export async function sweepCompanySize(
 		},
 	);
 
+	const reasons = [...failures]
+		.map(([reason, count]) => `${reason}:${count}`)
+		.join(", ");
 	console.log(
-		`[company-size] scanned=${summary.scanned} filled=${summary.filled} empty=${summary.empty} failed=${summary.failed}`,
+		`[company-size] scanned=${summary.scanned} filled=${summary.filled} empty=${summary.empty} failed=${summary.failed}${reasons ? ` reasons=${reasons}` : ""}`,
 	);
 	return summary;
 }
