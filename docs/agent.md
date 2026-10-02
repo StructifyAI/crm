@@ -174,9 +174,10 @@ name match.
 
 ### Company size is filled on the dispatch tick
 
-`sweepCompanySize` runs once per minute and searches for up to 20 newest eligible
-companies. Each search uses one paid Perplexity `sonar` call, with five concurrent
-calls, for about 20 calls per minute. The sweep claims each row with
+`sweepCompanySize` runs once per minute and searches for up to 10 newest eligible
+companies. Each search uses one paid Perplexity `sonar` call. The calls run one at
+a time. A low Perplexity usage tier allows 50 `sonar` calls per minute and rejects
+parallel calls with HTTP 429. The sweep claims each row with
 `employeeCheckedAt`, so it does not search the same company twice. Vendor failures
 clear the claim and retry on the next tick. An empty result keeps the claim. The
 sweep fills only blank employee fields and stores the `WEB_SEARCH` source and URL.
