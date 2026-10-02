@@ -23,6 +23,7 @@ function emptyCompany(
 		subIndustry: null,
 		employeeCount: null,
 		employeeRange: null,
+		employeeSource: null,
 		city: null,
 		stateCode: null,
 		country: null,
@@ -154,6 +155,7 @@ describe("brandToUpdate", () => {
 		).toMatchObject({
 			employeeCount: 84,
 			employeeRange: "51 to 200",
+			employeeSource: "CONTEXT_DEV",
 		});
 	});
 
@@ -162,6 +164,7 @@ describe("brandToUpdate", () => {
 
 		expect(update.employeeCount).toBeUndefined();
 		expect(update.employeeRange).toBeUndefined();
+		expect(update.employeeSource).toBeUndefined();
 	});
 
 	it("does not replace an existing exact count", () => {
@@ -172,6 +175,7 @@ describe("brandToUpdate", () => {
 
 		expect(update.employeeCount).toBeUndefined();
 		expect(update.employeeRange).toBe("51 to 200");
+		expect(update.employeeSource).toBe("CONTEXT_DEV");
 	});
 
 	it("ignores zero and non-integer exact employee counts", () => {
@@ -183,7 +187,20 @@ describe("brandToUpdate", () => {
 
 			expect(update.employeeCount).toBeUndefined();
 			expect(update.employeeRange).toBe("51 to 200");
+			expect(update.employeeSource).toBe("CONTEXT_DEV");
 		}
+	});
+
+	it("keeps the existing employee source", () => {
+		const update = brandToUpdate(
+			{ employees: { exact: 84, range: "51 to 200" } },
+			emptyCompany({
+				employeeRange: "11 to 50",
+				employeeSource: "WEB_SEARCH",
+			}),
+		);
+
+		expect(update.employeeSource).toBeUndefined();
 	});
 });
 

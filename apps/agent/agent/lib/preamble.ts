@@ -1,5 +1,9 @@
 import { db } from "@crm/db";
 import { websiteUrl } from "@crm/db/workspace";
+import {
+	estimateRevenue,
+	formatRevenueEstimate,
+} from "@crm/validation/company-size";
 import { formatCompanyEmployees } from "./brand-mapping";
 import { capabilitiesMarkdown } from "./capabilities";
 import { identity, usMarkdown, type WorkspaceIdentity } from "./workspace";
@@ -210,9 +214,20 @@ export async function companyPreamble(
 		.map((deal) => `${deal.name} (${deal.stage}) \`${deal.id}\``)
 		.join("; ");
 
+	const revenueEstimate = formatRevenueEstimate(
+		estimateRevenue({
+			employeeCount: company.employeeCount,
+			employeeRange: company.employeeRange,
+			industry: company.industry,
+		}),
+	);
+
 	const companyDetails = [
 		company.industry,
 		formatCompanyEmployees(company.employeeCount, company.employeeRange),
+		revenueEstimate
+			? `estimated revenue ${revenueEstimate} from headcount`
+			: null,
 	]
 		.filter((detail): detail is string => detail !== null)
 		.join(", ");

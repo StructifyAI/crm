@@ -49,7 +49,7 @@ export function capabilitiesFrom(
 			...fromEnv("PERPLEXITY_API_KEY"),
 			label: "Web research",
 			gives:
-				"open-web context with citations, and the search that finds a LinkedIn slug in the first place",
+				"open-web context with citations, and the search that finds a LinkedIn slug in the first place, and a company's headcount when Context.dev has none",
 		},
 		{
 			id: CONTEXT_DEV,

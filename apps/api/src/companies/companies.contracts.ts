@@ -194,6 +194,8 @@ export const companyDetailOutput = z.object({
 	subIndustry: z.string().nullable(),
 	employeeCount: z.number().int().nullable(),
 	employeeRange: z.string().nullable(),
+	employeeSource: z.enum(["CONTEXT_DEV", "WEB_SEARCH", "IMPORT"]).nullable(),
+	employeeSourceUrl: z.string().nullable(),
 	city: z.string().nullable(),
 	stateCode: z.string().nullable(),
 	country: z.string().nullable(),

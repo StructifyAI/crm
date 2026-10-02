@@ -64,6 +64,9 @@ two commits that are submitted upstream and not yet released:
 - `feat(db,agent,api,app): promote the Context.dev employee count onto the company` —
   `Company.employeeCount`/`employeeRange`, migration `company_employees` backfills from
   `companyEnrichment.raw`.
+- `feat(db,agent,api,app): fill company size from a web search when Context.dev has none` —
+  `Company.employeeSource`/`employeeSourceUrl`/`employeeCheckedAt`, migration
+  `company_employee_source` imports the custom `headcount` field and archives it.
 
 Rules for this branch:
 

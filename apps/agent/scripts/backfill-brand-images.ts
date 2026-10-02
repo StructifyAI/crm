@@ -35,6 +35,7 @@ const rows = await db.companyEnrichment.findMany({
 				subIndustry: true,
 				employeeCount: true,
 				employeeRange: true,
+				employeeSource: true,
 				city: true,
 				stateCode: true,
 				country: true,

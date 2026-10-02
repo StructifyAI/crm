@@ -16,6 +16,7 @@ export type AskOptions = {
 	model?: "sonar" | "sonar-pro";
 	domains?: string[];
 	system?: string;
+	schema?: { name: string; schema: object };
 };
 
 export async function ask(
@@ -45,6 +46,17 @@ export async function ask(
 					{ role: "user", content: question },
 				],
 				search_domain_filter: options.domains,
+				...(options.schema
+					? {
+							response_format: {
+								type: "json_schema",
+								json_schema: {
+									name: options.schema.name,
+									schema: options.schema.schema,
+								},
+							},
+						}
+					: {}),
 			}),
 		});
 
