@@ -68,10 +68,7 @@ export async function lookupCompanySize({
 }
 
 export function sizeFromAnswer(answer: Answer): CompanySize | null {
-	const citations = Array.isArray(answer.citations) ? answer.citations : [];
-	const citationUrl = citations.find(
-		(value) => typeof value === "string" && httpUrl(value) !== null,
-	);
+	const citationUrl = answer.citations.find((value) => httpUrl(value) !== null);
 	if (!citationUrl) return null;
 
 	let parsed: unknown;

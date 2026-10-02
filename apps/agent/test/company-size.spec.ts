@@ -1,13 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { sizeFromAnswer } from "../agent/lib/company-size";
+import { type CompanySize, sizeFromAnswer } from "../agent/lib/company-size";
 import type { Answer } from "../agent/lib/perplexity";
 
 function answer(
-	data: unknown,
+	data: CompanySize,
 	citations: string[] = ["https://www.linkedin.com/company/example"],
 ): Answer {
 	return {
-		text: typeof data === "string" ? data : JSON.stringify(data),
+		text: JSON.stringify(data),
 		citations,
 	};
 }
@@ -88,7 +88,12 @@ describe("sizeFromAnswer", () => {
 	});
 
 	it("returns null for unreadable JSON", () => {
-		expect(sizeFromAnswer(answer("not json"))).toBeNull();
+		expect(
+			sizeFromAnswer({
+				text: "not json",
+				citations: ["https://www.linkedin.com/company/example"],
+			}),
+		).toBeNull();
 	});
 
 	it("ignores counts outside the accepted range", () => {
