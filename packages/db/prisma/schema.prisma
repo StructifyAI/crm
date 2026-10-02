@@ -278,6 +278,12 @@ enum RecordSource {
   EXTROVERT
 }
 
+enum EmployeeSource {
+  CONTEXT_DEV
+  WEB_SEARCH
+  IMPORT
+}
+
 enum AgentConversationKind {
   RECORD
   BUILDER
@@ -365,14 +371,17 @@ model Company {
   iconTone    String?
   brandColor  String?
 
-  industry      String?
-  subIndustry   String?
-  employeeCount Int?
-  employeeRange String?
-  city          String?
-  stateCode     String?
-  country       String?
-  countryCode   String?
+  industry          String?
+  subIndustry       String?
+  employeeCount     Int?
+  employeeRange     String?
+  employeeSource    EmployeeSource?
+  employeeSourceUrl String?
+  employeeCheckedAt DateTime?
+  city              String?
+  stateCode         String?
+  country           String?
+  countryCode       String?
 
   phone       String?
   email       String?

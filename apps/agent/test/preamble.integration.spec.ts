@@ -142,13 +142,17 @@ describe("companyPreamble", () => {
 	it("includes employee data in the company identity line", async () => {
 		await db.company.update({
 			where: { id: companyId },
-			data: { employeeCount: 120, employeeRange: "51 to 200" },
+			data: {
+				employeeCount: 120,
+				employeeRange: "51 to 200",
+				industry: "manufacturing",
+			},
 		});
 
 		const { markdown } = await companyPreamble(companyId, rep);
 
 		expect(markdown).toContain(
-			", Security software, 120 employees — company id",
+			", manufacturing, 120 employees, estimated revenue ≈ $33.1M from headcount — company id",
 		);
 	});
 

@@ -16,6 +16,7 @@ export type AskOptions = {
 	model?: "sonar" | "sonar-pro";
 	domains?: string[];
 	system?: string;
+	schema?: { name: string; schema: object };
 };
 
 export async function ask(
@@ -29,6 +30,26 @@ export async function ask(
 	const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
 	try {
+		const requestBody = {
+			model: options.model ?? "sonar",
+			messages: [
+				...(options.system
+					? [{ role: "system" as const, content: options.system }]
+					: []),
+				{ role: "user", content: question },
+			],
+			search_domain_filter: options.domains,
+			response_format: options.schema
+				? {
+						type: "json_schema",
+						json_schema: {
+							name: options.schema.name,
+							schema: options.schema.schema,
+						},
+					}
+				: undefined,
+		};
+
 		const response = await fetch(ENDPOINT, {
 			method: "POST",
 			headers: {
@@ -36,16 +57,7 @@ export async function ask(
 				"content-type": "application/json",
 			},
 			signal: controller.signal,
-			body: JSON.stringify({
-				model: options.model ?? "sonar",
-				messages: [
-					...(options.system
-						? [{ role: "system", content: options.system }]
-						: []),
-					{ role: "user", content: question },
-				],
-				search_domain_filter: options.domains,
-			}),
+			body: JSON.stringify(requestBody),
 		});
 
 		if (!response.ok) {

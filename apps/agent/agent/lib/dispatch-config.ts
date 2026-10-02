@@ -42,6 +42,11 @@ export const DISPATCH = {
 		candidates: 500,
 	},
 
+	companySize: {
+		batch: 20,
+		concurrency: 5,
+	},
+
 	sweep: {
 		timeoutMs: 4 * MINUTE_MS,
 		staleQueueMs: 5 * MINUTE_MS,

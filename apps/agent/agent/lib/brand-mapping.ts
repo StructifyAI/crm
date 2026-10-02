@@ -1,4 +1,4 @@
-import type { Prisma } from "@crm/db";
+import type { EmployeeSource, Prisma } from "@crm/db";
 import type { Brand } from "./context-dev";
 
 export type BrandUpdate = Prisma.CompanyUpdateInput;
@@ -17,6 +17,7 @@ export type CompanySnapshot = {
 	subIndustry: string | null;
 	employeeCount: number | null;
 	employeeRange: string | null;
+	employeeSource: EmployeeSource | null;
 	city: string | null;
 	stateCode: string | null;
 	country: string | null;
@@ -173,6 +174,13 @@ export function brandToUpdate(
 
 	fill("pricingUrl", clean(brand.links?.pricing));
 	fill("careersUrl", clean(brand.links?.careers));
+
+	if (
+		current.employeeSource === null &&
+		(update.employeeCount !== undefined || update.employeeRange !== undefined)
+	) {
+		update.employeeSource = "CONTEXT_DEV";
+	}
 
 	return update;
 }

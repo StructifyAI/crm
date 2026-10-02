@@ -1,6 +1,7 @@
 import { defineSchedule } from "eve/schedules";
 import crm from "../channels/crm";
 import { sweepBlankFacts } from "../lib/blank-facts";
+import { sweepCompanySize } from "../lib/company-size";
 import {
 	pendingAgentRunIds,
 	pendingBuilderSubmissionIds,
@@ -16,6 +17,7 @@ export default defineSchedule({
 		waitUntil(
 			Promise.all([
 				sweepBlankFacts(),
+				sweepCompanySize(),
 				sweepEmployerLinks(),
 
 				(async () => {

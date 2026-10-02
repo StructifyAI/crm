@@ -172,6 +172,17 @@ so each fact runs once. A company created later is not linked until a new employ
 lands. Matching uses a domain only from a live `record_fact`, then a unique `companyKey`
 name match.
 
+### Company size is filled on the dispatch tick
+
+`sweepCompanySize` runs once per minute and searches for up to 20 newest eligible
+companies. Each search uses one paid Perplexity `sonar` call, with five concurrent
+calls, for about 20 calls per minute. The sweep claims each row with
+`employeeCheckedAt`, so it does not search the same company twice. Vendor failures
+clear the claim and retry on the next tick. An empty result keeps the claim. The
+sweep fills only blank employee fields and stores the `WEB_SEARCH` source and URL.
+Without `PERPLEXITY_API_KEY`, the sweep skips. Context.dev sets `CONTEXT_DEV` only
+when no employee source exists. It does not replace `WEB_SEARCH` or `IMPORT`.
+
 ### Stale rows are closed on the dispatch tick
 
 `reconcileStaleTasks` (`lib/stale-tasks.ts`) runs before `drainAll`, every minute. Like

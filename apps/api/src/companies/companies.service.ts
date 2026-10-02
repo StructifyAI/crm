@@ -200,6 +200,8 @@ export class CompaniesService {
 				subIndustry: true,
 				employeeCount: true,
 				employeeRange: true,
+				employeeSource: true,
+				employeeSourceUrl: true,
 				city: true,
 				stateCode: true,
 				country: true,

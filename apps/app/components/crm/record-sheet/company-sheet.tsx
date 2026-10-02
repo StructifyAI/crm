@@ -22,6 +22,10 @@ import {
 	TooltipTrigger,
 } from "@crm/ui/components/tooltip";
 import { formatMoney } from "@crm/ui/lib/format";
+import {
+	estimateRevenue,
+	formatRevenueEstimate,
+} from "@crm/validation/company-size";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AgentPanel } from "@/components/crm/agent-panel";
@@ -44,6 +48,7 @@ import {
 	DetailSheetMain,
 	DetailSheetPending,
 	DetailSheetProperties,
+	DetailSheetProperty,
 	DetailSheetProse,
 	DetailSheetRail,
 	DetailSheetSection,
@@ -75,6 +80,19 @@ type Company = RouterOutputs["companies"]["byId"];
 type CompanyDeal = Company["deals"][number];
 
 const UNASSIGNED = "unassigned";
+
+function employeeSourceLabel(source: Company["employeeSource"]): string | null {
+	switch (source) {
+		case "CONTEXT_DEV":
+			return "Context.dev";
+		case "IMPORT":
+			return "Imported";
+		case "WEB_SEARCH":
+			return "Web search";
+		default:
+			return null;
+	}
+}
 
 function pendingFields(company: Company): string[] {
 	const missing: string[] = [];
@@ -326,6 +344,16 @@ function CompanyOverview({ company }: { company: Company }) {
 
 	const isSaving = savingField(update);
 	const isSavingField = savingValue(update);
+	const employeeValue =
+		company.employeeCount?.toLocaleString() ?? company.employeeRange;
+	const employeeSource = employeeSourceLabel(company.employeeSource);
+	const estimatedRevenue = formatRevenueEstimate(
+		estimateRevenue({
+			employeeCount: company.employeeCount,
+			employeeRange: company.employeeRange,
+			industry: company.industry,
+		}),
+	);
 
 	return (
 		<DetailSheetBody>
@@ -394,6 +422,34 @@ function CompanyOverview({ company }: { company: Company }) {
 								saving={isSaving("country")}
 								onSave={(country) => save({ country })}
 							/>
+							<DetailSheetProperty label="Employees">
+								{employeeValue === null ? (
+									<EmptyCellValue />
+								) : (
+									<div className="flex flex-col items-start gap-0.5">
+										<span className="tabular-nums">{employeeValue}</span>
+										{employeeSource ? (
+											company.employeeSourceUrl ? (
+												<a
+													href={company.employeeSourceUrl}
+													target="_blank"
+													rel="noreferrer"
+													className="text-muted-foreground underline underline-offset-3 hover:text-foreground"
+												>
+													{employeeSource}
+												</a>
+											) : (
+												<span className="text-muted-foreground">
+													{employeeSource}
+												</span>
+											)
+										) : null}
+									</div>
+								)}
+							</DetailSheetProperty>
+							<DetailSheetProperty label="Est. revenue">
+								{estimatedRevenue ?? <EmptyCellValue />}
+							</DetailSheetProperty>
 							<InlineSelectField
 								label="Owner"
 								value={company.owner?.id ?? UNASSIGNED}
