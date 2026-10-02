@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { db, EmployeeSource, EnrichmentStatus } from "@crm/db";
 import {
 	type CompanySizeLookupResult,
+	sizeFromAnswer,
 	sweepCompanySize,
 } from "../agent/lib/company-size";
 
@@ -41,6 +42,25 @@ async function createCompany(
 	companyIds.push(company.id);
 	return { id: company.id, domain };
 }
+
+describe("sizeFromAnswer", () => {
+	it("strips NUL from the source URL", () => {
+		const answer = {
+			text: JSON.stringify({
+				employeeCount: 84,
+				employeeRange: null,
+				sourceUrl: "https://www.linkedin.com/company/acme\u0000",
+			}),
+			citations: ["https://www.linkedin.com/company/acme"],
+		};
+
+		expect(sizeFromAnswer(answer)).toEqual({
+			employeeCount: 84,
+			employeeRange: null,
+			sourceUrl: "https://www.linkedin.com/company/acme",
+		});
+	});
+});
 
 describe("sweepCompanySize", () => {
 	it("skips the sweep when Perplexity is not configured", async () => {
@@ -97,6 +117,30 @@ describe("sweepCompanySize", () => {
 			employeeSourceUrl: "https://example.com/about",
 			employeeCheckedAt: expect.any(Date),
 		});
+	});
+
+	it("strips NUL from the source URL before storing it", async () => {
+		const company = await createCompany();
+
+		const summary = await sweepCompanySize({
+			lookup: async () => ({
+				ok: true,
+				size: {
+					employeeCount: 84,
+					employeeRange: null,
+					sourceUrl: "https://www.linkedin.com/company/acme\u0000",
+				},
+			}),
+		});
+		const saved = await db.company.findUnique({
+			where: { id: company.id },
+			select: { employeeSourceUrl: true },
+		});
+
+		expect(summary.filled).toBe(1);
+		expect(saved?.employeeSourceUrl).toBe(
+			"https://www.linkedin.com/company/acme",
+		);
 	});
 
 	it("does not overwrite size set while lookup is in flight", async () => {

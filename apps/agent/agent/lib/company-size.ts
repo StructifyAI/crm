@@ -187,7 +187,7 @@ export async function sweepCompanySize(
 					employeeCount: result.size.employeeCount,
 					employeeRange: result.size.employeeRange,
 					employeeSource: "WEB_SEARCH",
-					employeeSourceUrl: result.size.sourceUrl,
+					employeeSourceUrl: httpUrl(result.size.sourceUrl),
 				},
 			});
 			summary.filled += filled.count;
@@ -206,10 +206,18 @@ export async function sweepCompanySize(
 function httpUrl(value: string | null): string | null {
 	if (!value) return null;
 
+	const cleaned = Array.from(value)
+		.filter((character) => {
+			const codePoint = character.codePointAt(0);
+			return codePoint !== undefined && codePoint > 0x1f && codePoint !== 0x7f;
+		})
+		.join("")
+		.trim();
+
 	try {
-		const url = new URL(value.trim());
+		const url = new URL(cleaned);
 		return url.protocol === "http:" || url.protocol === "https:"
-			? value.trim()
+			? cleaned
 			: null;
 	} catch {
 		return null;
