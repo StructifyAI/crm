@@ -1,4 +1,4 @@
-import type { Db } from "@crm/db";
+import { type Db, Prisma } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -110,43 +110,43 @@ export class InstantlySyncService {
 								stepIndex === null ? -1 : stepIndex + 1
 							]?.delay,
 						);
-						await this.db.instantlyCampaignLead.deleteMany({
-							where: {
-								contactId: resolved.id,
-								campaignId: campaign.id,
-								leadId: { not: lead.id },
-							},
-						});
-						await this.db.instantlyCampaignLead.upsert({
-							where: { leadId: lead.id },
-							create: {
-								leadId: lead.id,
-								contactId: resolved.id,
-								campaignId: campaign.id,
-								campaignName: campaign.name,
-								status: lead.status,
-								interestStatus: lead.lt_interest_status ?? null,
-								replyCount: lead.email_reply_count,
-								stepIndex,
-								stepCount,
-								sendingMailbox: lastStep?.from ?? null,
-								lastContactAt,
-								nextContactAt,
-							},
-							update: {
-								contactId: resolved.id,
-								campaignId: campaign.id,
-								campaignName: campaign.name,
-								status: lead.status,
-								interestStatus: lead.lt_interest_status ?? null,
-								replyCount: lead.email_reply_count,
-								stepIndex,
-								stepCount,
-								sendingMailbox: lastStep?.from ?? null,
-								lastContactAt,
-								nextContactAt,
-							},
-						});
+						const fields = {
+							contactId: resolved.id,
+							campaignId: campaign.id,
+							campaignName: campaign.name,
+							status: lead.status,
+							interestStatus: lead.lt_interest_status ?? null,
+							replyCount: lead.email_reply_count,
+							stepIndex,
+							stepCount,
+							sendingMailbox: lastStep?.from ?? null,
+							lastContactAt,
+							nextContactAt,
+						};
+						const upsert = () =>
+							this.db.instantlyCampaignLead.upsert({
+								where: { leadId: lead.id },
+								create: { leadId: lead.id, ...fields },
+								update: fields,
+							});
+						try {
+							await upsert();
+						} catch (error) {
+							if (
+								!(error instanceof Prisma.PrismaClientKnownRequestError) ||
+								error.code !== "P2002"
+							)
+								throw error;
+							// A merged contact can still hold another Instantly lead's row for this campaign.
+							await this.db.instantlyCampaignLead.deleteMany({
+								where: {
+									contactId: resolved.id,
+									campaignId: campaign.id,
+									leadId: { not: lead.id },
+								},
+							});
+							await upsert();
+						}
 						if (resolved.created) result.created += 1;
 					}
 				}
