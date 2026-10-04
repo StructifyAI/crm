@@ -8,6 +8,8 @@ import type { EventsPage, EventsQuery } from "../src/google/calendar.client";
 import { CalendarSyncService } from "../src/google/calendar-sync.service";
 import type { GmailClient } from "../src/google/gmail.client";
 import { GmailSyncService } from "../src/google/gmail-sync.service";
+import { SCOPE_FOR_SOURCE } from "../src/google/google.constants";
+import { GoogleConnectionService } from "../src/google/google-connection.service";
 import { deadlineIn } from "../src/mailbox/deadline";
 import type { SyncSource } from "../src/mailbox/mailbox.constants";
 import type {
@@ -71,6 +73,7 @@ function row(overrides: Partial<MailboxSync> = {}): MailboxSync {
 
 function stateStub(log: StateLog): SyncStateService {
 	return {
+		listForUser: async () => [],
 		markRunning: async () => undefined,
 		settle: async (_id: string, update: Settlement) => {
 			log.settles.push(update);
@@ -461,5 +464,31 @@ describe("restoreParkedRows", () => {
 
 		expect(restored).toEqual([]);
 		expect(log.ensured).toEqual([]);
+	});
+});
+
+describe("GoogleConnectionService.onConnected", () => {
+	it("defaults auto-create off for every new source", async () => {
+		const log = emptyLog();
+		const tokens = {
+			grantedScopes: async () =>
+				new Set([SCOPE_FOR_SOURCE.calendar, SCOPE_FOR_SOURCE.gmail]),
+			refresh: async () => fresh,
+		} as unknown as MailboxTokenService;
+		const service = new GoogleConnectionService(
+			{} as never,
+			tokens,
+			stateStub(log),
+			{} as never,
+			{} as never,
+			{} as never,
+		);
+
+		await service.onConnected("user-1");
+
+		expect(log.ensured).toEqual([
+			{ source: "calendar", autoCreate: false },
+			{ source: "gmail", autoCreate: false },
+		]);
 	});
 });
