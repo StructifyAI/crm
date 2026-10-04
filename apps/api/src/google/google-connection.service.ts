@@ -89,9 +89,7 @@ export class GoogleConnectionService {
 			if (!granted.has(SCOPE_FOR_SOURCE[source])) continue;
 			if (known.has(source)) continue;
 
-			await this.state.ensure(userId, source, {
-				autoCreate: source === "calendar",
-			});
+			await this.state.ensure(userId, source, { autoCreate: false });
 
 			added.push(source);
 		}
