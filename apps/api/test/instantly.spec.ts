@@ -855,6 +855,55 @@ describe("Instantly campaign leads", () => {
 		).toBeNull();
 	});
 
+	it("keeps one campaign lead when two Instantly leads now resolve to the same contact", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const campaign = {
+			id: `campaign-merged-${suffix}`,
+			name: "Merged",
+			status: 1,
+			email_list: [],
+			sequences: [{ steps: [{ delay: 1 }] }],
+		};
+		const contact = await db.contact.create({
+			data: { firstName: "Merged", email: `merged@${domain}` },
+		});
+		await db.instantlyCampaignLead.create({
+			data: {
+				leadId: `lead-loser-${suffix}`,
+				contactId: contact.id,
+				campaignId: campaign.id,
+				campaignName: campaign.name,
+				status: 1,
+			},
+		});
+		const survivingLead = {
+			id: `lead-survivor-${suffix}`,
+			email: contact.email,
+			campaign: campaign.id,
+			status: 1,
+			email_reply_count: 2,
+		};
+		const client = {
+			listCampaigns: async () => [campaign],
+			async *listCampaignLeads() {
+				yield [survivingLead];
+			},
+		} as unknown as InstantlyClient;
+		const sync = new InstantlySyncService(db, client, filing);
+
+		expect(await sync.run()).toMatchObject({ leads: 1, error: null });
+		expect(
+			await db.instantlyCampaignLead.findMany({
+				where: { contactId: contact.id, campaignId: campaign.id },
+				select: { leadId: true, replyCount: true },
+			}),
+		).toEqual([{ leadId: survivingLead.id, replyCount: 2 }]);
+	});
+
 	it("backfills unowned contacts and preserves existing owners", async () => {
 		await db.user.upsert({
 			where: { id: existingOwnerId },

@@ -110,6 +110,13 @@ export class InstantlySyncService {
 								stepIndex === null ? -1 : stepIndex + 1
 							]?.delay,
 						);
+						await this.db.instantlyCampaignLead.deleteMany({
+							where: {
+								contactId: resolved.id,
+								campaignId: campaign.id,
+								leadId: { not: lead.id },
+							},
+						});
 						await this.db.instantlyCampaignLead.upsert({
 							where: { leadId: lead.id },
 							create: {
