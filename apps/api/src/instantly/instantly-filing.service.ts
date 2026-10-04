@@ -111,20 +111,23 @@ export class InstantlyFilingService {
 			return null;
 		const domain = email.split("@")[1] ?? "";
 		if (!domain || isMachineDomain(domain)) return null;
-		if (await suppressionReason(this.db, email, domain)) return null;
+		const [suppressed, existing] = await Promise.all([
+			suppressionReason(this.db, email, domain),
+			this.db.contact.findFirst({
+				where: { email, archivedAt: null },
+				select: { id: true, ownerId: true },
+			}),
+		]);
+		if (suppressed) return null;
+		if (existing) {
+			return { id: existing.id, created: false, ownerId: existing.ownerId };
+		}
 		const mailbox = input.mailbox
 			? await this.db.instantlyMailbox.findUnique({
 					where: { emailAccount: input.mailbox.trim().toLowerCase() },
 					select: { ownerId: true },
 				})
 			: null;
-		const existing = await this.db.contact.findFirst({
-			where: { email, archivedAt: null },
-			select: { id: true, ownerId: true },
-		});
-		if (existing) {
-			return { id: existing.id, created: false, ownerId: existing.ownerId };
-		}
 		const companyId = await this.companies.companyForEmail(email);
 		const derived = splitName(
 			[input.firstName, input.lastName].filter(Boolean).join(" ") || null,
