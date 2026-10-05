@@ -1,5 +1,6 @@
 import { DealStage, EnrichmentStatus, RecordSource } from "@crm/db";
 import { FIELD_TYPES } from "@crm/db/fields";
+import { ICP_STATUSES } from "@crm/validation/icp";
 import { z } from "zod";
 import { contactClockOutput } from "../contact-events/contact-events.contracts";
 import { bulkIdsInput } from "../crm/bulk";
@@ -12,6 +13,7 @@ export const companyListInput = listInput.extend({
 	enrichment: z.array(z.string()).default([]),
 	source: z.array(z.string()).default([]),
 	activity: activityFacetInput.default([]),
+	icp: z.array(z.string()).default([]),
 	fields: z.record(z.string(), z.array(z.string())).default({}),
 	archived: z.boolean().default(false),
 });
@@ -126,6 +128,7 @@ export const companyRowOutput = z.object({
 	industry: z.string().nullable(),
 	employeeCount: z.number().int().nullable(),
 	employeeRange: z.string().nullable(),
+	icp: z.enum(ICP_STATUSES),
 	enrichmentStatus: companyEnrichmentStatus,
 	queued: z.boolean(),
 	source: companyRecordSource,
@@ -145,7 +148,11 @@ export type CompanyRow = z.infer<typeof companyRowOutput>;
 export const companyListOutput = z.object({
 	rows: z.array(companyRowOutput),
 	total: z.number(),
-	facetCounts: z.record(z.string(), z.record(z.string(), z.number())),
+	facetCounts: z.record(z.string(), z.record(z.string(), z.number())).and(
+		z.object({
+			icp: z.record(z.enum(ICP_STATUSES), z.number()),
+		}),
+	),
 });
 
 const companyDetailContactOutput = z.object({
@@ -194,6 +201,7 @@ export const companyDetailOutput = z.object({
 	subIndustry: z.string().nullable(),
 	employeeCount: z.number().int().nullable(),
 	employeeRange: z.string().nullable(),
+	icp: z.enum(ICP_STATUSES),
 	employeeSource: z.enum(["CONTEXT_DEV", "WEB_SEARCH", "IMPORT"]).nullable(),
 	employeeSourceUrl: z.string().nullable(),
 	city: z.string().nullable(),

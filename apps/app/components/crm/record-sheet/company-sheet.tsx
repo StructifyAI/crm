@@ -447,6 +447,9 @@ function CompanyOverview({ company }: { company: Company }) {
 									</div>
 								)}
 							</DetailSheetProperty>
+							<DetailSheetProperty label="ICP">
+								{company.icp}
+							</DetailSheetProperty>
 							<DetailSheetProperty label="Est. revenue">
 								{estimatedRevenue ?? <EmptyCellValue />}
 							</DetailSheetProperty>

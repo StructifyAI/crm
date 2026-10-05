@@ -6,6 +6,7 @@ import {
 	RecordSource,
 } from "@crm/db";
 import { FIELD_ENTITIES, FIELD_TYPES } from "@crm/db/fields";
+import { ICP_STATUSES } from "@crm/validation/icp";
 import { z } from "zod";
 import { contactClockOutput } from "../contact-events/contact-events.contracts";
 import { bulkIdsInput } from "../crm/bulk";
@@ -20,6 +21,7 @@ export const contactListInput = listInput.extend({
 	seniority: z.array(z.string()).default([]),
 	persona: z.array(z.string()).default([]),
 	activity: activityFacetInput.default([]),
+	icp: z.array(z.string()).default([]),
 	fields: z.record(z.string(), z.array(z.string())).default({}),
 	archived: z.boolean().default(false),
 });
@@ -156,7 +158,11 @@ export type ContactRow = z.infer<typeof contactRowOutput>;
 export const contactListOutput = z.object({
 	rows: z.array(contactRowOutput),
 	total: z.number(),
-	facetCounts: z.record(z.string(), z.record(z.string(), z.number())),
+	facetCounts: z.record(z.string(), z.record(z.string(), z.number())).and(
+		z.object({
+			icp: z.record(z.enum(ICP_STATUSES), z.number()),
+		}),
+	),
 });
 
 const contactBriefSectionsOutput = z.object({

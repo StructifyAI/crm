@@ -13,6 +13,7 @@ import {
 	type EntityLogoTone,
 } from "@crm/ui/components/entity-logo";
 import { useTableSelection } from "@crm/ui/hooks/use-table-selection";
+import { ICP_STATUSES } from "@crm/validation/icp";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { EnrichmentIndicator } from "@/components/crm/enrichment-status";
@@ -144,6 +145,13 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		),
 	},
 	{
+		id: "icp",
+		header: "ICP",
+		width: "w-[10%]",
+		hideBelow: "lg",
+		cell: (row) => <span>{row.icp}</span>,
+	},
+	{
 		id: "lastActivity",
 		header: "Last activity",
 		sortable: true,
@@ -235,6 +243,13 @@ export function CompaniesTable() {
 			options: Object.keys(facetCounts?.industry ?? {})
 				.sort()
 				.map((value) => ({ value, label: value })),
+		},
+		{
+			id: "icp",
+			label: "ICP",
+			options: ICP_STATUSES.filter(
+				(status) => (facetCounts?.icp?.[status] ?? 0) > 0,
+			).map((status) => ({ value: status, label: status })),
 		},
 		{
 			id: "enrichment",

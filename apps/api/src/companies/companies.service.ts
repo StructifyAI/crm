@@ -7,6 +7,7 @@ import {
 } from "@crm/db";
 import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import type { FieldDefinitionWithOptions } from "@crm/db/fields";
+import { ICP_STATUSES, icpStatus } from "@crm/validation/icp";
 import {
 	BadRequestException,
 	ConflictException,
@@ -53,6 +54,14 @@ import type {
 } from "./companies.contracts";
 import { normalizeDomain } from "./domain";
 import { FaviconService } from "./favicon.service";
+import {
+	companyNaics,
+	type IcpWhereContext,
+	icpStatusCounts,
+	icpWhere,
+	loadIcpWhereContext,
+	naicsFieldIdFor,
+} from "./icp-where";
 
 const OWNER_SELECT = {
 	id: true,
@@ -92,8 +101,11 @@ export class CompaniesService {
 	) {}
 
 	async list(input: CompanyListInput): Promise<ListResult<CompanyRow>> {
-		const filterableFields = await this.fields.filterableFieldsFor("COMPANY");
-		const where = this.buildWhere(input, filterableFields);
+		const [filterableFields, icpContext] = await Promise.all([
+			this.fields.filterableFieldsFor("COMPANY"),
+			loadIcpWhereContext(this.db),
+		]);
+		const where = this.buildWhere(input, filterableFields, icpContext);
 		const { skip, take } = paginate(input);
 
 		const [rows, total, facetCounts] = await Promise.all([
@@ -116,6 +128,8 @@ export class CompaniesService {
 					industry: true,
 					employeeCount: true,
 					employeeRange: true,
+					countryCode: true,
+					...companyNaics.select(icpContext.naicsFieldId),
 					enrichmentStatus: true,
 					source: true,
 					owner: { select: OWNER_SELECT },
@@ -135,7 +149,7 @@ export class CompaniesService {
 				},
 			}),
 			this.db.company.count({ where }),
-			this.facetCounts(input, filterableFields),
+			this.facetCounts(input, filterableFields, icpContext),
 		]);
 
 		const ids = rows.map((row) => row.id);
@@ -157,6 +171,12 @@ export class CompaniesService {
 				industry: row.industry,
 				employeeCount: row.employeeCount,
 				employeeRange: row.employeeRange,
+				icp: icpStatus({
+					countryCode: row.countryCode,
+					employeeCount: row.employeeCount,
+					employeeRange: row.employeeRange,
+					naics: companyNaics.label(row.fieldValues),
+				}),
 				enrichmentStatus: row.enrichmentStatus,
 				queued: queued.has(row.id),
 				source: row.source,
@@ -182,6 +202,7 @@ export class CompaniesService {
 	}
 
 	async byId(id: string) {
+		const naicsFieldId = await naicsFieldIdFor(this.db);
 		const company = await this.db.company.findUnique({
 			where: { id },
 			select: {
@@ -200,6 +221,7 @@ export class CompaniesService {
 				subIndustry: true,
 				employeeCount: true,
 				employeeRange: true,
+				...companyNaics.select(naicsFieldId),
 				employeeSource: true,
 				employeeSourceUrl: true,
 				city: true,
@@ -271,6 +293,7 @@ export class CompaniesService {
 		const {
 			deals,
 			primaryContact,
+			fieldValues,
 			enrichedAt,
 			createdAt,
 			archivedAt,
@@ -283,6 +306,12 @@ export class CompaniesService {
 
 		return {
 			...rest,
+			icp: icpStatus({
+				countryCode: company.countryCode,
+				employeeCount: company.employeeCount,
+				employeeRange: company.employeeRange,
+				naics: companyNaics.label(fieldValues),
+			}),
 			lastContacted: serializeContactClock(lastContactedAt, lastContactedEvent),
 			lastReplied: serializeContactClock(lastRepliedAt, lastRepliedEvent),
 			unclassifiedInbound,
@@ -703,6 +732,7 @@ export class CompaniesService {
 	private buildWhere(
 		input: CompanyListInput,
 		filterableFields: FieldDefinitionWithOptions[],
+		icpContext: IcpWhereContext,
 	): Prisma.CompanyWhereInput {
 		const and: Prisma.CompanyWhereInput[] = [
 			this.searchFilter(input.q),
@@ -723,6 +753,10 @@ export class CompaniesService {
 		if (input.source.length > 0) {
 			and.push({ source: { in: input.source as RecordSource[] } });
 		}
+		const icp = ICP_STATUSES.filter((status) => input.icp.includes(status));
+		if (icp.length > 0) {
+			and.push({ OR: icp.map((status) => icpWhere(status, icpContext)) });
+		}
 
 		const activity = activityFilter(input.activity);
 		if (activity) and.push(activity);
@@ -733,38 +767,53 @@ export class CompaniesService {
 	private async facetCounts(
 		input: CompanyListInput,
 		filterableFields: FieldDefinitionWithOptions[],
+		icpContext: IcpWhereContext,
 	) {
 		const where = {
 			AND: [this.searchFilter(input.q), archivedFilter(input.archived)],
 		};
 
-		const [owners, industries, enrichment, sources, activity, fieldFacets] =
-			await Promise.all([
-				this.db.company.groupBy({
-					by: ["ownerId"],
-					where,
-					_count: { _all: true },
-				}),
-				this.db.company.groupBy({
-					by: ["industry"],
-					where,
-					_count: { _all: true },
-				}),
-				this.db.company.groupBy({
-					by: ["enrichmentStatus"],
-					where,
-					_count: { _all: true },
-				}),
-				this.db.company.groupBy({
-					by: ["source"],
-					where,
-					_count: { _all: true },
-				}),
-				activityFacetCounts((activityWhere) =>
-					this.db.company.count({ where: { AND: [where, activityWhere] } }),
+		const [
+			owners,
+			industries,
+			enrichment,
+			sources,
+			activity,
+			fieldFacets,
+			icp,
+		] = await Promise.all([
+			this.db.company.groupBy({
+				by: ["ownerId"],
+				where,
+				_count: { _all: true },
+			}),
+			this.db.company.groupBy({
+				by: ["industry"],
+				where,
+				_count: { _all: true },
+			}),
+			this.db.company.groupBy({
+				by: ["enrichmentStatus"],
+				where,
+				_count: { _all: true },
+			}),
+			this.db.company.groupBy({
+				by: ["source"],
+				where,
+				_count: { _all: true },
+			}),
+			activityFacetCounts((activityWhere) =>
+				this.db.company.count({ where: { AND: [where, activityWhere] } }),
+			),
+			this.fields.filterFacetCounts("COMPANY", where, filterableFields),
+			Promise.all(
+				ICP_STATUSES.map((status) =>
+					this.db.company.count({
+						where: { AND: [where, icpWhere(status, icpContext)] },
+					}),
 				),
-				this.fields.filterFacetCounts("COMPANY", where, filterableFields),
-			]);
+			).then(icpStatusCounts),
+		]);
 
 		return {
 			owner: countsByKey(owners, "ownerId", FACET_UNASSIGNED),
@@ -772,6 +821,7 @@ export class CompaniesService {
 			enrichment: countsByKey(enrichment, "enrichmentStatus"),
 			source: countsByKey(sources, "source"),
 			activity,
+			icp,
 			...Object.fromEntries(
 				Object.entries(fieldFacets).map(([key, counts]) => [
 					`field:${key}`,
