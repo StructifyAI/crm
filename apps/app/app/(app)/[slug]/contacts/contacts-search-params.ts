@@ -10,5 +10,6 @@ export const contactsSearchParams = createListSearchParams({
 		"seniority",
 		"persona",
 		"activity",
+		"icp",
 	] as const,
 });

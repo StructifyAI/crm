@@ -56,6 +56,14 @@ export type {
 	EveToolOutcome,
 	EveToolOutput,
 } from "./eve-tool";
+export type { IcpStatus } from "./icp";
+export {
+	employeesInIcpBand,
+	ICP_EMPLOYEES,
+	ICP_STATUSES,
+	icpStatus,
+	isManufacturingNaics,
+} from "./icp";
 export type { AuthTest, JoinPayload, OauthAccess, Reply } from "./slack";
 
 export class InvalidInput extends Error {

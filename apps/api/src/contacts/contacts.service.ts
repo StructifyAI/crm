@@ -8,6 +8,7 @@ import {
 	type RecordSource,
 } from "@crm/db";
 import type { FieldDefinitionWithOptions } from "@crm/db/fields";
+import { ICP_STATUSES } from "@crm/validation/icp";
 import {
 	ConflictException,
 	Injectable,
@@ -18,6 +19,12 @@ import { AgentQueueService } from "../agent/agent-queue.service";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ARCHIVE } from "../archive/archive-config";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
+import {
+	contactIcpWhere,
+	type IcpWhereContext,
+	icpStatusCounts,
+	loadIcpWhereContext,
+} from "../companies/icp-where";
 import type { ContactClockTargets } from "../contact-events/contact-clock.service";
 import {
 	CONTACT_CLOCK_EVENT_SELECT,
@@ -114,8 +121,11 @@ export class ContactsService {
 	) {}
 
 	async list(input: ContactListInput): Promise<ListResult<ContactRow>> {
-		const filterableFields = await this.fields.filterableFieldsFor("CONTACT");
-		const where = this.buildWhere(input, filterableFields);
+		const [filterableFields, icpContext] = await Promise.all([
+			this.fields.filterableFieldsFor("CONTACT"),
+			loadIcpWhereContext(this.db),
+		]);
+		const where = this.buildWhere(input, filterableFields, icpContext);
 		const { skip, take } = paginate(input);
 
 		const [rows, total, facetCounts] = await Promise.all([
@@ -144,7 +154,7 @@ export class ContactsService {
 				},
 			}),
 			this.db.contact.count({ where }),
-			this.facetCounts(input, filterableFields),
+			this.facetCounts(input, filterableFields, icpContext),
 		]);
 
 		const tableFields = await this.fields.tableValuesFor(
@@ -920,6 +930,7 @@ export class ContactsService {
 	private buildWhere(
 		input: ContactListInput,
 		filterableFields: FieldDefinitionWithOptions[],
+		icpContext: IcpWhereContext,
 	): Prisma.ContactWhereInput {
 		const and: Prisma.ContactWhereInput[] = [
 			this.searchFilter(input.q),
@@ -932,6 +943,12 @@ export class ContactsService {
 
 		const company = this.companyFilter(input.company);
 		if (company) and.push(company);
+		const icp = ICP_STATUSES.filter((status) => input.icp.includes(status));
+		if (icp.length > 0) {
+			and.push({
+				OR: icp.map((status) => contactIcpWhere(status, icpContext)),
+			});
+		}
 
 		if (input.source.length > 0) {
 			and.push({ source: { in: input.source as RecordSource[] } });
@@ -951,6 +968,7 @@ export class ContactsService {
 	private async facetCounts(
 		input: ContactListInput,
 		filterableFields: FieldDefinitionWithOptions[],
+		icpContext: IcpWhereContext,
 	) {
 		const where = {
 			AND: [this.searchFilter(input.q), archivedFilter(input.archived)],
@@ -965,6 +983,7 @@ export class ContactsService {
 			personas,
 			activity,
 			fieldFacets,
+			icp,
 		] = await Promise.all([
 			this.db.contact.groupBy({
 				by: ["ownerId"],
@@ -1000,6 +1019,15 @@ export class ContactsService {
 				this.db.contact.count({ where: { AND: [where, activityWhere] } }),
 			),
 			this.fields.filterFacetCounts("CONTACT", where, filterableFields),
+			Promise.all(
+				ICP_STATUSES.map((status) =>
+					this.db.contact.count({
+						where: {
+							AND: [where, contactIcpWhere(status, icpContext)],
+						},
+					}),
+				),
+			).then(icpStatusCounts),
 		]);
 
 		return {
@@ -1010,6 +1038,7 @@ export class ContactsService {
 			seniority: countsByKey(seniorities, "seniority"),
 			persona: countsByKey(personas, "function"),
 			activity,
+			icp,
 			...Object.fromEntries(
 				Object.entries(fieldFacets).map(([key, counts]) => [
 					`field:${key}`,

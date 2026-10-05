@@ -11,6 +11,7 @@ import { EmptyCellValue } from "@crm/ui/components/empty-cell";
 import { PersonAvatar } from "@crm/ui/components/person-avatar";
 import { useSearchInput } from "@crm/ui/hooks/use-search-input";
 import { useTableSelection } from "@crm/ui/hooks/use-table-selection";
+import { ICP_STATUSES } from "@crm/validation/icp";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { CompanyCell } from "@/components/crm/company-cell";
@@ -250,6 +251,13 @@ export function ContactsTable() {
 			options: ACTIVITY_FACET_OPTIONS.filter(
 				(option) => (facetCounts?.activity?.[option.value] ?? 0) > 0,
 			),
+		},
+		{
+			id: "icp",
+			label: "Company ICP",
+			options: ICP_STATUSES.filter(
+				(status) => (facetCounts?.icp?.[status] ?? 0) > 0,
+			).map((status) => ({ value: status, label: status })),
 		},
 		...fieldFacets,
 	];

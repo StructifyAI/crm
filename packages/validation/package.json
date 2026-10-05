@@ -10,6 +10,7 @@
 		"./agent-manifest": "./src/agent-manifest.ts",
 		"./calendar-sync-resume": "./src/calendar-sync-resume.ts",
 		"./company-size": "./src/company-size.ts",
+		"./icp": "./src/icp.ts",
 		"./contact-events": "./src/contact-events.ts",
 		"./deal-link": "./src/deal-link.ts",
 		"./email-recipients": "./src/email-recipients.ts",
