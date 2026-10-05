@@ -1,4 +1,5 @@
 import { db } from "@crm/db";
+import { NAICS_FIELD_KEY, recomputeCompanyIcp } from "@crm/db/company-icp";
 import type { FieldEntity, FieldType } from "@crm/db/enums";
 import {
 	attachValues,
@@ -215,7 +216,7 @@ export async function archiveField(input: {
 }): Promise<{ archived: boolean; reason?: string }> {
 	const existing = await db.fieldDefinition.findUnique({
 		where: { entity_key: { entity: input.entity, key: input.key } },
-		select: { id: true },
+		select: { id: true, entity: true, key: true },
 	});
 
 	if (!existing) {
@@ -229,6 +230,9 @@ export async function archiveField(input: {
 		where: { id: existing.id },
 		data: { archivedAt: new Date() },
 	});
+	if (existing.entity === "COMPANY" && existing.key === NAICS_FIELD_KEY) {
+		await recomputeCompanyIcp(db, {});
+	}
 
 	return { archived: true };
 }

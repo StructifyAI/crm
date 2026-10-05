@@ -9,9 +9,55 @@ import {
 
 const originalApiKey = process.env.PERPLEXITY_API_KEY;
 const companyIds: string[] = [];
+const NAICS_LABEL = "332 Fabricated Metal Product Manufacturing";
+let naicsFieldId = "";
+let naicsOptionId = "";
+let ownsNaicsField = false;
+let previousArchivedAt: Date | null = null;
+const createdOptionIds: string[] = [];
 
-beforeAll(() => {
+beforeAll(async () => {
 	process.env.PERPLEXITY_API_KEY = "test-key";
+	let field = await db.fieldDefinition.findUnique({
+		where: { entity_key: { entity: "COMPANY", key: "naics" } },
+		select: { id: true, type: true, archivedAt: true, options: true },
+	});
+	if (!field) {
+		field = await db.fieldDefinition.create({
+			data: {
+				entity: "COMPANY",
+				key: "naics",
+				label: "NAICS",
+				type: "SELECT",
+				position: 0,
+				agentFilled: false,
+				options: { create: [{ label: NAICS_LABEL, position: 0 }] },
+			},
+			select: { id: true, type: true, archivedAt: true, options: true },
+		});
+		ownsNaicsField = true;
+	} else {
+		expect(field.type).toBe("SELECT");
+		if (field.archivedAt) {
+			previousArchivedAt = field.archivedAt;
+			await db.fieldDefinition.update({
+				where: { id: field.id },
+				data: { archivedAt: null },
+			});
+		}
+	}
+	naicsFieldId = field.id;
+	let option = field.options.find(
+		(entry) => entry.label === NAICS_LABEL && entry.archivedAt === null,
+	);
+	if (!option) {
+		option = await db.fieldOption.create({
+			data: { fieldId: field.id, label: NAICS_LABEL, position: 0 },
+			select: { id: true, label: true, archivedAt: true },
+		});
+		createdOptionIds.push(option.id);
+	}
+	naicsOptionId = option.id;
 });
 
 afterEach(async () => {
@@ -21,11 +67,30 @@ afterEach(async () => {
 afterAll(async () => {
 	if (originalApiKey === undefined) delete process.env.PERPLEXITY_API_KEY;
 	else process.env.PERPLEXITY_API_KEY = originalApiKey;
+	if (ownsNaicsField) {
+		await db.fieldDefinition.deleteMany({ where: { id: naicsFieldId } });
+	} else {
+		if (createdOptionIds.length > 0) {
+			await db.fieldOption.deleteMany({
+				where: { id: { in: createdOptionIds } },
+			});
+		}
+		if (previousArchivedAt) {
+			await db.fieldDefinition.updateMany({
+				where: { id: naicsFieldId },
+				data: { archivedAt: previousArchivedAt },
+			});
+		}
+	}
 	await db.$disconnect();
 });
 
 async function createCompany(
-	input: { status?: EnrichmentStatus; domain?: string | null } = {},
+	input: {
+		status?: EnrichmentStatus;
+		domain?: string | null;
+		naics?: boolean;
+	} = {},
 ) {
 	const domain =
 		input.domain === undefined
@@ -40,6 +105,15 @@ async function createCompany(
 		select: { id: true },
 	});
 	companyIds.push(company.id);
+	if (input.naics) {
+		await db.fieldValue.create({
+			data: {
+				fieldId: naicsFieldId,
+				companyId: company.id,
+				optionId: naicsOptionId,
+			},
+		});
+	}
 	return { id: company.id, domain };
 }
 
@@ -82,7 +156,7 @@ describe("sweepCompanySize", () => {
 	});
 
 	it("fills a blank company with web-search provenance", async () => {
-		const company = await createCompany();
+		const company = await createCompany({ naics: true });
 		const result: CompanySizeLookupResult = {
 			ok: true,
 			size: {
@@ -101,6 +175,7 @@ describe("sweepCompanySize", () => {
 				employeeSource: true,
 				employeeSourceUrl: true,
 				employeeCheckedAt: true,
+				icp: true,
 			},
 		});
 
@@ -116,6 +191,7 @@ describe("sweepCompanySize", () => {
 			employeeSource: EmployeeSource.WEB_SEARCH,
 			employeeSourceUrl: "https://example.com/about",
 			employeeCheckedAt: expect.any(Date),
+			icp: "ICP",
 		});
 	});
 

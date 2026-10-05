@@ -1,3 +1,4 @@
+import { parseEmployeeRange } from "@crm/db/company-icp";
 import { REVENUE_PER_EMPLOYEE_USD } from "./company-size-config";
 
 export { REVENUE_PER_EMPLOYEE_USD };
@@ -10,25 +11,9 @@ export type RevenueEstimate = {
 export function normalizeEmployeeRange(
 	text: string | null | undefined,
 ): string | null {
-	const value = text?.trim().replaceAll(",", "");
-	if (!value) return null;
-
-	const open = /^(\d+)\s*\+$/.exec(value);
-	if (open?.[1]) {
-		const low = Number(open[1]);
-		return Number.isSafeInteger(low) ? `${low}+` : null;
-	}
-
-	const range = /^(\d+)\s*(?:-|–|to)\s*(\d+)$/i.exec(value);
-	if (!range?.[1] || !range[2]) return null;
-
-	const low = Number(range[1]);
-	const high = Number(range[2]);
-	if (!Number.isSafeInteger(low) || !Number.isSafeInteger(high) || low > high) {
-		return null;
-	}
-
-	return `${low} to ${high}`;
+	const range = parseEmployeeRange(text);
+	if (!range) return null;
+	return range.hi === Infinity ? `${range.lo}+` : `${range.lo} to ${range.hi}`;
 }
 
 export function estimateRevenue(input: {

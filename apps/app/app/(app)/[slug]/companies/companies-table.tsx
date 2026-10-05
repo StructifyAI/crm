@@ -1,6 +1,7 @@
 "use client";
 
 import Archive from "@carbon/icons-react/es/Archive";
+import { ICP_STATUSES } from "@crm/db/company-icp";
 import { Button } from "@crm/ui/components/button";
 import {
 	DataTable,
@@ -13,7 +14,6 @@ import {
 	type EntityLogoTone,
 } from "@crm/ui/components/entity-logo";
 import { useTableSelection } from "@crm/ui/hooks/use-table-selection";
-import { ICP_STATUSES } from "@crm/validation/icp";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { EnrichmentIndicator } from "@/components/crm/enrichment-status";

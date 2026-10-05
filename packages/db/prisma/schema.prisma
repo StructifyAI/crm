@@ -375,6 +375,7 @@ model Company {
   subIndustry       String?
   employeeCount     Int?
   employeeRange     String?
+  icp               String    @default("Unknown")
   employeeSource    EmployeeSource?
   employeeSourceUrl String?
   employeeCheckedAt DateTime?
@@ -431,6 +432,7 @@ model Company {
   @@index([lastContactedAt])
   @@index([lastRepliedAt])
   @@index([archivedAt])
+  @@index([icp])
   @@map("company")
 }
 

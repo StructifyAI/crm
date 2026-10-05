@@ -5,9 +5,13 @@ import {
 	Prisma as PrismaNamespace,
 	type RecordSource,
 } from "@crm/db";
+import {
+	ICP_STATUSES,
+	type IcpStatus,
+	recomputeCompanyIcp,
+} from "@crm/db/company-icp";
 import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import type { FieldDefinitionWithOptions } from "@crm/db/fields";
-import { ICP_STATUSES, icpStatus } from "@crm/validation/icp";
 import {
 	BadRequestException,
 	ConflictException,
@@ -54,14 +58,6 @@ import type {
 } from "./companies.contracts";
 import { normalizeDomain } from "./domain";
 import { FaviconService } from "./favicon.service";
-import {
-	companyNaics,
-	type IcpWhereContext,
-	icpStatusCounts,
-	icpWhere,
-	loadIcpWhereContext,
-	naicsFieldIdFor,
-} from "./icp-where";
 
 const OWNER_SELECT = {
 	id: true,
@@ -101,11 +97,8 @@ export class CompaniesService {
 	) {}
 
 	async list(input: CompanyListInput): Promise<ListResult<CompanyRow>> {
-		const [filterableFields, icpContext] = await Promise.all([
-			this.fields.filterableFieldsFor("COMPANY"),
-			loadIcpWhereContext(this.db),
-		]);
-		const where = this.buildWhere(input, filterableFields, icpContext);
+		const filterableFields = await this.fields.filterableFieldsFor("COMPANY");
+		const where = this.buildWhere(input, filterableFields);
 		const { skip, take } = paginate(input);
 
 		const [rows, total, facetCounts] = await Promise.all([
@@ -128,8 +121,7 @@ export class CompaniesService {
 					industry: true,
 					employeeCount: true,
 					employeeRange: true,
-					countryCode: true,
-					...companyNaics.select(icpContext.naicsFieldId),
+					icp: true,
 					enrichmentStatus: true,
 					source: true,
 					owner: { select: OWNER_SELECT },
@@ -149,7 +141,7 @@ export class CompaniesService {
 				},
 			}),
 			this.db.company.count({ where }),
-			this.facetCounts(input, filterableFields, icpContext),
+			this.facetCounts(input, filterableFields),
 		]);
 
 		const ids = rows.map((row) => row.id);
@@ -171,12 +163,7 @@ export class CompaniesService {
 				industry: row.industry,
 				employeeCount: row.employeeCount,
 				employeeRange: row.employeeRange,
-				icp: icpStatus({
-					countryCode: row.countryCode,
-					employeeCount: row.employeeCount,
-					employeeRange: row.employeeRange,
-					naics: companyNaics.label(row.fieldValues),
-				}),
+				icp: row.icp as IcpStatus,
 				enrichmentStatus: row.enrichmentStatus,
 				queued: queued.has(row.id),
 				source: row.source,
@@ -202,7 +189,6 @@ export class CompaniesService {
 	}
 
 	async byId(id: string) {
-		const naicsFieldId = await naicsFieldIdFor(this.db);
 		const company = await this.db.company.findUnique({
 			where: { id },
 			select: {
@@ -221,7 +207,7 @@ export class CompaniesService {
 				subIndustry: true,
 				employeeCount: true,
 				employeeRange: true,
-				...companyNaics.select(naicsFieldId),
+				icp: true,
 				employeeSource: true,
 				employeeSourceUrl: true,
 				city: true,
@@ -293,7 +279,7 @@ export class CompaniesService {
 		const {
 			deals,
 			primaryContact,
-			fieldValues,
+			icp,
 			enrichedAt,
 			createdAt,
 			archivedAt,
@@ -306,12 +292,7 @@ export class CompaniesService {
 
 		return {
 			...rest,
-			icp: icpStatus({
-				countryCode: company.countryCode,
-				employeeCount: company.employeeCount,
-				employeeRange: company.employeeRange,
-				naics: companyNaics.label(fieldValues),
-			}),
+			icp: icp as IcpStatus,
 			lastContacted: serializeContactClock(lastContactedAt, lastContactedEvent),
 			lastReplied: serializeContactClock(lastRepliedAt, lastRepliedEvent),
 			unclassifiedInbound,
@@ -368,6 +349,7 @@ export class CompaniesService {
 				},
 				select: { id: true, name: true, domain: true, createdAt: true },
 			});
+			await recomputeCompanyIcp(tx, { id: created.id });
 			await emit({
 				type: "company.created",
 				record: { kind: "company", id: created.id },
@@ -732,7 +714,6 @@ export class CompaniesService {
 	private buildWhere(
 		input: CompanyListInput,
 		filterableFields: FieldDefinitionWithOptions[],
-		icpContext: IcpWhereContext,
 	): Prisma.CompanyWhereInput {
 		const and: Prisma.CompanyWhereInput[] = [
 			this.searchFilter(input.q),
@@ -755,7 +736,7 @@ export class CompaniesService {
 		}
 		const icp = ICP_STATUSES.filter((status) => input.icp.includes(status));
 		if (icp.length > 0) {
-			and.push({ OR: icp.map((status) => icpWhere(status, icpContext)) });
+			and.push({ icp: { in: icp } });
 		}
 
 		const activity = activityFilter(input.activity);
@@ -767,7 +748,6 @@ export class CompaniesService {
 	private async facetCounts(
 		input: CompanyListInput,
 		filterableFields: FieldDefinitionWithOptions[],
-		icpContext: IcpWhereContext,
 	) {
 		const where = {
 			AND: [this.searchFilter(input.q), archivedFilter(input.archived)],
@@ -780,7 +760,7 @@ export class CompaniesService {
 			sources,
 			activity,
 			fieldFacets,
-			icp,
+			icpGroups,
 		] = await Promise.all([
 			this.db.company.groupBy({
 				by: ["ownerId"],
@@ -806,14 +786,18 @@ export class CompaniesService {
 				this.db.company.count({ where: { AND: [where, activityWhere] } }),
 			),
 			this.fields.filterFacetCounts("COMPANY", where, filterableFields),
-			Promise.all(
-				ICP_STATUSES.map((status) =>
-					this.db.company.count({
-						where: { AND: [where, icpWhere(status, icpContext)] },
-					}),
-				),
-			).then(icpStatusCounts),
+			this.db.company.groupBy({
+				by: ["icp"],
+				where,
+				_count: { _all: true },
+			}),
 		]);
+		const icp = Object.fromEntries(
+			ICP_STATUSES.map((status) => [
+				status,
+				icpGroups.find((group) => group.icp === status)?._count._all ?? 0,
+			]),
+		) as Record<IcpStatus, number>;
 
 		return {
 			owner: countsByKey(owners, "ownerId", FACET_UNASSIGNED),

@@ -1,4 +1,5 @@
 import { db, EnrichmentStatus } from "@crm/db";
+import { recomputeCompanyIcp } from "@crm/db/company-icp";
 import { mirrorBrandImages } from "./brand-images";
 import { brandToUpdate, filledFields, stillFillable } from "./brand-mapping";
 import { brandByDomain, contextDevEnabled } from "./context-dev";
@@ -128,6 +129,7 @@ export async function runBrand({
 				enrichmentError: null,
 			},
 		});
+		await recomputeCompanyIcp(tx, { id: companyId });
 
 		await tx.companyEnrichment.upsert({
 			where: { companyId },

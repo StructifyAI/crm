@@ -1,5 +1,6 @@
 import { mirror } from "../src/blob";
 import { db } from "../src/client";
+import { recomputeCompanyIcp } from "../src/company-icp";
 import { DEFAULT_REPORTING_CURRENCY } from "../src/currency";
 import { resolveFavicon } from "../src/favicon";
 import { fieldKeyFromLabel } from "../src/fields-shape";
@@ -1002,6 +1003,7 @@ async function main() {
 	const activities = await seedActivities(companies, contacts, deals, ownerIds);
 	const companyFields = await seedCompanyFields();
 	await seedCompanyFieldValues(companyFields, companies, ownerIds);
+	await recomputeCompanyIcp(db, {});
 
 	console.log(
 		`Seeded ${companies.length} companies, ${contacts.length} contacts, ` +
