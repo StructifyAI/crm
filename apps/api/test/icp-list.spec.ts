@@ -66,6 +66,7 @@ const companyIds = {
 	notNaics: "",
 	unknown: "",
 	updated: "",
+	countryUpdate: "",
 };
 const contactIds = {
 	icp: "",
@@ -144,14 +145,20 @@ async function makeCompany(
 		naics?: string;
 		employeeRange?: string | null;
 		employeeCount?: number | null;
+		country?: string | null;
+		countryCode?: string | null;
+		name?: string;
+		domain?: string;
 	} = {},
 ): Promise<string> {
 	const company = await db.company.create({
 		data: {
-			name: `${marker} ${key}`,
-			domain: `${key}-${domain}`,
+			name: input.name ?? `${marker} ${key}`,
+			domain: input.domain ?? `${key}-${domain}`,
 			employeeRange: input.employeeRange ?? null,
 			employeeCount: input.employeeCount ?? null,
+			country: input.country ?? null,
+			countryCode: input.countryCode ?? null,
 		},
 		select: { id: true },
 	});
@@ -224,6 +231,7 @@ beforeAll(async () => {
 		naics: manufacturingLabel,
 		employeeRange: "51 to 200",
 		employeeCount: 3000,
+		countryCode: "US",
 	});
 	companyIds.notIcp = await makeCompany("not-icp", {
 		naics: manufacturingLabel,
@@ -236,11 +244,20 @@ beforeAll(async () => {
 		employeeCount: 100,
 	});
 	companyIds.unknown = await makeCompany("unknown");
+	companyIds.countryUpdate = await makeCompany("country-update", {
+		naics: manufacturingLabel,
+		employeeRange: "51 to 200",
+		employeeCount: 3000,
+		country: "United States",
+		name: `Country ICP ${suffix}`,
+		domain: `${randomUUID()}-country-icp.test`,
+	});
 	const writeCompany = await db.company.create({
 		data: {
 			name: `ICP write ${suffix}`,
 			domain: `${randomUUID()}-${suffix}.icp-write.test`,
 			employeeCount: 100,
+			countryCode: "US",
 		},
 		select: { id: true },
 	});
@@ -362,6 +379,18 @@ describe("stored ICP list filters", () => {
 		});
 		saved = await db.company.findUniqueOrThrow({
 			where: { id: companyIds.updated },
+			select: { icp: true },
+		});
+		expect(saved.icp).toBe("Not ICP");
+	});
+
+	it("recomputes stored ICP when a company country changes", async () => {
+		expect((await companies.byId(companyIds.countryUpdate)).icp).toBe("ICP");
+
+		await companies.update(companyIds.countryUpdate, { country: "Germany" });
+
+		const saved = await db.company.findUniqueOrThrow({
+			where: { id: companyIds.countryUpdate },
 			select: { icp: true },
 		});
 		expect(saved.icp).toBe("Not ICP");
