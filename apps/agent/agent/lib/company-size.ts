@@ -1,4 +1,5 @@
 import { db, EnrichmentStatus } from "@crm/db";
+import { recomputeCompanyIcp } from "@crm/db/company-icp";
 import { normalizeEmployeeRange } from "@crm/validation/company-size";
 import { z } from "zod";
 import { DISPATCH } from "./dispatch-config";
@@ -190,6 +191,9 @@ export async function sweepCompanySize(
 					employeeSourceUrl: httpUrl(result.size.sourceUrl),
 				},
 			});
+			if (filled.count > 0) {
+				await recomputeCompanyIcp(db, { id: company.id });
+			}
 			summary.filled += filled.count;
 		},
 	);

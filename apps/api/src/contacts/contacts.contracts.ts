@@ -5,8 +5,8 @@ import {
 	FactStatus,
 	RecordSource,
 } from "@crm/db";
+import { ICP_STATUSES } from "@crm/db/company-icp";
 import { FIELD_ENTITIES, FIELD_TYPES } from "@crm/db/fields";
-import { ICP_STATUSES } from "@crm/validation/icp";
 import { z } from "zod";
 import { contactClockOutput } from "../contact-events/contact-events.contracts";
 import { bulkIdsInput } from "../crm/bulk";

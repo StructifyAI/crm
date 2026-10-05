@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { db } from "@crm/db";
+import { recomputeCompanyIcp } from "@crm/db/company-icp";
 import { AgentQueueService } from "../src/agent/agent-queue.service";
 import { AgentTriggerService } from "../src/agent/agent-trigger.service";
-import { companyListInput } from "../src/companies/companies.contracts";
+import {
+	companyListInput,
+	companyUpdateArgs,
+} from "../src/companies/companies.contracts";
 import { CompaniesService } from "../src/companies/companies.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import type { FaviconService } from "../src/companies/favicon.service";
@@ -15,11 +20,11 @@ import { withDiscardedCrmEvents } from "./agent-trigger.stub";
 import { noContactEvents } from "./contact-events.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "api-spec";
-const marker = `computed-icp-${suffix}`;
+const marker = `stored-icp-${suffix}`;
 const domain = `${marker}.test`;
-const fieldKey = "naics";
+const naicsKey = "naics";
 const manufacturingLabel = "332 Fabricated Metal Product Manufacturing";
-const nonManufacturingLabel = "42 Wholesale Trade";
+const wholesaleLabel = "42 Wholesale Trade";
 
 const agent = {
 	contactCreated: async () => true,
@@ -51,25 +56,27 @@ const contacts = new ContactsService(
 	noContactEvents,
 );
 
-let naicsFieldId: string;
+let naicsFieldId = "";
 let ownsNaicsField = false;
 let previousArchivedAt: Date | null = null;
 const createdOptionIds: string[] = [];
 const companyIds = {
 	icp: "",
-	nonUs: "",
-	nonManufacturing: "",
+	notIcp: "",
+	notNaics: "",
 	unknown: "",
+	updated: "",
 };
 const contactIds = {
 	icp: "",
-	nonIcp: "",
-	unknown: "",
+	notIcp: "",
+	unknownCompany: "",
+	unassigned: "",
 };
 
 async function seedNaics() {
 	let field = await db.fieldDefinition.findUnique({
-		where: { entity_key: { entity: "COMPANY", key: fieldKey } },
+		where: { entity_key: { entity: "COMPANY", key: naicsKey } },
 		select: { id: true, type: true, archivedAt: true, options: true },
 	});
 
@@ -77,7 +84,7 @@ async function seedNaics() {
 		field = await db.fieldDefinition.create({
 			data: {
 				entity: "COMPANY",
-				key: fieldKey,
+				key: naicsKey,
 				label: "NAICS",
 				type: "SELECT",
 				position: 0,
@@ -85,7 +92,7 @@ async function seedNaics() {
 				options: {
 					create: [
 						{ label: manufacturingLabel, position: 0 },
-						{ label: nonManufacturingLabel, position: 1 },
+						{ label: wholesaleLabel, position: 1 },
 					],
 				},
 			},
@@ -106,9 +113,15 @@ async function seedNaics() {
 	naicsFieldId = field.id;
 	for (const [position, label] of [
 		manufacturingLabel,
-		nonManufacturingLabel,
+		wholesaleLabel,
 	].entries()) {
-		if (field.options.some((option) => option.label === label)) continue;
+		if (
+			field.options.some(
+				(option) => option.label === label && option.archivedAt === null,
+			)
+		) {
+			continue;
+		}
 		const option = await db.fieldOption.create({
 			data: { fieldId: field.id, label, position },
 			select: { id: true },
@@ -117,35 +130,43 @@ async function seedNaics() {
 	}
 }
 
+async function optionId(label: string): Promise<string> {
+	const option = await db.fieldOption.findFirstOrThrow({
+		where: { fieldId: naicsFieldId, label, archivedAt: null },
+		select: { id: true },
+	});
+	return option.id;
+}
+
 async function makeCompany(
 	key: string,
-	countryCode: string | null,
-	naicsLabel?: string,
+	input: {
+		naics?: string;
+		employeeRange?: string | null;
+		employeeCount?: number | null;
+	} = {},
 ): Promise<string> {
 	const company = await db.company.create({
 		data: {
 			name: `${marker} ${key}`,
 			domain: `${key}-${domain}`,
-			countryCode,
-			employeeCount: 100,
+			employeeRange: input.employeeRange ?? null,
+			employeeCount: input.employeeCount ?? null,
 		},
 		select: { id: true },
 	});
 
-	if (naicsLabel) {
-		const option = await db.fieldOption.findFirstOrThrow({
-			where: { fieldId: naicsFieldId, label: naicsLabel },
-			select: { id: true },
-		});
+	if (input.naics) {
 		await db.fieldValue.create({
 			data: {
 				fieldId: naicsFieldId,
 				companyId: company.id,
-				optionId: option.id,
+				optionId: await optionId(input.naics),
 			},
 		});
 	}
 
+	await recomputeCompanyIcp(db, { id: company.id });
 	return company.id;
 }
 
@@ -165,16 +186,21 @@ async function makeContact(
 }
 
 async function clean() {
+	const ids = Object.values(companyIds).filter(Boolean);
 	await db.contact.deleteMany({
 		where: { email: { contains: marker } },
 	});
 	await db.company.deleteMany({
-		where: { domain: { endsWith: domain } },
+		where: {
+			OR: [
+				{ id: { in: ids } },
+				{ domain: { endsWith: domain } },
+				{ domain: { endsWith: `${suffix}.icp-write.test` } },
+			],
+		},
 	});
 	if (ownsNaicsField) {
-		await db.fieldDefinition.deleteMany({
-			where: { id: naicsFieldId },
-		});
+		await db.fieldDefinition.deleteMany({ where: { id: naicsFieldId } });
 	} else {
 		if (createdOptionIds.length > 0) {
 			await db.fieldOption.deleteMany({
@@ -194,24 +220,45 @@ beforeAll(async () => {
 	await clean();
 	await seedNaics();
 
-	companyIds.icp = await makeCompany("icp", "US", manufacturingLabel);
-	companyIds.nonUs = await makeCompany("non-us", "CA");
-	companyIds.nonManufacturing = await makeCompany(
-		"non-manufacturing",
-		"US",
-		nonManufacturingLabel,
-	);
-	companyIds.unknown = await makeCompany("unknown", "US");
+	companyIds.icp = await makeCompany("icp", {
+		naics: manufacturingLabel,
+		employeeRange: "51 to 200",
+		employeeCount: 3000,
+	});
+	companyIds.notIcp = await makeCompany("not-icp", {
+		naics: manufacturingLabel,
+		employeeRange: "10 to 49",
+		employeeCount: 100,
+	});
+	companyIds.notNaics = await makeCompany("not-naics", {
+		naics: wholesaleLabel,
+		employeeRange: "51 to 200",
+		employeeCount: 100,
+	});
+	companyIds.unknown = await makeCompany("unknown");
+	const writeCompany = await db.company.create({
+		data: {
+			name: `ICP write ${suffix}`,
+			domain: `${randomUUID()}-${suffix}.icp-write.test`,
+			employeeCount: 100,
+		},
+		select: { id: true },
+	});
+	companyIds.updated = writeCompany.id;
 
 	contactIds.icp = await makeContact("icp-contact", companyIds.icp);
-	contactIds.nonIcp = await makeContact("non-icp-contact", companyIds.nonUs);
-	contactIds.unknown = await makeContact("unknown-contact", null);
+	contactIds.notIcp = await makeContact("not-icp-contact", companyIds.notIcp);
+	contactIds.unknownCompany = await makeContact(
+		"unknown-company-contact",
+		companyIds.unknown,
+	);
+	contactIds.unassigned = await makeContact("unassigned-contact", null);
 });
 
 afterAll(clean);
 
-describe("computed ICP list filters", () => {
-	it("filters companies and counts each computed status", async () => {
+describe("stored ICP list filters", () => {
+	it("filters companies by stored ICP and counts each stored status", async () => {
 		const result = await companies.list(
 			companyListInput.parse({
 				q: marker,
@@ -227,9 +274,10 @@ describe("computed ICP list filters", () => {
 			"Not ICP": 2,
 			Unknown: 1,
 		});
+		expect((await companies.byId(companyIds.icp)).icp).toBe("ICP");
 	});
 
-	it("treats non-US and non-manufacturing companies as not ICP", async () => {
+	it("filters companies with a non-ICP stored status", async () => {
 		const result = await companies.list(
 			companyListInput.parse({
 				q: marker,
@@ -239,11 +287,11 @@ describe("computed ICP list filters", () => {
 		);
 
 		expect(result.rows.map((row) => row.id).sort()).toEqual(
-			[companyIds.nonUs, companyIds.nonManufacturing].sort(),
+			[companyIds.notIcp, companyIds.notNaics].sort(),
 		);
 	});
 
-	it("treats missing NAICS as unknown", async () => {
+	it("filters companies with an unknown stored status", async () => {
 		const result = await companies.list(
 			companyListInput.parse({
 				q: marker,
@@ -256,7 +304,22 @@ describe("computed ICP list filters", () => {
 		expect(result.rows[0]?.icp).toBe("Unknown");
 	});
 
-	it("filters contacts through company ICP and counts unassigned contacts as unknown", async () => {
+	it("returns no changes when recomputing stored statuses again", async () => {
+		const changes = await recomputeCompanyIcp(db, {
+			id: {
+				in: [
+					companyIds.icp,
+					companyIds.notIcp,
+					companyIds.notNaics,
+					companyIds.unknown,
+				],
+			},
+		});
+
+		expect(changes).toEqual([]);
+	});
+
+	it("filters contacts by company ICP and includes unassigned contacts as unknown", async () => {
 		const result = await contacts.list(
 			contactListInput.parse({
 				q: marker,
@@ -269,7 +332,7 @@ describe("computed ICP list filters", () => {
 		expect(result.facetCounts.icp).toEqual({
 			ICP: 1,
 			"Not ICP": 1,
-			Unknown: 1,
+			Unknown: 2,
 		});
 
 		const unknown = await contacts.list(
@@ -279,6 +342,41 @@ describe("computed ICP list filters", () => {
 				pageSize: 100,
 			}),
 		);
-		expect(unknown.rows.map((row) => row.id)).toEqual([contactIds.unknown]);
+		expect(unknown.rows.map((row) => row.id).sort()).toEqual(
+			[contactIds.unknownCompany, contactIds.unassigned].sort(),
+		);
+	});
+
+	it("recomputes stored ICP when a company NAICS field changes", async () => {
+		await companies.update(companyIds.updated, {
+			fields: { naics: await optionId(manufacturingLabel) },
+		});
+		let saved = await db.company.findUniqueOrThrow({
+			where: { id: companyIds.updated },
+			select: { icp: true },
+		});
+		expect(saved.icp).toBe("ICP");
+
+		await companies.update(companyIds.updated, {
+			fields: { naics: await optionId(wholesaleLabel) },
+		});
+		saved = await db.company.findUniqueOrThrow({
+			where: { id: companyIds.updated },
+			select: { icp: true },
+		});
+		expect(saved.icp).toBe("Not ICP");
+	});
+
+	it("rejects a direct ICP update and a custom ICP field write", async () => {
+		expect(() =>
+			companyUpdateArgs.parse({
+				id: companyIds.updated,
+				data: { icp: "ICP" },
+			}),
+		).toThrow("ICP is computed from NAICS and headcount and can't be set.");
+
+		await expect(
+			companies.update(companyIds.updated, { fields: { icp: "ICP" } }),
+		).rejects.toThrow();
 	});
 });

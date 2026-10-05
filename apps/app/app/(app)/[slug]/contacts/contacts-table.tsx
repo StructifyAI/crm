@@ -1,6 +1,7 @@
 "use client";
 
 import Archive from "@carbon/icons-react/es/Archive";
+import { ICP_STATUSES } from "@crm/db/company-icp";
 import { Button } from "@crm/ui/components/button";
 import {
 	DataTable,
@@ -11,7 +12,6 @@ import { EmptyCellValue } from "@crm/ui/components/empty-cell";
 import { PersonAvatar } from "@crm/ui/components/person-avatar";
 import { useSearchInput } from "@crm/ui/hooks/use-search-input";
 import { useTableSelection } from "@crm/ui/hooks/use-table-selection";
-import { ICP_STATUSES } from "@crm/validation/icp";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { CompanyCell } from "@/components/crm/company-cell";

@@ -1,3 +1,4 @@
+import { NAICS_FIELD_KEY, recomputeCompanyIcp } from "./company-icp";
 import {
 	columnFor,
 	FieldValueError,
@@ -311,7 +312,10 @@ export function attachValues(
 		});
 }
 
-export type FieldWriter = {
+export type FieldWriter = Pick<
+	Prisma.TransactionClient,
+	"company" | "$executeRaw"
+> & {
 	fieldValue: {
 		deleteMany(args: { where: Record<string, unknown> }): Promise<unknown>;
 		upsert(args: {
@@ -396,6 +400,13 @@ export async function writeValues(
 			create: { fieldId: definition.id, [column]: recordId, ...data },
 			update: data,
 		});
+	}
+
+	if (
+		entity === "COMPANY" &&
+		writes.some(({ definition }) => definition.key === NAICS_FIELD_KEY)
+	) {
+		await recomputeCompanyIcp(tx, { id: recordId });
 	}
 }
 

@@ -1,4 +1,5 @@
 import { EnrichmentStatus } from "@crm/db";
+import { recomputeCompanyIcp } from "@crm/db/company-icp";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
@@ -35,6 +36,7 @@ export class CompanyDirectoryService {
 				},
 				select: { id: true, name: true, domain: true, createdAt: true },
 			});
+			await recomputeCompanyIcp(tx, { id: company.id });
 			await emit({
 				type: "company.created",
 				record: { kind: "company", id: company.id },

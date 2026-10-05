@@ -1,6 +1,6 @@
 import { DealStage, EnrichmentStatus, RecordSource } from "@crm/db";
+import { ICP_STATUSES } from "@crm/db/company-icp";
 import { FIELD_TYPES } from "@crm/db/fields";
-import { ICP_STATUSES } from "@crm/validation/icp";
 import { z } from "zod";
 import { contactClockOutput } from "../contact-events/contact-events.contracts";
 import { bulkIdsInput } from "../crm/bulk";
@@ -44,6 +44,11 @@ const companyUpdateInput = z.object({
 	phone: z.string().optional(),
 	email: z.string().optional(),
 	linkedinUrl: z.string().optional(),
+	icp: z
+		.never({
+			error: "ICP is computed from NAICS and headcount and can't be set.",
+		})
+		.optional(),
 	ownerId: z.string().nullable().optional(),
 	fields: recordFieldValues.optional(),
 });

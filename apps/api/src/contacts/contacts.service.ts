@@ -7,8 +7,8 @@ import {
 	Prisma as PrismaNamespace,
 	type RecordSource,
 } from "@crm/db";
+import { ICP_STATUSES, type IcpStatus } from "@crm/db/company-icp";
 import type { FieldDefinitionWithOptions } from "@crm/db/fields";
-import { ICP_STATUSES } from "@crm/validation/icp";
 import {
 	ConflictException,
 	Injectable,
@@ -19,12 +19,6 @@ import { AgentQueueService } from "../agent/agent-queue.service";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ARCHIVE } from "../archive/archive-config";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
-import {
-	contactIcpWhere,
-	type IcpWhereContext,
-	icpStatusCounts,
-	loadIcpWhereContext,
-} from "../companies/icp-where";
 import type { ContactClockTargets } from "../contact-events/contact-clock.service";
 import {
 	CONTACT_CLOCK_EVENT_SELECT,
@@ -82,6 +76,13 @@ const COMPANY_SELECT = {
 
 const NO_COMPANY = "none";
 
+function contactIcpFilter(status: IcpStatus): Prisma.ContactWhereInput {
+	if (status === "Unknown") {
+		return { OR: [{ company: { icp: status } }, { companyId: null }] };
+	}
+	return { company: { icp: status } };
+}
+
 type FactColumns = Record<string, string | undefined>;
 
 const FACT_COLUMNS: FactColumns = {
@@ -121,11 +122,8 @@ export class ContactsService {
 	) {}
 
 	async list(input: ContactListInput): Promise<ListResult<ContactRow>> {
-		const [filterableFields, icpContext] = await Promise.all([
-			this.fields.filterableFieldsFor("CONTACT"),
-			loadIcpWhereContext(this.db),
-		]);
-		const where = this.buildWhere(input, filterableFields, icpContext);
+		const filterableFields = await this.fields.filterableFieldsFor("CONTACT");
+		const where = this.buildWhere(input, filterableFields);
 		const { skip, take } = paginate(input);
 
 		const [rows, total, facetCounts] = await Promise.all([
@@ -154,7 +152,7 @@ export class ContactsService {
 				},
 			}),
 			this.db.contact.count({ where }),
-			this.facetCounts(input, filterableFields, icpContext),
+			this.facetCounts(input, filterableFields),
 		]);
 
 		const tableFields = await this.fields.tableValuesFor(
@@ -930,7 +928,6 @@ export class ContactsService {
 	private buildWhere(
 		input: ContactListInput,
 		filterableFields: FieldDefinitionWithOptions[],
-		icpContext: IcpWhereContext,
 	): Prisma.ContactWhereInput {
 		const and: Prisma.ContactWhereInput[] = [
 			this.searchFilter(input.q),
@@ -946,7 +943,10 @@ export class ContactsService {
 		const icp = ICP_STATUSES.filter((status) => input.icp.includes(status));
 		if (icp.length > 0) {
 			and.push({
-				OR: icp.map((status) => contactIcpWhere(status, icpContext)),
+				OR: [
+					{ company: { icp: { in: icp } } },
+					...(icp.includes("Unknown") ? [{ companyId: null }] : []),
+				],
 			});
 		}
 
@@ -968,7 +968,6 @@ export class ContactsService {
 	private async facetCounts(
 		input: ContactListInput,
 		filterableFields: FieldDefinitionWithOptions[],
-		icpContext: IcpWhereContext,
 	) {
 		const where = {
 			AND: [this.searchFilter(input.q), archivedFilter(input.archived)],
@@ -983,7 +982,7 @@ export class ContactsService {
 			personas,
 			activity,
 			fieldFacets,
-			icp,
+			icpCounts,
 		] = await Promise.all([
 			this.db.contact.groupBy({
 				by: ["ownerId"],
@@ -1020,15 +1019,18 @@ export class ContactsService {
 			),
 			this.fields.filterFacetCounts("CONTACT", where, filterableFields),
 			Promise.all(
-				ICP_STATUSES.map((status) =>
+				ICP_STATUSES.map((status: IcpStatus) =>
 					this.db.contact.count({
 						where: {
-							AND: [where, contactIcpWhere(status, icpContext)],
+							AND: [where, contactIcpFilter(status)],
 						},
 					}),
 				),
-			).then(icpStatusCounts),
+			),
 		]);
+		const icp = Object.fromEntries(
+			ICP_STATUSES.map((status, index) => [status, icpCounts[index] ?? 0]),
+		) as Record<IcpStatus, number>;
 
 		return {
 			owner: countsByKey(owners, "ownerId", FACET_UNASSIGNED),

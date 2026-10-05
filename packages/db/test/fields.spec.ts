@@ -218,7 +218,7 @@ describe("coerceValue", () => {
 
 	it("deletes a multi-select value when the selection is cleared", async () => {
 		const deleted: unknown[] = [];
-		const writer: FieldWriter = {
+		const writer = {
 			fieldValue: {
 				deleteMany: async (args) => {
 					deleted.push(args);
@@ -229,7 +229,7 @@ describe("coerceValue", () => {
 				},
 			},
 			user: { findMany: async () => [] },
-		};
+		} as unknown as FieldWriter;
 
 		await writeValues(
 			writer,

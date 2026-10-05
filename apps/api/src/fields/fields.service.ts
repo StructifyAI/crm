@@ -4,6 +4,7 @@ import {
 	type Prisma,
 	Prisma as PrismaNamespace,
 } from "@crm/db";
+import { NAICS_FIELD_KEY, recomputeCompanyIcp } from "@crm/db/company-icp";
 import {
 	attachValues,
 	FIELD_VALUE_OPTIONS_INCLUDE,
@@ -222,6 +223,13 @@ export class FieldsService {
 				include: WITH_OPTIONS,
 			});
 		});
+		if (
+			data.options !== undefined &&
+			existing.entity === "COMPANY" &&
+			existing.key === NAICS_FIELD_KEY
+		) {
+			await recomputeCompanyIcp(this.db, {});
+		}
 
 		const briefChanged =
 			data.agentBrief !== undefined && data.agentBrief !== existing.agentBrief;
@@ -277,6 +285,12 @@ export class FieldsService {
 				data: { archivedAt: new Date() },
 				include: WITH_OPTIONS,
 			});
+			if (
+				definition.entity === "COMPANY" &&
+				definition.key === NAICS_FIELD_KEY
+			) {
+				await recomputeCompanyIcp(this.db, {});
+			}
 
 			return serializeField(definition);
 		} catch (error) {
@@ -291,6 +305,12 @@ export class FieldsService {
 				data: { archivedAt: null },
 				include: WITH_OPTIONS,
 			});
+			if (
+				definition.entity === "COMPANY" &&
+				definition.key === NAICS_FIELD_KEY
+			) {
+				await recomputeCompanyIcp(this.db, {});
+			}
 
 			return serializeField(definition);
 		} catch (error) {
@@ -300,7 +320,17 @@ export class FieldsService {
 
 	async delete(id: string): Promise<{ id: string }> {
 		try {
+			const definition = await this.db.fieldDefinition.findUnique({
+				where: { id },
+				select: { entity: true, key: true },
+			});
 			await this.db.fieldDefinition.delete({ where: { id } });
+			if (
+				definition?.entity === "COMPANY" &&
+				definition.key === NAICS_FIELD_KEY
+			) {
+				await recomputeCompanyIcp(this.db, {});
+			}
 		} catch (error) {
 			throw this.translate(error);
 		}
