@@ -11,6 +11,7 @@ import {
 	TooltipTrigger,
 } from "@crm/ui/components/tooltip";
 import { useQuery } from "@tanstack/react-query";
+import { InlineMultiSelectField } from "@/components/crm/fields/multi-select-field";
 import {
 	InlineDateField,
 	InlineField,
@@ -24,7 +25,7 @@ import {
 import { DetailSheetProperty } from "@/components/detail-sheet";
 import { useTRPC } from "@/lib/trpc/client";
 
-type RecordFieldOption = { id: string; label: string };
+type RecordFieldOption = { id: string; label: string; archived?: boolean };
 
 export type RecordFieldEntry = {
 	id: string;
@@ -147,6 +148,19 @@ export function RecordFields({
 								]}
 								saving={busy}
 								onSave={(next) => save(next === NONE ? null : next)}
+							/>
+						);
+					}
+
+					if (field.type === "MULTI_SELECT") {
+						return (
+							<InlineMultiSelectField
+								key={field.id}
+								label={field.label}
+								value={Array.isArray(field.value) ? field.value : []}
+								options={field.options}
+								saving={busy}
+								onSave={save}
 							/>
 						);
 					}

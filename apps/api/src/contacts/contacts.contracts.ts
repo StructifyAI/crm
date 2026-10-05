@@ -9,7 +9,10 @@ import { FIELD_ENTITIES, FIELD_TYPES } from "@crm/db/fields";
 import { z } from "zod";
 import { contactClockOutput } from "../contact-events/contact-events.contracts";
 import { bulkIdsInput } from "../crm/bulk";
-import { recordFieldValues } from "../fields/fields.contracts";
+import {
+	recordFieldTableValuesOutput,
+	recordFieldValues,
+} from "../fields/fields.contracts";
 import { activityFacetInput, listInput } from "../trpc/list-input";
 
 export const contactListInput = listInput.extend({
@@ -86,6 +89,7 @@ const fieldValueOutput = z.union([
 	z.string(),
 	z.number(),
 	z.boolean(),
+	z.array(z.string()),
 	z.null(),
 ]);
 
@@ -93,6 +97,7 @@ const fieldOptionOutput = z.object({
 	id: z.string(),
 	label: z.string(),
 	position: z.number(),
+	archived: z.boolean().optional(),
 });
 
 const recordFieldOutput = z.object({
@@ -148,7 +153,7 @@ export const contactRowOutput = z.object({
 	lastReplied: contactClockOutput.nullable(),
 	createdAt: z.string(),
 	archivedAt: z.string().nullable(),
-	fields: z.record(z.string(), fieldValueOutput),
+	fields: recordFieldTableValuesOutput,
 });
 
 export type ContactRow = z.infer<typeof contactRowOutput>;

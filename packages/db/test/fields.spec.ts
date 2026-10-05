@@ -5,12 +5,16 @@ import {
 	columnFor,
 	type FieldDefinitionWithOptions,
 	FieldValueError,
+	type FieldValueWithOptions,
+	type FieldWriter,
 	fieldKeyFromLabel,
 	readValue,
 	recordColumn,
 	serializeField,
+	serializeFieldFor,
+	usesOptions,
+	writeValues,
 } from "../src/fields";
-import type { FieldValueModel } from "../src/generated/prisma/models";
 
 function definition(
 	over: Partial<FieldDefinitionWithOptions> = {},
@@ -35,7 +39,9 @@ function definition(
 	} as FieldDefinitionWithOptions;
 }
 
-function value(over: Partial<FieldValueModel> = {}): FieldValueModel {
+function value(
+	over: Partial<FieldValueWithOptions> = {},
+): FieldValueWithOptions {
 	return {
 		id: "val-1",
 		fieldId: "def-1",
@@ -47,10 +53,11 @@ function value(over: Partial<FieldValueModel> = {}): FieldValueModel {
 		date: null,
 		bool: null,
 		optionId: null,
+		options: [],
 		userId: null,
 		updatedAt: new Date("2026-01-01T00:00:00.000Z"),
 		...over,
-	} as FieldValueModel;
+	} as FieldValueWithOptions;
 }
 
 describe("fieldKeyFromLabel", () => {
@@ -83,6 +90,7 @@ describe("columnFor", () => {
 		expect(columnFor("DATE")).toBe("date");
 		expect(columnFor("CHECKBOX")).toBe("bool");
 		expect(columnFor("SELECT")).toBe("optionId");
+		expect(columnFor("MULTI_SELECT")).toBe("optionIds");
 		expect(columnFor("USER")).toBe("userId");
 	});
 });
@@ -92,6 +100,14 @@ describe("recordColumn", () => {
 		expect(recordColumn("COMPANY")).toBe("companyId");
 		expect(recordColumn("CONTACT")).toBe("contactId");
 		expect(recordColumn("DEAL")).toBe("dealId");
+	});
+});
+
+describe("usesOptions", () => {
+	it("recognizes select and multi-select fields", () => {
+		expect(usesOptions("SELECT")).toBe(true);
+		expect(usesOptions("MULTI_SELECT")).toBe(true);
+		expect(usesOptions("TEXT")).toBe(false);
 	});
 });
 
@@ -150,6 +166,83 @@ describe("coerceValue", () => {
 		expect(coerceValue(select, "aws")).toEqual({ optionId: "opt-aws" });
 		expect(() => coerceValue(select, "Fly.io")).toThrow(FieldValueError);
 	});
+
+	it("resolves multi-select labels and IDs, removes duplicates, and accepts one string", () => {
+		const multiSelect = definition({
+			type: "MULTI_SELECT",
+			options: [
+				{
+					id: "opt-cnc",
+					fieldId: "def-1",
+					label: "CNC machining",
+					position: 0,
+					archivedAt: null,
+				},
+				{
+					id: "opt-weld",
+					fieldId: "def-1",
+					label: "Welding",
+					position: 1,
+					archivedAt: null,
+				},
+			],
+		});
+
+		expect(
+			coerceValue(multiSelect, ["cnc machining", "opt-weld", "CNC MACHINING"]),
+		).toEqual({ optionIds: ["opt-cnc", "opt-weld"] });
+		expect(coerceValue(multiSelect, "Welding")).toEqual({
+			optionIds: ["opt-weld"],
+		});
+	});
+
+	it("names an unknown multi-select option", () => {
+		const multiSelect = definition({
+			type: "MULTI_SELECT",
+			options: [],
+		});
+
+		expect(() => coerceValue(multiSelect, ["Laser cutting"])).toThrow(
+			'Runs on has no option "Laser cutting".',
+		);
+	});
+
+	it("treats an empty multi-select as blank and checks required fields", () => {
+		const multiSelect = definition({ type: "MULTI_SELECT" });
+
+		expect(coerceValue(multiSelect, [])).toEqual({ optionIds: null });
+		expect(() => coerceValue({ ...multiSelect, required: true }, [])).toThrow(
+			FieldValueError,
+		);
+	});
+
+	it("deletes a multi-select value when the selection is cleared", async () => {
+		const deleted: unknown[] = [];
+		const writer: FieldWriter = {
+			fieldValue: {
+				deleteMany: async (args) => {
+					deleted.push(args);
+					return { count: 1 };
+				},
+				upsert: async () => {
+					throw new Error("A blank selection does not upsert.");
+				},
+			},
+			user: { findMany: async () => [] },
+		};
+
+		await writeValues(
+			writer,
+			"COMPANY",
+			"company-1",
+			[definition({ type: "MULTI_SELECT" })],
+			{ runs_on: [] },
+		);
+
+		expect(deleted).toEqual([
+			{ where: { fieldId: "def-1", companyId: "company-1" } },
+		]);
+	});
 });
 
 describe("readValue", () => {
@@ -168,6 +261,20 @@ describe("readValue", () => {
 
 	it("is null when the record has no row", () => {
 		expect(readValue(definition(), undefined)).toBeNull();
+	});
+
+	it("reads multi-select option IDs in option order", () => {
+		expect(
+			readValue(
+				definition({ type: "MULTI_SELECT" }),
+				value({
+					options: [
+						{ optionId: "second", option: { position: 1 } },
+						{ optionId: "first", option: { position: 0 } },
+					],
+				}),
+			),
+		).toEqual(["first", "second"]);
 	});
 });
 
@@ -206,6 +313,41 @@ describe("serializeField", () => {
 			"AWS",
 			"Azure",
 		]);
+	});
+
+	it("keeps retired options visible for selected multi-select values", () => {
+		const serialized = serializeFieldFor(
+			definition({
+				type: "MULTI_SELECT",
+				options: [
+					{
+						id: "active",
+						fieldId: "def-1",
+						label: "CNC machining",
+						position: 0,
+						archivedAt: null,
+					},
+					{
+						id: "retired",
+						fieldId: "def-1",
+						label: "Welding",
+						position: 1,
+						archivedAt: new Date(),
+					},
+				],
+			}),
+			["retired"],
+		);
+
+		expect(serialized.options.map((option) => option.id)).toEqual([
+			"active",
+			"retired",
+		]);
+		expect(
+			serialized.options.find((option) => option.id === "retired"),
+		).toMatchObject({
+			archived: true,
+		});
 	});
 });
 

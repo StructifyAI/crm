@@ -3,7 +3,11 @@ import { FIELD_TYPES } from "@crm/db/fields";
 import { z } from "zod";
 import { contactClockOutput } from "../contact-events/contact-events.contracts";
 import { bulkIdsInput } from "../crm/bulk";
-import { fieldEntity, recordFieldValues } from "../fields/fields.contracts";
+import {
+	fieldEntity,
+	recordFieldTableValuesOutput,
+	recordFieldValues,
+} from "../fields/fields.contracts";
 import { activityFacetInput, listInput } from "../trpc/list-input";
 
 export const companyListInput = listInput.extend({
@@ -93,6 +97,7 @@ const companyFieldOptionOutput = z.object({
 	id: z.string(),
 	label: z.string(),
 	position: z.number(),
+	archived: z.boolean().optional(),
 });
 
 const companyRecordFieldOutput = z.object({
@@ -111,7 +116,13 @@ const companyRecordFieldOutput = z.object({
 	position: z.number(),
 	archived: z.boolean(),
 	options: z.array(companyFieldOptionOutput),
-	value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+	value: z.union([
+		z.string(),
+		z.number(),
+		z.boolean(),
+		z.array(z.string()),
+		z.null(),
+	]),
 });
 
 export const companyRowOutput = z.object({
@@ -137,7 +148,7 @@ export const companyRowOutput = z.object({
 	lastReplied: contactClockOutput.nullable(),
 	createdAt: z.string(),
 	archivedAt: z.string().nullable(),
-	fields: recordFieldValues,
+	fields: recordFieldTableValuesOutput,
 });
 
 export type CompanyRow = z.infer<typeof companyRowOutput>;

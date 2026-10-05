@@ -68,16 +68,25 @@ export const fieldReorderInput = z.object({
 export type FieldReorderInput = z.infer<typeof fieldReorderInput>;
 
 const recordFieldValue = z.union(
-	[z.string(), z.number(), z.boolean(), z.null()],
-	{ error: "A field holds text, a number, true or false, or nothing at all." },
+	[z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()],
+	{
+		error:
+			"A field holds text, a number, true or false, a list of strings, or nothing at all.",
+	},
 );
 
 export const recordFieldValues = z.record(z.string(), recordFieldValue);
+
+export const recordFieldTableValuesOutput = z.record(
+	z.string(),
+	z.union([z.string(), z.number(), z.boolean(), z.null()]),
+);
 
 const fieldOptionOutput = z.object({
 	id: z.string(),
 	label: z.string(),
 	position: z.number(),
+	archived: z.boolean().optional(),
 });
 
 export const serializedFieldOutput = z.object({
