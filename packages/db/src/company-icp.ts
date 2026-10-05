@@ -3,6 +3,24 @@ import type { Prisma } from "./generated/prisma/client";
 export const ICP_STATUSES = ["ICP", "Not ICP", "Unknown"] as const;
 export type IcpStatus = (typeof ICP_STATUSES)[number];
 
+export const ICP_COUNTRIES = new Set(["US", "CA"]);
+
+const COUNTRY_NAMES = new Map<string, string>([
+	["USA", "US"],
+	["UNITED STATES", "US"],
+	["UNITED STATES OF AMERICA", "US"],
+	["CANADA", "CA"],
+]);
+
+export function icpCountry(company: {
+	countryCode: string | null;
+	country: string | null;
+}): string | null {
+	const value = (company.countryCode?.trim() || company.country?.trim())?.toUpperCase();
+	if (!value) return null;
+	return COUNTRY_NAMES.get(value) ?? value;
+}
+
 export const ICP_EMPLOYEES = { min: 50, max: 2000 } as const;
 
 export const ICP_NAICS_CODES = new Set([
@@ -51,26 +69,35 @@ export function computeCompanyIcp(company: {
 	naics: string | null;
 	employeeRange: string | null;
 	employeeCount: number | null;
+	countryCode: string | null;
+	country: string | null;
 }): IcpStatus {
-	const code = company.naics?.trim().slice(0, 3);
-	if (!code) return "Unknown";
-	if (!ICP_NAICS_CODES.has(code)) return "Not ICP";
+	const country = icpCountry(company);
+	if (country && !ICP_COUNTRIES.has(country)) return "Not ICP";
 
-	const range = parseEmployeeRange(company.employeeRange);
-	if (range) {
-		if (range.lo >= ICP_EMPLOYEES.min && range.hi <= ICP_EMPLOYEES.max) {
-			return "ICP";
-		}
-		if (range.hi <= ICP_EMPLOYEES.min || range.lo > ICP_EMPLOYEES.max) {
-			return "Not ICP";
-		}
-	}
+	const status = (() => {
+		const code = company.naics?.trim().slice(0, 3);
+		if (!code) return "Unknown";
+		if (!ICP_NAICS_CODES.has(code)) return "Not ICP";
 
-	if (company.employeeCount === null) return "Unknown";
-	return company.employeeCount >= ICP_EMPLOYEES.min &&
-		company.employeeCount <= ICP_EMPLOYEES.max
-		? "ICP"
-		: "Not ICP";
+		const range = parseEmployeeRange(company.employeeRange);
+		if (range) {
+			if (range.lo >= ICP_EMPLOYEES.min && range.hi <= ICP_EMPLOYEES.max) {
+				return "ICP";
+			}
+			if (range.hi <= ICP_EMPLOYEES.min || range.lo > ICP_EMPLOYEES.max) {
+				return "Not ICP";
+			}
+		}
+
+		if (company.employeeCount === null) return "Unknown";
+		return company.employeeCount >= ICP_EMPLOYEES.min &&
+			company.employeeCount <= ICP_EMPLOYEES.max
+			? "ICP"
+			: "Not ICP";
+	})();
+
+	return status === "ICP" && !country ? "Unknown" : status;
 }
 
 export type IcpChange = {
@@ -81,6 +108,8 @@ export type IcpChange = {
 	naics: string | null;
 	employeeRange: string | null;
 	employeeCount: number | null;
+	countryCode: string | null;
+	country: string | null;
 };
 
 type IcpClient = Pick<Prisma.TransactionClient, "company" | "$executeRaw">;
@@ -106,6 +135,8 @@ export async function recomputeCompanyIcp(
 				icp: true,
 				employeeRange: true,
 				employeeCount: true,
+				countryCode: true,
+				country: true,
 				fieldValues: {
 					where: {
 						field: {
@@ -125,6 +156,8 @@ export async function recomputeCompanyIcp(
 				naics,
 				employeeRange: row.employeeRange,
 				employeeCount: row.employeeCount,
+				countryCode: row.countryCode,
+				country: row.country,
 			});
 
 			if (newIcp === row.icp) continue;
@@ -136,6 +169,8 @@ export async function recomputeCompanyIcp(
 				naics,
 				employeeRange: row.employeeRange,
 				employeeCount: row.employeeCount,
+				countryCode: row.countryCode,
+				country: row.country,
 			});
 		}
 

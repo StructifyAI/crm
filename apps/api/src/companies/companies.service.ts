@@ -426,11 +426,15 @@ export class CompaniesService {
 					await this.fields.applyValues(tx, "COMPANY", id, input.fields);
 				}
 
-				return tx.company.update({
+				const updated = await tx.company.update({
 					where: { id },
 					data,
 					select: { id: true, name: true, domain: true },
 				});
+				if (input.country !== undefined) {
+					await recomputeCompanyIcp(tx, { id });
+				}
+				return updated;
 			});
 
 			if (data.enrichmentStatus === "PENDING") {

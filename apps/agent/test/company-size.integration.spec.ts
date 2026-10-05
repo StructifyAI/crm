@@ -90,6 +90,7 @@ async function createCompany(
 		status?: EnrichmentStatus;
 		domain?: string | null;
 		naics?: boolean;
+		countryCode?: string | null;
 	} = {},
 ) {
 	const domain =
@@ -100,6 +101,7 @@ async function createCompany(
 		data: {
 			name: `Company size ${randomUUID()}`,
 			domain,
+			countryCode: input.countryCode ?? null,
 			enrichmentStatus: input.status ?? EnrichmentStatus.COMPLETE,
 		},
 		select: { id: true },
@@ -156,7 +158,7 @@ describe("sweepCompanySize", () => {
 	});
 
 	it("fills a blank company with web-search provenance", async () => {
-		const company = await createCompany({ naics: true });
+		const company = await createCompany({ naics: true, countryCode: "US" });
 		const result: CompanySizeLookupResult = {
 			ok: true,
 			size: {
