@@ -24,6 +24,7 @@ export default defineTool({
 				"DATE",
 				"CHECKBOX",
 				"SELECT",
+				"MULTI_SELECT",
 				"URL",
 				"EMAIL",
 				"PHONE",
@@ -34,7 +35,7 @@ export default defineTool({
 		options: z
 			.array(z.string())
 			.optional()
-			.describe("The fixed list, when the type is SELECT."),
+			.describe("The fixed list, when the type is SELECT or MULTI_SELECT."),
 		agentBrief: z
 			.string()
 			.optional()

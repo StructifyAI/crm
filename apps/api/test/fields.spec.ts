@@ -584,6 +584,96 @@ describe("a select option that was taken away", () => {
 	});
 });
 
+describe("a multi-select field", () => {
+	it("writes, filters, counts, replaces, and clears option values", async () => {
+		const first = await makeCompany("multi-process-first");
+		const second = await makeCompany("multi-process-second");
+
+		const field = await fields.create({
+			entity: "COMPANY",
+			label: "Spec processes",
+			type: "MULTI_SELECT",
+			options: [
+				{ label: "Cutting" },
+				{ label: "Welding" },
+				{ label: "Finishing" },
+			],
+			agentFilled: false,
+			agentBrief: null,
+			required: false,
+			showOnSheet: true,
+			showOnTable: true,
+			showOnFilter: true,
+		});
+
+		const optionId = (label: string) => {
+			const option = field.options.find((entry) => entry.label === label);
+			if (!option) throw new Error(`Missing option ${label}.`);
+			return option.id;
+		};
+		const cutting = optionId("Cutting");
+		const welding = optionId("Welding");
+		const finishing = optionId("Finishing");
+
+		await companies.update(first, {
+			fields: { spec_processes: [cutting, welding] },
+		});
+		await companies.update(second, {
+			fields: { spec_processes: [welding] },
+		});
+
+		const list = (fields: Record<string, string[]> = {}) =>
+			companies.list(
+				companyListInput.parse({ q: "multi", pageSize: 100, fields }),
+			);
+
+		const initial = await list();
+		expect(initial.facetCounts["field:spec_processes"]).toEqual({
+			[cutting]: 1,
+			[welding]: 2,
+		});
+		expect(
+			initial.rows.find((row) => row.id === first)?.fields.spec_processes,
+		).toBe("Cutting, Welding");
+		expect(
+			(await list({ spec_processes: [cutting] })).rows.map((row) => row.id),
+		).toEqual([first]);
+		expect(
+			(await list({ spec_processes: [welding] })).rows
+				.map((row) => row.id)
+				.sort(),
+		).toEqual([first, second].sort());
+
+		const detail = await companies.byId(first);
+		expect(
+			detail.fields.find((entry) => entry.key === "spec_processes")?.value,
+		).toEqual([cutting, welding]);
+
+		await companies.update(first, {
+			fields: { spec_processes: [finishing] },
+		});
+		expect((await list()).facetCounts["field:spec_processes"]).toEqual({
+			[welding]: 1,
+			[finishing]: 1,
+		});
+
+		await companies.update(first, { fields: { spec_processes: [] } });
+		expect(
+			await db.fieldValue.count({
+				where: { fieldId: field.id, companyId: first },
+			}),
+		).toBe(0);
+		expect(
+			(await companies.byId(first)).fields.find(
+				(entry) => entry.key === "spec_processes",
+			)?.value,
+		).toBeNull();
+		expect((await list()).facetCounts["field:spec_processes"]).toEqual({
+			[welding]: 1,
+		});
+	});
+});
+
 describe("a record update that fails", () => {
 	it("leaves a company's field values as they were", async () => {
 		const record = await makeCompany("company-rollback");

@@ -1,6 +1,5 @@
 import {
 	columnFor,
-	type FieldValueColumn,
 	FieldValueError,
 	type FieldValueJson,
 	type FieldValueWrite,
@@ -21,10 +20,25 @@ export type FieldDefinitionWithOptions = FieldDefinitionModel & {
 	options: FieldOptionModel[];
 };
 
+export type FieldValueWithOptions = FieldValueModel & {
+	options: {
+		optionId: string;
+		option: { position: number };
+	}[];
+};
+
+export const FIELD_VALUE_OPTIONS_INCLUDE = {
+	options: {
+		orderBy: { option: { position: "asc" } },
+		select: { optionId: true, option: { select: { position: true } } },
+	},
+} as const satisfies Prisma.FieldValueInclude;
+
 export type SerializedFieldOption = {
 	id: string;
 	label: string;
 	position: number;
+	archived?: boolean;
 };
 
 export type SerializedField = {
@@ -79,18 +93,34 @@ export function serializeFieldFor(
 	value: FieldValueJson,
 ): SerializedField {
 	const field = serializeField(definition);
-
-	if (definition.type !== "SELECT" || typeof value !== "string") return field;
-	if (field.options.some((option) => option.id === value)) return field;
-
-	const retired = definition.options.find((option) => option.id === value);
-	if (!retired) return field;
+	const selectedIds =
+		definition.type === "SELECT" && typeof value === "string"
+			? [value]
+			: definition.type === "MULTI_SELECT" && Array.isArray(value)
+				? value
+				: [];
+	const retired = definition.options.filter(
+		(option) =>
+			selectedIds.includes(option.id) &&
+			!field.options.some((visible) => visible.id === option.id),
+	);
+	if (retired.length === 0) return field;
 
 	return {
 		...field,
 		options: [
 			...field.options,
-			{ id: retired.id, label: retired.label, position: retired.position },
+			...retired.map((option) => {
+				const serialized = {
+					id: option.id,
+					label: option.label,
+					position: option.position,
+				};
+
+				return definition.type === "MULTI_SELECT"
+					? { ...serialized, archived: true }
+					: serialized;
+			}),
 		].sort((left, right) => left.position - right.position),
 	};
 }
@@ -106,7 +136,10 @@ export function coerceValue(
 	const blank =
 		input === null ||
 		input === undefined ||
-		(typeof input === "string" && input.trim() === "");
+		(typeof input === "string" && input.trim() === "") ||
+		(definition.type === "MULTI_SELECT" &&
+			Array.isArray(input) &&
+			input.length === 0);
 
 	if (blank) {
 		if (definition.required) {
@@ -186,6 +219,45 @@ export function coerceValue(
 			return { optionId: option.id };
 		}
 
+		case "MULTI_SELECT": {
+			const values = typeof input === "string" ? [input] : input;
+			if (!Array.isArray(values)) {
+				throw new FieldValueError(
+					definition.key,
+					`${definition.label} takes an array of options.`,
+				);
+			}
+
+			const optionIds: string[] = [];
+			for (const value of values) {
+				if (typeof value !== "string") {
+					throw new FieldValueError(
+						definition.key,
+						`${definition.label} has no option "${String(value)}".`,
+					);
+				}
+
+				const raw = value.trim();
+				const option = definition.options.find(
+					(entry) =>
+						entry.archivedAt === null &&
+						(entry.id === raw ||
+							entry.label.toLowerCase() === raw.toLowerCase()),
+				);
+
+				if (!option) {
+					throw new FieldValueError(
+						definition.key,
+						`${definition.label} has no option "${raw}".`,
+					);
+				}
+
+				if (!optionIds.includes(option.id)) optionIds.push(option.id);
+			}
+
+			return { optionIds };
+		}
+
 		case "USER":
 			return { userId: String(input).trim() };
 
@@ -196,7 +268,7 @@ export function coerceValue(
 
 export function readValue(
 	definition: FieldDefinitionWithOptions,
-	row: FieldValueModel | undefined,
+	row: FieldValueWithOptions | undefined,
 ): FieldValueJson {
 	if (!row) return null;
 
@@ -209,6 +281,11 @@ export function readValue(
 			return row.date === null ? null : row.date.toISOString();
 		case "SELECT":
 			return row.optionId ?? null;
+		case "MULTI_SELECT":
+			return row.options
+				.slice()
+				.sort((left, right) => left.option.position - right.option.position)
+				.map((entry) => entry.optionId);
 		case "USER":
 			return row.userId ?? null;
 		default:
@@ -220,7 +297,7 @@ export type RecordField = SerializedField & { value: FieldValueJson };
 
 export function attachValues(
 	definitions: FieldDefinitionWithOptions[],
-	rows: FieldValueModel[],
+	rows: FieldValueWithOptions[],
 ): RecordField[] {
 	const byField = new Map(rows.map((row) => [row.fieldId, row]));
 
@@ -280,9 +357,34 @@ export async function writeValues(
 	await assertUsersExist(tx, writes);
 
 	for (const { definition, data, stored } of writes) {
-		if (stored === null || stored === undefined) {
+		if (
+			stored === null ||
+			stored === undefined ||
+			(Array.isArray(stored) && stored.length === 0)
+		) {
 			await tx.fieldValue.deleteMany({
 				where: { fieldId: definition.id, [column]: recordId },
+			});
+			continue;
+		}
+
+		if (definition.type === "MULTI_SELECT" && Array.isArray(stored)) {
+			const createOptions = stored.map((optionId) => ({ optionId }));
+			await tx.fieldValue.upsert({
+				where: {
+					[`fieldId_${column}`]: {
+						fieldId: definition.id,
+						[column]: recordId,
+					},
+				},
+				create: {
+					fieldId: definition.id,
+					[column]: recordId,
+					options: { create: createOptions },
+				},
+				update: {
+					options: { deleteMany: {}, create: createOptions },
+				},
 			});
 			continue;
 		}

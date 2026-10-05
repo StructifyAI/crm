@@ -6,6 +6,7 @@ import {
 	FIELD_TYPES,
 	fieldKeyFromLabel,
 	typeLabel,
+	usesOptions,
 } from "@crm/db/fields-shape";
 import {
 	AlertDialog,
@@ -94,6 +95,7 @@ const TYPE_HINTS = {
 	DATE: "Date",
 	CHECKBOX: "Checkbox — yes or no",
 	SELECT: "Select — one of a fixed list",
+	MULTI_SELECT: "Multi-select — one or more of a fixed list",
 	URL: "URL",
 	EMAIL: "Email",
 	PHONE: "Phone",
@@ -223,7 +225,7 @@ export function FieldEditor({
 
 	const key = field?.key ?? fieldKeyFromLabel(draft.label);
 	const saving = create.isPending || update.isPending;
-	const filterable = draft.type === "SELECT" || draft.type === "USER";
+	const filterable = usesOptions(draft.type) || draft.type === "USER";
 
 	const save = () => {
 		const payload = {
@@ -314,7 +316,7 @@ export function FieldEditor({
 						</Select>
 					</Field>
 
-					{draft.type === "SELECT" ? (
+					{usesOptions(draft.type) ? (
 						<Field aria-labelledby={optionsId}>
 							<FieldTitle id={optionsId}>{OPTIONS_LABEL}</FieldTitle>
 							<SortableList

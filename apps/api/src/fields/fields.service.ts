@@ -6,6 +6,7 @@ import {
 } from "@crm/db";
 import {
 	attachValues,
+	FIELD_VALUE_OPTIONS_INCLUDE,
 	type FieldDefinitionWithOptions,
 	FieldValueError,
 	type FieldValueJson,
@@ -42,6 +43,8 @@ const RELATIONS = {
 	CONTACT: "contact",
 	DEAL: "deal",
 } as const satisfies Record<FieldEntity, string>;
+
+type FieldTableValue = string | number | boolean | null;
 
 @Injectable()
 export class FieldsService {
@@ -91,7 +94,9 @@ export class FieldsService {
 		}
 
 		if (usesOptions(input.type) && input.options.length === 0) {
-			throw new BadRequestException("A select needs at least one option.");
+			throw new BadRequestException(
+				"A select or multi-select needs at least one option.",
+			);
 		}
 
 		const last = await this.db.fieldDefinition.findFirst({
@@ -169,7 +174,9 @@ export class FieldsService {
 			: existing.options.filter((option) => option.archivedAt === null).length;
 
 		if (usesOptions(type) && optionCount === 0) {
-			throw new BadRequestException("A select needs at least one option.");
+			throw new BadRequestException(
+				"A select or multi-select needs at least one option.",
+			);
 		}
 
 		const definition = await this.db.$transaction(async (tx) => {
@@ -428,7 +435,10 @@ export class FieldsService {
 
 		const [definitions, rows] = await Promise.all([
 			this.definitionsFor(entity),
-			this.db.fieldValue.findMany({ where: { [column]: recordId } }),
+			this.db.fieldValue.findMany({
+				where: { [column]: recordId },
+				include: FIELD_VALUE_OPTIONS_INCLUDE,
+			}),
 		]);
 
 		return attachValues(definitions, rows);
@@ -437,8 +447,8 @@ export class FieldsService {
 	async tableValuesFor(
 		entity: FieldEntity,
 		recordIds: string[],
-	): Promise<Map<string, Record<string, FieldValueJson>>> {
-		const byRecord = new Map<string, Record<string, FieldValueJson>>();
+	): Promise<Map<string, Record<string, FieldTableValue>>> {
+		const byRecord = new Map<string, Record<string, FieldTableValue>>();
 
 		if (recordIds.length === 0) return byRecord;
 
@@ -457,6 +467,7 @@ export class FieldsService {
 				[column]: { in: recordIds },
 				fieldId: { in: definitions.map((definition) => definition.id) },
 			},
+			include: FIELD_VALUE_OPTIONS_INCLUDE,
 		});
 
 		const byId = new Map(definitions.map((entry) => [entry.id, entry]));
@@ -479,12 +490,6 @@ export class FieldsService {
 		return byRecord;
 	}
 
-	/**
-	 * SELECT and USER fields are the only types with a fixed, small
-	 * vocabulary a facet can count, but only the ones an admin turned on
-	 * (`showOnFilter`) actually render — same opt-in as `showOnTable`, so the
-	 * filter bar doesn't fill up with every field ever created.
-	 */
 	async filters(entity: FieldEntity): Promise<SerializedField[]> {
 		const definitions = await this.filterableFieldsFor(entity);
 		return definitions.map(serializeField);
@@ -498,7 +503,7 @@ export class FieldsService {
 				entity,
 				archivedAt: null,
 				showOnFilter: true,
-				type: { in: ["SELECT", "USER"] },
+				type: { in: ["SELECT", "MULTI_SELECT", "USER"] },
 			},
 			include: WITH_OPTIONS,
 			orderBy: { position: "asc" },
@@ -532,8 +537,20 @@ export class FieldsService {
 		const userIds = definitions
 			.filter((definition) => definition.type === "USER")
 			.map((definition) => definition.id);
+		const multiSelectIds = definitions
+			.filter((definition) => definition.type === "MULTI_SELECT")
+			.map((definition) => definition.id);
+		const optionDefinitions = new Map(
+			definitions
+				.filter((definition) => definition.type === "MULTI_SELECT")
+				.flatMap((definition) =>
+					definition.options
+						.filter((option) => option.archivedAt === null)
+						.map((option) => [option.id, definition] as const),
+				),
+		);
 
-		const [selectGroups, userGroups] = await Promise.all([
+		const [selectGroups, multiSelectGroups, userGroups] = await Promise.all([
 			selectIds.length > 0
 				? this.db.fieldValue.groupBy({
 						by: ["fieldId", "optionId"],
@@ -542,6 +559,18 @@ export class FieldsService {
 							optionId: { not: null },
 							[relation]: relationWhere,
 						} as Prisma.FieldValueWhereInput,
+						_count: { _all: true },
+					})
+				: [],
+			multiSelectIds.length > 0
+				? this.db.fieldValueOption.groupBy({
+						by: ["optionId"],
+						where: {
+							fieldValue: {
+								fieldId: { in: multiSelectIds },
+								[relation]: relationWhere,
+							},
+						} as Prisma.FieldValueOptionWhereInput,
 						_count: { _all: true },
 					})
 				: [],
@@ -561,6 +590,15 @@ export class FieldsService {
 		for (const group of selectGroups) {
 			const definition = byId.get(group.fieldId);
 			if (!definition || !group.optionId) continue;
+			const bucket = facetCounts[definition.key] ?? {};
+			facetCounts[definition.key] = bucket;
+			bucket[group.optionId] =
+				(bucket[group.optionId] ?? 0) + group._count._all;
+		}
+
+		for (const group of multiSelectGroups) {
+			const definition = optionDefinitions.get(group.optionId);
+			if (!definition) continue;
 			const bucket = facetCounts[definition.key] ?? {};
 			facetCounts[definition.key] = bucket;
 			bucket[group.optionId] =
@@ -599,7 +637,14 @@ export class FieldsService {
 							some:
 								definition.type === "USER"
 									? { fieldId: definition.id, userId: { in: values } }
-									: { fieldId: definition.id, optionId: { in: values } },
+									: definition.type === "MULTI_SELECT"
+										? {
+												fieldId: definition.id,
+												options: {
+													some: { optionId: { in: values } },
+												},
+											}
+										: { fieldId: definition.id, optionId: { in: values } },
 						},
 					},
 				];
@@ -642,7 +687,19 @@ export class FieldsService {
 function tableValue(
 	definition: FieldDefinitionWithOptions,
 	value: FieldValueJson,
-): FieldValueJson {
+): FieldTableValue {
+	if (Array.isArray(value)) {
+		return definition.type === "MULTI_SELECT"
+			? value
+					.map(
+						(id) =>
+							definition.options.find((option) => option.id === id)?.label,
+					)
+					.filter((label): label is string => label !== undefined)
+					.join(", ")
+			: value.join(", ");
+	}
+
 	if (definition.type !== "SELECT" || typeof value !== "string") return value;
 
 	return (

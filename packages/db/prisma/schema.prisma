@@ -1120,6 +1120,7 @@ enum FieldType {
   DATE
   CHECKBOX
   SELECT
+  MULTI_SELECT
   URL
   EMAIL
   PHONE
@@ -1165,6 +1166,7 @@ model FieldOption {
 
   archivedAt DateTime?
   values     FieldValue[]
+  multiValues FieldValueOption[]
 
   @@index([fieldId, position])
   @@map("fieldOption")
@@ -1188,6 +1190,7 @@ model FieldValue {
   bool     Boolean?
   optionId String?
   option   FieldOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  options  FieldValueOption[]
   userId   String?
   user     User?        @relation("FieldValueUser", fields: [userId], references: [id], onDelete: SetNull)
 
@@ -1205,6 +1208,17 @@ model FieldValue {
   @@index([optionId])
   @@index([userId])
   @@map("fieldValue")
+}
+
+model FieldValueOption {
+  fieldValueId String
+  fieldValue   FieldValue  @relation(fields: [fieldValueId], references: [id], onDelete: Cascade)
+  optionId     String
+  option       FieldOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@id([fieldValueId, optionId])
+  @@index([optionId])
+  @@map("fieldValueOption")
 }
 
 model SavedView {

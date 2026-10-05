@@ -2,6 +2,7 @@ import { db } from "@crm/db";
 import type { FieldEntity, FieldType } from "@crm/db/enums";
 import {
 	attachValues,
+	FIELD_VALUE_OPTIONS_INCLUDE,
 	type FieldDefinitionWithOptions,
 	FieldValueError,
 	fieldKeyFromLabel,
@@ -45,7 +46,10 @@ export async function readFields(
 
 	const [definitions, rows] = await Promise.all([
 		definitionsFor(entity),
-		db.fieldValue.findMany({ where: { [column]: recordId } }),
+		db.fieldValue.findMany({
+			where: { [column]: recordId },
+			include: FIELD_VALUE_OPTIONS_INCLUDE,
+		}),
 	]);
 
 	return attachValues(definitions, rows);
@@ -91,6 +95,7 @@ export async function writeField(input: {
 
 				const row = await tx.fieldValue.findFirst({
 					where: { fieldId: definition.id, [column]: input.recordId },
+					include: FIELD_VALUE_OPTIONS_INCLUDE,
 				});
 
 				if (readValue(definition, row ?? undefined) !== null) {
@@ -142,7 +147,10 @@ export async function createField(input: {
 	}
 
 	if (usesOptions(input.type) && (input.options ?? []).length === 0) {
-		return { created: false, reason: "A select needs at least one option." };
+		return {
+			created: false,
+			reason: "A select or multi-select needs at least one option.",
+		};
 	}
 
 	const last = await db.fieldDefinition.findFirst({

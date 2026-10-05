@@ -13,9 +13,15 @@ export default defineTool({
 			.string()
 			.describe("The field's key, exactly as list_fields reports it."),
 		value: z
-			.union([z.string(), z.number(), z.boolean(), z.null()])
+			.union([
+				z.string(),
+				z.number(),
+				z.boolean(),
+				z.array(z.string()),
+				z.null(),
+			])
 			.describe(
-				"The value. A select takes the option's label, a date takes YYYY-MM-DD, and null clears it.",
+				"The value. A select takes the option's label, a multi-select takes an array of option labels, a date takes YYYY-MM-DD, and null clears it.",
 			),
 	}),
 	async execute({ entity, recordId, key, value }) {

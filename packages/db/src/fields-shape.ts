@@ -9,6 +9,7 @@ export const FIELD_TYPES = [
 	"DATE",
 	"CHECKBOX",
 	"SELECT",
+	"MULTI_SELECT",
 	"URL",
 	"EMAIL",
 	"PHONE",
@@ -23,6 +24,7 @@ export type FieldValueColumn =
 	| "date"
 	| "bool"
 	| "optionId"
+	| "optionIds"
 	| "userId";
 
 export type FieldValueWrite = Partial<Record<FieldValueColumn, unknown>>;
@@ -37,6 +39,7 @@ const COLUMNS = {
 	DATE: "date",
 	CHECKBOX: "bool",
 	SELECT: "optionId",
+	MULTI_SELECT: "optionIds",
 	USER: "userId",
 } as const satisfies Record<FieldTypeName, FieldValueColumn>;
 
@@ -47,6 +50,7 @@ const TYPE_LABELS = {
 	DATE: "Date",
 	CHECKBOX: "Checkbox",
 	SELECT: "Select",
+	MULTI_SELECT: "Multi-select",
 	URL: "URL",
 	EMAIL: "Email",
 	PHONE: "Phone",
@@ -62,7 +66,7 @@ export function typeLabel(type: FieldTypeName): string {
 }
 
 export function usesOptions(type: FieldTypeName): boolean {
-	return type === "SELECT";
+	return type === "SELECT" || type === "MULTI_SELECT";
 }
 
 export const RECORD_ID_COLUMNS = {
@@ -111,4 +115,4 @@ export class FieldValueError extends Error {
 	}
 }
 
-export type FieldValueJson = string | number | boolean | null;
+export type FieldValueJson = string | number | boolean | string[] | null;
