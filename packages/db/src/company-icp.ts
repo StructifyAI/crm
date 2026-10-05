@@ -16,7 +16,9 @@ export function icpCountry(company: {
 	countryCode: string | null;
 	country: string | null;
 }): string | null {
-	const value = (company.countryCode?.trim() || company.country?.trim())?.toUpperCase();
+	const value = (
+		company.countryCode?.trim() || company.country?.trim()
+	)?.toUpperCase();
 	if (!value) return null;
 	return COUNTRY_NAMES.get(value) ?? value;
 }

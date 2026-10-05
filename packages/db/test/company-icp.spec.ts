@@ -46,9 +46,12 @@ describe("icpCountry", () => {
 		["DE", "United States", "DE"],
 		[null, "Mexico", "MEXICO"],
 		[null, null, null],
-	] as const)("normalizes %s and %s to %s", (countryCode, country, expected) => {
-		expect(icpCountry({ countryCode, country })).toBe(expected);
-	});
+	] as const)(
+		"normalizes %s and %s to %s",
+		(countryCode, country, expected) => {
+			expect(icpCountry({ countryCode, country })).toBe(expected);
+		},
+	);
 });
 
 describe("computeCompanyIcp", () => {
