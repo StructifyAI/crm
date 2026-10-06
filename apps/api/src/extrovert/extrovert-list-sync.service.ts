@@ -910,12 +910,23 @@ export class ExtrovertListSyncService {
 		];
 		if (slugs.length === 0) return [];
 
+		const keys = [
+			...new Set(
+				slugs.flatMap((slug) => [
+					slug.toLowerCase(),
+					encodeURIComponent(slug).toLowerCase(),
+				]),
+			),
+		];
+		const matches = await this.db.$queryRaw<Array<{ id: string }>>`
+			SELECT id FROM contact
+			WHERE "archivedAt" IS NULL
+				AND lower(substring("linkedinUrl" from '/in/([^/?#]+)')) = ANY(${keys}::text[])`;
+		if (matches.length === 0) return [];
+
 		const rows = await this.db.contact.findMany({
 			where: {
-				archivedAt: null,
-				OR: slugs.map((slug) => ({
-					linkedinUrl: { contains: slug, mode: "insensitive" },
-				})),
+				id: { in: matches.map((match) => match.id) },
 			},
 			select: {
 				id: true,
