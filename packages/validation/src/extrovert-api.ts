@@ -203,6 +203,7 @@ const extrovertListMembership = z
 		id: z.string(),
 		listId: z.string(),
 		prospectProfileUrl: z.string(),
+		connectionStatus: z.string().nullable().optional(),
 	})
 	.passthrough();
 

@@ -562,8 +562,22 @@ export class ExtrovertSyncService {
 		const recentlySeen = new Set(
 			recentRows.flatMap((row) => (row.contactId ? [row.contactId] : [])),
 		);
-		const contactIds = staleContactIds.filter(
+		const potentiallyInactiveContactIds = staleContactIds.filter(
 			(contactId) => !recentlySeen.has(contactId),
+		);
+		if (potentiallyInactiveContactIds.length === 0) return 0;
+		const connectedRows = await this.db.extrovertProspect.findMany({
+			where: {
+				contactId: { in: potentiallyInactiveContactIds },
+				connectionStatus: "connected",
+			},
+			select: { contactId: true },
+		});
+		const connectedContactIds = new Set(
+			connectedRows.map(({ contactId }) => contactId),
+		);
+		const contactIds = potentiallyInactiveContactIds.filter(
+			(contactId) => !connectedContactIds.has(contactId),
 		);
 		if (contactIds.length === 0) return 0;
 
