@@ -10,6 +10,8 @@ export const EXTROVERT = {
 		campaignsPath: "/client/v2/campaign",
 		teamMembersPath: "/client/v2/user/team-members",
 		prospectsPath: "/client/v2/prospects",
+		prospectByIdPath: (id: string) =>
+			`/client/v2/prospects/${encodeURIComponent(id)}`,
 		commentsPath: "/client/v2/comments",
 		conversationsPath: "/client/v2/dm-conversations",
 	},

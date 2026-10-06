@@ -51,6 +51,20 @@ export class ExtrovertClient {
 		);
 	}
 
+	async prospectExists(key: string, id: string): Promise<boolean> {
+		try {
+			await this.request(key, EXTROVERT.api.prospectByIdPath(id), undefined, {
+				tolerate: [404],
+			});
+			return true;
+		} catch (error) {
+			if (error instanceof ExtrovertHttpError && error.status === 404) {
+				return false;
+			}
+			throw error;
+		}
+	}
+
 	async listPostedCommentsPage(
 		key: string,
 		input: { ownerId: string; campaignId: string; offset: number },
