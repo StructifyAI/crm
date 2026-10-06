@@ -82,7 +82,7 @@ export class ExtrovertClient {
 			return parseExtrovertProspectDetail(
 				await this.request(
 					key,
-					`${EXTROVERT.api.prospectsPath}/${id}`,
+					EXTROVERT.api.prospectByIdPath(id),
 					{},
 					{
 						tolerate: [404],
@@ -120,6 +120,20 @@ export class ExtrovertClient {
 				},
 			),
 		);
+	}
+
+	async prospectExists(key: string, id: string): Promise<boolean> {
+		try {
+			await this.request(key, EXTROVERT.api.prospectByIdPath(id), undefined, {
+				tolerate: [404],
+			});
+			return true;
+		} catch (error) {
+			if (error instanceof ExtrovertHttpError && error.status === 404) {
+				return false;
+			}
+			throw error;
+		}
 	}
 
 	async listPostedCommentsPage(

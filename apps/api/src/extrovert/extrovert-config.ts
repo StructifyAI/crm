@@ -1,5 +1,5 @@
+const DAY_MS = 24 * 60 * 60 * 1_000;
 const HOUR_MS = 60 * 60 * 1_000;
-
 export const EXTROVERT = {
 	webhook: {
 		maxBodyBytes: 64 * 1024,
@@ -13,6 +13,8 @@ export const EXTROVERT = {
 		listMembershipPath: "/api/client/v1/prospects",
 		prospectCapacityPath: "/client/v2/workspace/get-capacity",
 		prospectListPath: "/client/v2/prospect-list",
+		prospectByIdPath: (id: string) =>
+			`/client/v2/prospects/${encodeURIComponent(id)}`,
 		commentsPath: "/client/v2/comments",
 		conversationsPath: "/client/v2/dm-conversations",
 	},
@@ -20,6 +22,16 @@ export const EXTROVERT = {
 		minRequestGapMs: 120,
 		pageSize: 200,
 		tickBudgetMs: 40_000,
+	},
+	linkedin: {
+		activityWindowMs: 30 * DAY_MS,
+		fields: {
+			headline: "linkedin_headline",
+			active: "linkedin_active",
+			lastPost: "linkedin_last_post",
+			activityChecked: "linkedin_activity_checked",
+			jobChange: "linkedin_job_change",
+		},
 	},
 	engagement: {
 		pageSize: 50,
