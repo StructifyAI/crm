@@ -1,9 +1,4 @@
 export const REVENUE_PER_EMPLOYEE_USD = [
-	{ industry: /machine shop|contract manufactur|machining/i, rate: 229_000 },
-	{ industry: /stamp|forg/i, rate: 283_000 },
-	{
-		industry:
-			/manufactur|machinery|metal|fabricat|industrial|aerospace|automotive|motor vehicle|defense/i,
-		rate: 276_000,
-	},
+	{ naics: /^332\b/, rate: 229_000 },
+	{ naics: /^3[1-3]\d\b/, rate: 276_000 },
 ] as const;

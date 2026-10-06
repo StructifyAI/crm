@@ -58,7 +58,6 @@ const OWNERS = [
 type SeedCompany = {
 	name: string;
 	domain: string;
-	industry: string;
 	city: string;
 	country: string;
 	countryCode: string;
@@ -68,7 +67,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Stripe",
 		domain: "stripe.com",
-		industry: "Financial Services",
 		city: "San Francisco",
 		country: "United States",
 		countryCode: "US",
@@ -76,7 +74,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Linear",
 		domain: "linear.app",
-		industry: "Software",
 		city: "San Francisco",
 		country: "United States",
 		countryCode: "US",
@@ -84,7 +81,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Vercel",
 		domain: "vercel.com",
-		industry: "Software",
 		city: "San Francisco",
 		country: "United States",
 		countryCode: "US",
@@ -92,7 +88,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Ramp",
 		domain: "ramp.com",
-		industry: "Financial Services",
 		city: "New York",
 		country: "United States",
 		countryCode: "US",
@@ -100,7 +95,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Notion",
 		domain: "notion.so",
-		industry: "Software",
 		city: "San Francisco",
 		country: "United States",
 		countryCode: "US",
@@ -108,7 +102,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Monzo",
 		domain: "monzo.com",
-		industry: "Banking",
 		city: "London",
 		country: "United Kingdom",
 		countryCode: "GB",
@@ -116,7 +109,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Wise",
 		domain: "wise.com",
-		industry: "Financial Services",
 		city: "London",
 		country: "United Kingdom",
 		countryCode: "GB",
@@ -124,7 +116,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Personio",
 		domain: "personio.com",
-		industry: "Human Resources",
 		city: "Munich",
 		country: "Germany",
 		countryCode: "DE",
@@ -132,7 +123,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Pennylane",
 		domain: "pennylane.com",
-		industry: "Accounting",
 		city: "Paris",
 		country: "France",
 		countryCode: "FR",
@@ -140,7 +130,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Cal.com",
 		domain: "cal.com",
-		industry: "Software",
 		city: "San Francisco",
 		country: "United States",
 		countryCode: "US",
@@ -148,7 +137,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Supabase",
 		domain: "supabase.com",
-		industry: "Software",
 		city: "Singapore",
 		country: "Singapore",
 		countryCode: "SG",
@@ -156,7 +144,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Retool",
 		domain: "retool.com",
-		industry: "Software",
 		city: "San Francisco",
 		country: "United States",
 		countryCode: "US",
@@ -164,7 +151,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Deel",
 		domain: "deel.com",
-		industry: "Human Resources",
 		city: "New York",
 		country: "United States",
 		countryCode: "US",
@@ -172,7 +158,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Mercury",
 		domain: "mercury.com",
-		industry: "Banking",
 		city: "San Francisco",
 		country: "United States",
 		countryCode: "US",
@@ -180,7 +165,6 @@ const COMPANIES: readonly SeedCompany[] = [
 	{
 		name: "Attio",
 		domain: "attio.com",
-		industry: "Software",
 		city: "London",
 		country: "United Kingdom",
 		countryCode: "GB",
@@ -384,7 +368,6 @@ async function seedCompanies(
 				name: company.name,
 				domain: company.domain,
 				website: `https://${company.domain}`,
-				industry: company.industry,
 				city: company.city,
 				country: company.country,
 				countryCode: company.countryCode,

@@ -73,19 +73,6 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 			),
 	},
 	{
-		id: "industry",
-		header: "Industry",
-		sortable: true,
-		width: "w-[16%]",
-		hideBelow: "lg",
-		cell: (row) =>
-			row.industry ? (
-				<span className="truncate">{row.industry}</span>
-			) : (
-				<EmptyCellValue />
-			),
-	},
-	{
 		id: "employees",
 		header: "Employees",
 		sortable: true,
@@ -236,13 +223,6 @@ export function CompaniesTable() {
 					label: user.name,
 				})),
 			].filter((option) => (facetCounts?.owner?.[option.value] ?? 0) > 0),
-		},
-		{
-			id: "industry",
-			label: "Industry",
-			options: Object.keys(facetCounts?.industry ?? {})
-				.sort()
-				.map((value) => ({ value, label: value })),
 		},
 		{
 			id: "icp",

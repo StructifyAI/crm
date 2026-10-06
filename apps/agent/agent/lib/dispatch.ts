@@ -413,7 +413,7 @@ function work(
 		case "meeting-prep":
 			return "There is a meeting with this person soon. Make sure whoever is taking it opens the record knowing who they are dealing with.";
 		case "company-profile":
-			return "This company's brand, industry, location and links are filled in separately and may already be there. Read the account, fill anything still missing, and write a brief if there is something worth saying.";
+			return "This company's brand, location and links are filled in separately and may already be there. Read the account, fill anything still missing, and write a brief if there is something worth saying.";
 		case "workspace-profile":
 			return "Write the profile of the company you work for, so that every other session knows who we are. Read our own site and keep it short.";
 		case "field-backfill": {

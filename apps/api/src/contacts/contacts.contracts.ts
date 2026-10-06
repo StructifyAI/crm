@@ -259,7 +259,6 @@ export const contactByIdOutput = z.object({
 	owner: contactOwnerOutput.nullable(),
 	company: contactCompanyOutput
 		.extend({
-			industry: z.string().nullable(),
 			primaryContactId: z.string().nullable(),
 		})
 		.nullable(),

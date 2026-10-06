@@ -31,8 +31,6 @@ const rows = await db.companyEnrichment.findMany({
 				iconDarkUrl: true,
 				iconTone: true,
 				brandColor: true,
-				industry: true,
-				subIndustry: true,
 				employeeCount: true,
 				employeeRange: true,
 				employeeSource: true,

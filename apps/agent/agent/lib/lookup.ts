@@ -19,7 +19,6 @@ export type CompanyHit = {
 	id: string;
 	name: string;
 	domain: string | null;
-	industry: string | null;
 	contacts: number;
 	deals: number;
 };
@@ -283,7 +282,6 @@ async function searchCompanies(
 			id: true,
 			name: true,
 			domain: true,
-			industry: true,
 			_count: { select: { contacts: true, deals: true } },
 		},
 	});
@@ -296,7 +294,6 @@ async function searchCompanies(
 				id: row.id,
 				name: row.name,
 				domain: row.domain,
-				industry: row.industry,
 				contacts: row._count.contacts,
 				deals: row._count.deals,
 			},

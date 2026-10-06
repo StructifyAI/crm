@@ -13,7 +13,6 @@ import { activityFacetInput, listInput } from "../trpc/list-input";
 
 export const companyListInput = listInput.extend({
 	owner: z.array(z.string()).default([]),
-	industry: z.array(z.string()).default([]),
 	enrichment: z.array(z.string()).default([]),
 	source: z.array(z.string()).default([]),
 	activity: activityFacetInput.default([]),
@@ -37,7 +36,6 @@ const companyUpdateInput = z.object({
 	domain: z.string().optional(),
 	website: z.string().optional(),
 	description: z.string().optional(),
-	industry: z.string().optional(),
 	city: z.string().optional(),
 	stateCode: z.string().optional(),
 	country: z.string().optional(),
@@ -141,7 +139,6 @@ export const companyRowOutput = z.object({
 	iconTone: z.string().nullable(),
 	logoUrl: z.string().nullable(),
 	brandColor: z.string().nullable(),
-	industry: z.string().nullable(),
 	employeeCount: z.number().int().nullable(),
 	employeeRange: z.string().nullable(),
 	icp: z.enum(ICP_STATUSES),
@@ -213,8 +210,6 @@ export const companyDetailOutput = z.object({
 	iconDarkUrl: z.string().nullable(),
 	iconTone: z.string().nullable(),
 	brandColor: z.string().nullable(),
-	industry: z.string().nullable(),
-	subIndustry: z.string().nullable(),
 	employeeCount: z.number().int().nullable(),
 	employeeRange: z.string().nullable(),
 	icp: z.enum(ICP_STATUSES),

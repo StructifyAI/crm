@@ -182,10 +182,6 @@ const dealCompanyOutput = z.object({
 	logoUrl: z.string().nullable(),
 });
 
-const dealCompanyDetailOutput = dealCompanyOutput.extend({
-	industry: z.string().nullable(),
-});
-
 const dealContactSummaryOutput = z.object({
 	id: z.string(),
 	firstName: z.string(),
@@ -239,7 +235,7 @@ export const dealDetailOutput = z.object({
 	stage: stageEnum,
 	currency: z.string(),
 	closedReason: z.string().nullable(),
-	company: dealCompanyDetailOutput,
+	company: dealCompanyOutput,
 	owner: dealOwnerOutput,
 	fields: z.array(recordFieldOutput),
 	amountCents: z.number().nullable(),

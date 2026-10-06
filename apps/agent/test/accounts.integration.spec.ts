@@ -43,7 +43,6 @@ beforeAll(async () => {
 		data: {
 			name: `Fernhill Systems ${suffix}`,
 			domain,
-			industry: "Security software",
 			lastActivityAt: daysAgo(1),
 		},
 		select: { id: true },

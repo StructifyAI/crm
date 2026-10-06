@@ -1,4 +1,5 @@
 import { db } from "@crm/db";
+import { NAICS_VALUE_SELECT } from "@crm/db/company-icp";
 import { websiteUrl } from "@crm/db/workspace";
 import {
 	estimateRevenue,
@@ -174,7 +175,6 @@ export async function companyPreamble(
 		select: {
 			name: true,
 			domain: true,
-			industry: true,
 			employeeCount: true,
 			employeeRange: true,
 			description: true,
@@ -188,6 +188,7 @@ export async function companyPreamble(
 				take: 8,
 				select: { id: true, name: true, stage: true },
 			},
+			fieldValues: NAICS_VALUE_SELECT,
 			_count: { select: { contacts: true } },
 		},
 	});
@@ -214,16 +215,18 @@ export async function companyPreamble(
 		.map((deal) => `${deal.name} (${deal.stage}) \`${deal.id}\``)
 		.join("; ");
 
+	const naics = company.fieldValues[0]?.option?.label ?? null;
+
 	const revenueEstimate = formatRevenueEstimate(
 		estimateRevenue({
 			employeeCount: company.employeeCount,
 			employeeRange: company.employeeRange,
-			industry: company.industry,
+			naics,
 		}),
 	);
 
 	const companyDetails = [
-		company.industry,
+		naics,
 		formatCompanyEmployees(company.employeeCount, company.employeeRange),
 		revenueEstimate
 			? `estimated revenue ${revenueEstimate} from headcount`

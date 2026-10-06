@@ -19,9 +19,6 @@ function emptyCompany(
 		iconDarkUrl: null,
 		iconTone: null,
 		brandColor: null,
-		industry: null,
-		subIndustry: null,
-		source: "MANUAL",
 		employeeCount: null,
 		employeeRange: null,
 		employeeSource: null,
@@ -67,9 +64,6 @@ describe("brandToUpdate", () => {
 			country: "United States",
 			country_code: "US",
 		},
-		industries: {
-			eic: [{ industry: "Finance", subindustry: "Payments & Money Movement" }],
-		},
 		links: {
 			pricing: "https://stripe.com/pricing",
 			careers: "https://stripe.com/jobs",
@@ -90,8 +84,6 @@ describe("brandToUpdate", () => {
 		expect(update).toMatchObject({
 			description: "Payments infrastructure for the internet.",
 			brandColor: "#635bff",
-			industry: "Finance",
-			subIndustry: "Payments & Money Movement",
 			city: "South San Francisco",
 			stateCode: "CA",
 			country: "United States",
@@ -192,43 +184,6 @@ describe("brandToUpdate", () => {
 		}
 	});
 
-	it("replaces imported industry labels with Context.dev's", () => {
-		const update = brandToUpdate(
-			{
-				industries: {
-					eic: [
-						{
-							industry: "Professional Services & Agencies",
-							subindustry: "Design, Branding & Creative Studios",
-						},
-					],
-				},
-			},
-			emptyCompany({
-				industry: "Machine Shops/Contract Manufacturers",
-				source: "IMPORT",
-			}),
-		);
-
-		expect(update.industry).toBe("Professional Services & Agencies");
-		expect(update.subIndustry).toBe("Design, Branding & Creative Studios");
-	});
-
-	it("keeps a manually set industry", () => {
-		const update = brandToUpdate(brand, emptyCompany({ industry: "Finance" }));
-
-		expect(update.industry).toBeUndefined();
-	});
-
-	it("leaves an imported industry when Context.dev has none", () => {
-		const update = brandToUpdate(
-			{},
-			emptyCompany({ industry: "Finance", source: "IMPORT" }),
-		);
-
-		expect(update.industry).toBeUndefined();
-	});
-
 	it("keeps the existing employee source", () => {
 		const update = brandToUpdate(
 			{ employees: { exact: 84, range: "51 to 200" } },
@@ -273,22 +228,6 @@ describe("stillFillable", () => {
 		);
 
 		expect(data.iconUrl).toBe("https://cdn/icon.svg");
-	});
-
-	it("keeps the industry on an imported company", () => {
-		const update = brandToUpdate(
-			{ industries: { eic: [{ industry: "Finance" }] } },
-			emptyCompany({ industry: "Manufacturing", source: "IMPORT" }),
-		);
-
-		expect(update.industry).toBe("Finance");
-
-		expect(
-			stillFillable(
-				update,
-				emptyCompany({ industry: "Manufacturing", source: "IMPORT" }),
-			).industry,
-		).toBe("Finance");
 	});
 
 	it("drops the name once the placeholder has been answered", () => {

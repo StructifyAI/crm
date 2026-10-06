@@ -116,7 +116,6 @@ export type CrmHistory = {
 			id: string;
 			name: string;
 			domain: string | null;
-			industry: string | null;
 		} | null;
 	};
 	deals: {
@@ -175,7 +174,7 @@ export async function readCrmHistory(
 			title: true,
 			companyId: true,
 			company: {
-				select: { id: true, name: true, domain: true, industry: true },
+				select: { id: true, name: true, domain: true },
 			},
 			deals: {
 				orderBy: { deal: { lastActivityAt: "desc" } },

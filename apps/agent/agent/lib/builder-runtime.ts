@@ -740,7 +740,7 @@ async function describeResources(resources: BuilderResource[]) {
 			if (resource.kind === "company") {
 				const row = await db.company.findUnique({
 					where: { id: resource.id },
-					select: { id: true, name: true, domain: true, industry: true },
+					select: { id: true, name: true, domain: true },
 				});
 				return { ...resource, record: row };
 			}

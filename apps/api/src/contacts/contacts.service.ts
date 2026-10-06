@@ -234,7 +234,7 @@ export class ContactsService {
 					},
 				},
 				company: {
-					select: { ...COMPANY_SELECT, industry: true, primaryContactId: true },
+					select: { ...COMPANY_SELECT, primaryContactId: true },
 				},
 				owner: { select: OWNER_SELECT },
 				deals: {
