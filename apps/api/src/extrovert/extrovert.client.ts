@@ -220,13 +220,19 @@ export class ExtrovertClient {
 		for (const [name, value] of Object.entries(query ?? {})) {
 			url.searchParams.set(name, value);
 		}
-		const headers: Record<string, string> = { "x-api-key": key };
-		if (options?.body) headers["content-type"] = "application/json";
-		const response = await fetch(url, {
+		const requestInit: RequestInit = {
 			method: options?.method ?? "GET",
-			headers,
-			body: options?.body ? JSON.stringify(options.body) : undefined,
-		});
+		};
+		if (options?.body) {
+			requestInit.headers = {
+				"x-api-key": key,
+				"content-type": "application/json",
+			};
+			requestInit.body = JSON.stringify(options.body);
+		} else {
+			requestInit.headers = { "x-api-key": key };
+		}
+		const response = await fetch(url, requestInit);
 		if (!response.ok) {
 			if (options?.tolerate?.includes(response.status)) {
 				throw new ExtrovertHttpError(response.status);
