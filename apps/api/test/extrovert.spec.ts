@@ -647,6 +647,69 @@ describe("Extrovert client", () => {
 		}
 	});
 
+	it("lists campaign members and removes a prospect from one campaign", async () => {
+		const originalFetch = globalThis.fetch;
+		const campaignId = EXTROVERT.icpList.campaignId;
+		const profileUrl = "https://www.linkedin.com/in/connected-person";
+		let status = 200;
+		globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+			if (init?.method === "GET") {
+				expect(String(input)).toBe(
+					`https://api.goextrovert.com/api/client/v1/prospects?campaignId=${campaignId}`,
+				);
+				return new Response(
+					JSON.stringify({
+						status: "success",
+						data: [
+							{
+								id: "connected-person",
+								listId: "list-1",
+								prospectProfileUrl: profileUrl,
+								connectionStatus: "connected",
+							},
+						],
+					}),
+				);
+			}
+			expect(String(input)).toBe(
+				"https://api.goextrovert.com/api/client/v1/prospects",
+			);
+			expect(init?.method).toBe("DELETE");
+			expect(init?.headers).toEqual({
+				"x-api-key": "valid-key",
+				"content-type": "application/json",
+			});
+			expect(JSON.parse(String(init?.body))).toEqual({
+				prospectProfileUrl: profileUrl,
+				campaignId,
+			});
+			return status === 404
+				? new Response("not found", { status })
+				: new Response("response body is not JSON");
+		}) as unknown as typeof fetch;
+		try {
+			const client = new ExtrovertClient();
+			await expect(
+				client.listProspectsInList("valid-key", { campaignId }),
+			).resolves.toMatchObject([{ connectionStatus: "connected" }]);
+			await expect(
+				client.removeProspectFromCampaign("valid-key", {
+					prospectProfileUrl: profileUrl,
+					campaignId,
+				}),
+			).resolves.toBeUndefined();
+			status = 404;
+			await expect(
+				client.removeProspectFromCampaign("valid-key", {
+					prospectProfileUrl: profileUrl,
+					campaignId,
+				}),
+			).resolves.toBeUndefined();
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
 	it("reports invalid keys and uses the prospect query path", async () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (input: string | URL) => {
@@ -1586,6 +1649,56 @@ describe("Extrovert sync", () => {
 			error: null,
 			fieldSkipped: 1,
 		});
+	});
+});
+
+describe("Extrovert sync connected prospect safety", () => {
+	it("does not mark stale connected prospects inactive", async () => {
+		await enableProspectSync();
+		const contact = await db.contact.create({
+			data: {
+				firstName: "Taylor",
+				linkedinUrl: `https://www.linkedin.com/in/stale-connected-${suffix}`,
+			},
+		});
+		await db.extrovertProspect.create({
+			data: {
+				id: `extrovert-prospect-${suffix}-stale-connected`,
+				contactId: contact.id,
+				directComments: 0,
+				indirectComments: 0,
+				likes: 0,
+				connectionStatus: "connected",
+				lastSeenAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+			},
+		});
+		await setLinkedInFieldValues(contact.id, {
+			[EXTROVERT.linkedin.fields.active]: "Active",
+		});
+		const checkedProspectIds: string[] = [];
+		const client = new ExtrovertClient();
+		client.listTeamMembers = async () => [];
+		client.listProspectsPage = async () => ({ prospects: [], total: 0 });
+		client.prospectExists = async (_apiKey, id) => {
+			checkedProspectIds.push(id);
+			return false;
+		};
+
+		const result = await new ExtrovertSyncService(
+			db,
+			client,
+			filing,
+			fieldsService,
+		).run();
+
+		expect(result).toMatchObject({ complete: true, error: null });
+		expect(checkedProspectIds).toEqual([]);
+		expect(
+			await readLinkedInFieldValue(
+				contact.id,
+				EXTROVERT.linkedin.fields.active,
+			),
+		).toBe("Active");
 	});
 });
 

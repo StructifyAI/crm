@@ -68,11 +68,31 @@ export class ExtrovertClient {
 
 	async listProspectsInList(
 		key: string,
-		input: { campaignId: string; listId: string },
+		input: { campaignId: string; listId?: string },
 	): Promise<ExtrovertListMembership[]> {
 		return parseExtrovertListMembership(
-			await this.request(key, EXTROVERT.api.listMembershipPath, input),
+			await this.request(key, EXTROVERT.api.listMembershipPath, {
+				campaignId: input.campaignId,
+				listId: input.listId,
+			}),
 		);
+	}
+
+	async removeProspectFromCampaign(
+		key: string,
+		input: { prospectProfileUrl: string; campaignId: string },
+	): Promise<void> {
+		try {
+			await this.request(key, EXTROVERT.api.listMembershipPath, undefined, {
+				method: "DELETE",
+				body: input,
+				tolerate: [404],
+				skipJsonParsing: true,
+			});
+		} catch (error) {
+			if (error instanceof ExtrovertHttpError && error.status === 404) return;
+			throw error;
+		}
 	}
 
 	async getProspectDetail(
@@ -218,11 +238,12 @@ export class ExtrovertClient {
 	private async request(
 		key: string,
 		path: string,
-		query?: Record<string, string>,
+		query?: Record<string, string | undefined>,
 		options?: {
 			tolerate?: number[];
-			method?: "GET" | "POST";
-			body?: ExtrovertAddUsersToListInput;
+			method?: "GET" | "POST" | "DELETE";
+			body?: unknown;
+			skipJsonParsing?: boolean;
 		},
 	): Promise<unknown> {
 		const now = Date.now();
@@ -233,12 +254,12 @@ export class ExtrovertClient {
 		}
 		const url = new URL(`${EXTROVERT.api.baseUrl}${path}`);
 		for (const [name, value] of Object.entries(query ?? {})) {
-			url.searchParams.set(name, value);
+			if (value !== undefined) url.searchParams.set(name, value);
 		}
 		const requestInit: RequestInit = {
 			method: options?.method ?? "GET",
 		};
-		if (options?.body) {
+		if (options?.body !== undefined) {
 			requestInit.headers = {
 				"x-api-key": key,
 				"content-type": "application/json",
@@ -258,6 +279,10 @@ export class ExtrovertClient {
 			throw new Error(
 				`Extrovert request failed with status ${response.status}.`,
 			);
+		}
+		if (options?.skipJsonParsing) {
+			await response.text();
+			return undefined;
 		}
 		return response.json();
 	}

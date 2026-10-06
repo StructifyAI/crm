@@ -92,28 +92,50 @@ const fieldSpecs: FieldSpec[] = [
 
 class StubExtrovertClient {
 	members: ExtrovertListMembership[] = [];
+	campaignMembers: ExtrovertListMembership[] = [];
 	details = new Map<string, ExtrovertProspectDetail | null>();
 	capacity = 0;
-	membershipCalls: Array<{ campaignId: string; listId: string }> = [];
+	membershipCalls: Array<{ campaignId: string; listId?: string }> = [];
 	capacityCalls: string[] = [];
 	detailCalls: string[] = [];
 	addCalls: AddInput[] = [];
+	removalCalls: Array<{
+		prospectProfileUrl: string;
+		campaignId: string;
+	}> = [];
 	addResult?: (
 		input: AddInput,
 	) => Promise<ExtrovertAddUsersToListResult> | ExtrovertAddUsersToListResult;
 
 	async listProspectsInList(
 		_key: string,
-		input: { campaignId: string; listId: string },
+		input: { campaignId: string; listId?: string },
 	) {
 		if (
 			input.campaignId !== EXTROVERT.icpList.campaignId ||
-			input.listId !== EXTROVERT.icpList.listId
+			(input.listId && input.listId !== EXTROVERT.icpList.listId)
 		) {
 			throw new Error("The sync used an unexpected campaign or list.");
 		}
-		this.membershipCalls.push(input);
-		return this.members;
+		this.membershipCalls.push(structuredClone(input));
+		return input.listId ? this.members : this.campaignMembers;
+	}
+
+	async removeProspectFromCampaign(
+		_key: string,
+		input: { prospectProfileUrl: string; campaignId: string },
+	) {
+		if (input.campaignId !== EXTROVERT.icpList.campaignId) {
+			throw new Error("The sync used an unexpected campaign.");
+		}
+		this.removalCalls.push(structuredClone(input));
+		const url = canonicalLinkedinUrl(input.prospectProfileUrl);
+		this.members = this.members.filter(
+			(member) => canonicalLinkedinUrl(member.prospectProfileUrl) !== url,
+		);
+		this.campaignMembers = this.campaignMembers.filter(
+			(member) => canonicalLinkedinUrl(member.prospectProfileUrl) !== url,
+		);
 	}
 
 	async getProspectDetail(_key: string, id: string) {
@@ -168,8 +190,18 @@ function makeService(
 	return service;
 }
 
-function membership(id: string, url: string): ExtrovertListMembership {
-	return { id, listId, prospectProfileUrl: url };
+function membership(
+	id: string,
+	url: string,
+	overrides: Partial<ExtrovertListMembership> = {},
+): ExtrovertListMembership {
+	return { id, listId, prospectProfileUrl: url, ...overrides };
+}
+
+function canonicalUrls(urls: string[]) {
+	return urls
+		.map((url) => canonicalLinkedinUrl(url))
+		.filter((url): url is string => Boolean(url));
 }
 
 function detail(
@@ -209,6 +241,7 @@ function queueCandidate(
 		active: null,
 		jobChange: null,
 		headline: null,
+		connected: false,
 		...overrides,
 	};
 }
@@ -552,6 +585,7 @@ describe("ICP list pure helpers", () => {
 		);
 		expect(exclusions.exclusions).toEqual({
 			no_url: 1,
+			connected: 0,
 			inactive: 1,
 			job_change: 1,
 			sales_marketing: 1,
@@ -561,6 +595,19 @@ describe("ICP list pure helpers", () => {
 			duplicate_url: 1,
 		});
 		expect(exclusions.queue[0]?.id).toBe("duplicate-b");
+	});
+
+	it("excludes connected contacts from the queue", () => {
+		const plan = buildQueue(
+			[
+				queueCandidate("connected", { connected: true }),
+				queueCandidate("eligible"),
+			],
+			{ inListUrls: [], skippedUrls: [] },
+		);
+
+		expect(plan.queue.map(({ id }) => id)).toEqual(["eligible"]);
+		expect(plan.exclusions.connected).toBe(1);
 	});
 
 	it("matches company names and domain stems in headlines", () => {
@@ -798,6 +845,117 @@ describe("ExtrovertListSyncService", () => {
 		);
 	});
 
+	it("removes connected campaign members and never marks or re-adds them", async () => {
+		const urls = [
+			`https://www.linkedin.com/in/${suffix}-connected-icp`,
+			`https://www.linkedin.com/in/${suffix}-connected-other`,
+			`https://www.linkedin.com/in/${suffix}-crm-connected`,
+			`https://www.linkedin.com/in/${suffix}-prune-connected`,
+			`https://www.linkedin.com/in/${suffix}-pending`,
+			`https://www.linkedin.com/in/${suffix}-not-connected`,
+		];
+		const contacts = await Promise.all(
+			urls
+				.slice(0, 4)
+				.map((url, index) =>
+					createContact(`extrovert-list-${suffix}-connected-${index}`, url),
+				),
+		);
+		for (const contact of contacts) {
+			await setField(contact.id, "linkedin_active", "Active");
+		}
+		for (const index of [2, 3]) {
+			const contact = contacts[index];
+			if (!contact) throw new Error("A connected contact fixture is missing.");
+			await db.extrovertProspect.create({
+				data: {
+					id: `extrovert-list-${suffix}-connected-prospect-${index}`,
+					contactId: contact.id,
+					campaignId: "teammate-campaign",
+					connectionStatus: "connected",
+					directComments: 0,
+					indirectComments: 0,
+					likes: 0,
+					lastSeenAt: now,
+				},
+			});
+		}
+
+		const client = new StubExtrovertClient();
+		client.capacity = 101;
+		client.members = [
+			membership("connected-icp", urls[0] ?? "", {
+				connectionStatus: "connected",
+			}),
+		];
+		client.campaignMembers = [
+			membership("connected-icp", urls[0] ?? "", {
+				connectionStatus: "connected",
+			}),
+			membership("connected-other-list", urls[1] ?? "", {
+				listId: "another-gm-list",
+				connectionStatus: "connected",
+			}),
+			membership("crm-connected", urls[2] ?? "", {
+				listId: "another-gm-list",
+				connectionStatus: "not_connected",
+			}),
+			membership("pending", urls[4] ?? "", {
+				listId: "another-gm-list",
+				connectionStatus: "pending",
+			}),
+			membership("not-connected", urls[5] ?? "", {
+				listId: "another-gm-list",
+				connectionStatus: "not_connected",
+			}),
+		];
+		await db.extrovertListSync.update({
+			where: { listId },
+			data: {
+				enabled: true,
+				previousUrls: urls.slice(0, 4),
+			},
+		});
+
+		const service = makeService(client, undefined, [
+			queueCandidate("removed-connected", { url: urls[1] ?? "" }),
+		]);
+		await service.run({ now, apiKey });
+
+		expect(client.removalCalls).toEqual(
+			urls.slice(0, 3).map((prospectProfileUrl) => ({
+				prospectProfileUrl,
+				campaignId: EXTROVERT.icpList.campaignId,
+			})),
+		);
+		expect(client.campaignMembers.map(({ id }) => id)).toEqual([
+			"pending",
+			"not-connected",
+		]);
+		expect(client.addCalls).toHaveLength(0);
+		const firstState = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+		expect(firstState.lastSummary).toContain("removed 3 connected");
+		expect(new Set(firstState.skippedUrls as string[])).toEqual(
+			new Set(canonicalUrls(urls.slice(0, 3))),
+		);
+		expect(firstState.previousUrls).toEqual([]);
+		for (const contact of contacts) {
+			expect(await readField(contact.id, "linkedin_active")).toBe("Active");
+		}
+
+		await service.run({
+			now: new Date(now.getTime() + EXTROVERT.icpList.cycleIntervalMs + 1),
+			apiKey,
+		});
+		expect(client.removalCalls).toHaveLength(3);
+		expect(client.addCalls).toHaveLength(0);
+		for (const contact of contacts) {
+			expect(await readField(contact.id, "linkedin_active")).toBe("Active");
+		}
+	});
+
 	it("does not remove or add prospects when every checked detail crashed", async () => {
 		const previousUrl = `https://www.linkedin.com/in/previous-${suffix}`;
 		const contact = await createContact(
@@ -868,6 +1026,7 @@ describe("ExtrovertListSyncService", () => {
 		).toBe(true);
 		expect(client.membershipCalls).toEqual([
 			{ campaignId: EXTROVERT.icpList.campaignId, listId },
+			{ campaignId: EXTROVERT.icpList.campaignId },
 		]);
 		expect(client.capacityCalls).toEqual([EXTROVERT.icpList.campaignId]);
 		expect(candidates).toHaveLength(550);
@@ -1045,6 +1204,16 @@ describe("ExtrovertListSyncService", () => {
 		const contact = await createContact(`extrovert-list-${suffix}-dry`, url);
 		const client = new StubExtrovertClient();
 		client.members = [membership("dry", url)];
+		client.campaignMembers = [
+			membership(
+				"dry-connected",
+				`https://www.linkedin.com/in/${suffix}-dry-connected`,
+				{
+					listId: "another-gm-list",
+					connectionStatus: "connected",
+				},
+			),
+		];
 		client.details.set(
 			"dry",
 			detail("dry", url, {
@@ -1077,6 +1246,10 @@ describe("ExtrovertListSyncService", () => {
 		});
 
 		expect(plan).toHaveProperty("writes");
+		expect(plan).toMatchObject({ connectedRemovals: 1 });
+		if (!("summary" in plan))
+			throw new Error("The dry run did not return a plan.");
+		expect(plan.summary).toContain("would remove 1 connected");
 		expect(client.addCalls).toHaveLength(0);
 		expect(afterState).toEqual(beforeState);
 		expect(afterContact).toEqual(beforeContact);
@@ -1133,6 +1306,7 @@ describe("ExtrovertListSyncService", () => {
 			removals: [],
 		});
 		expect(plan.summary).toContain("all 1 checked prospects");
+		expect(plan.summary).toContain("Would remove 0 connected");
 		expect(await readField(contact.id, "linkedin_active")).toBe("Active");
 		expect(
 			await db.extrovertListSync.findUniqueOrThrow({ where: { listId } }),
@@ -1188,6 +1362,81 @@ describe("ExtrovertListSyncService", () => {
 		expect(
 			parseExtrovertListSyncCycle(completedLegacyCycle())?.removalsApplied,
 		).toBe(false);
+		expect(
+			parseExtrovertListSyncCycle(completedLegacyCycle())?.connectedRemovedUrls,
+		).toEqual([]);
+	});
+
+	it("persists connected removals and resumes after the tick budget expires", async () => {
+		const urls = [
+			`https://www.linkedin.com/in/${suffix}-budget-connected-1`,
+			`https://www.linkedin.com/in/${suffix}-budget-connected-2`,
+		];
+		const [firstCanonicalUrl] = canonicalUrls([urls[0] ?? ""]);
+		if (!firstCanonicalUrl)
+			throw new Error("The first connected URL is invalid.");
+		const client = new StubExtrovertClient();
+		client.campaignMembers = urls.map((url, index) =>
+			membership(`budget-connected-${index}`, url, {
+				listId: "another-gm-list",
+				connectionStatus: "connected",
+			}),
+		);
+		const lastCycleFinishedAt = new Date(now.getTime() - 1_000);
+		await db.extrovertListSync.update({
+			where: { listId },
+			data: {
+				enabled: true,
+				cycle: completedLegacyCycle(),
+				lastCycleFinishedAt,
+			},
+		});
+
+		const originalNow = Date.now;
+		let clock = 1_000;
+		Date.now = () => clock;
+		const remove = client.removeProspectFromCampaign.bind(client);
+		client.removeProspectFromCampaign = async (key, input) => {
+			await remove(key, input);
+			clock += 1;
+		};
+		let first: Awaited<ReturnType<ReturnType<typeof makeService>["run"]>>;
+		try {
+			first = await makeService(client).run({
+				now,
+				apiKey,
+				tickBudgetMs: 1,
+			});
+		} finally {
+			Date.now = originalNow;
+		}
+
+		const deferredState = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+		expect(first).toMatchObject({ complete: false, resumed: true });
+		expect(client.removalCalls).toHaveLength(1);
+		expect(client.addCalls).toHaveLength(0);
+		expect(deferredState.cycle).toMatchObject({
+			connectedRemovedUrls: [firstCanonicalUrl],
+			removalsApplied: false,
+		});
+		expect(deferredState.lastCycleFinishedAt).toEqual(lastCycleFinishedAt);
+
+		const second = await makeService(client).run({
+			now: new Date(now.getTime() + 1_000),
+			apiKey,
+		});
+		const completedState = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+		expect(second).toMatchObject({ complete: true, resumed: true });
+		expect(client.removalCalls).toHaveLength(2);
+		expect(completedState.cycle).toBeNull();
+		expect(new Set(completedState.skippedUrls as string[])).toEqual(
+			new Set(canonicalUrls(urls)),
+		);
+		expect(completedState.lastSummary).toContain("removed 2 connected");
 	});
 
 	it("defers removals when the tick budget is exhausted", async () => {
