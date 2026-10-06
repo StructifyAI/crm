@@ -22,6 +22,7 @@ import { Injectable } from "@nestjs/common";
 import { EXTROVERT } from "./extrovert-config";
 
 type ExtrovertAddUsersToListInput = {
+	campaignId: string;
 	listId: string;
 	userUrls: string[];
 	moveOwnDuplicated: false;

@@ -1115,6 +1115,7 @@ export class ExtrovertListSyncService {
 			);
 			attempted += batch.length;
 			const result = await this.client.addUsersToList(key, {
+				campaignId: EXTROVERT.icpList.campaignId,
 				listId: EXTROVERT.icpList.listId,
 				userUrls: batch.map(({ url }) => url),
 				moveOwnDuplicated: false,
