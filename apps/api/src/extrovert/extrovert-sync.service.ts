@@ -1,4 +1,5 @@
 import { type Db, Prisma } from "@crm/db";
+import { isMirrored } from "@crm/db/blob";
 import {
 	type FieldDefinitionWithOptions,
 	FieldValueError,
@@ -17,6 +18,30 @@ import { FieldsService } from "../fields/fields.service";
 import { ExtrovertClient } from "./extrovert.client";
 import { EXTROVERT } from "./extrovert-config";
 import { ExtrovertFilingService } from "./extrovert-filing.service";
+import {
+	companiesMatch,
+	computeLinkedInActivity,
+	extractHeadlineCompany,
+	isLinkedInPostRecent,
+} from "./extrovert-linkedin";
+
+type LinkedInFieldDefinition = Pick<
+	FieldDefinitionWithOptions,
+	"id" | "key" | "type"
+> & {
+	options: Pick<
+		FieldDefinitionWithOptions["options"][number],
+		"id" | "label" | "archivedAt"
+	>[];
+};
+
+type LinkedInFieldValue = {
+	contactId: string;
+	fieldId: string;
+	text: string | null;
+	date: Date | null;
+	optionId: string | null;
+};
 
 export type ExtrovertMemberOwner = {
 	id: string;
@@ -79,6 +104,7 @@ export class ExtrovertSyncService {
 			const fieldDefinition = await this.connectionField(
 				setting.extrovertConnectionFieldId,
 			);
+			const linkedinFields = await this.linkedinFields();
 			if (!resume) {
 				await this.saveResume({ runStartedAt, offset, total });
 			}
@@ -102,6 +128,7 @@ export class ExtrovertSyncService {
 					runStartedAt,
 					memberOwners,
 					fieldDefinition,
+					linkedinFields,
 				);
 				result.prospects += counts.prospects;
 				result.created += counts.created;
@@ -112,6 +139,10 @@ export class ExtrovertSyncService {
 				if (offset >= page.total) break;
 			}
 
+			result.fieldSkipped += await this.markDeletedProspectsInactive(
+				new Date(runStartedAt),
+				linkedinFields,
+			);
 			await this.db.extrovertProspect.deleteMany({
 				where: { lastSeenAt: { lt: new Date(runStartedAt) } },
 			});
@@ -146,6 +177,7 @@ export class ExtrovertSyncService {
 		runStartedAt: string,
 		memberOwners: Map<string, ExtrovertMemberOwner>,
 		fieldDefinition: Pick<FieldDefinitionWithOptions, "key" | "type"> | null,
+		linkedinFields: LinkedInFieldDefinition[],
 	): Promise<
 		Pick<ExtrovertSyncResult, "prospects" | "created" | "fieldSkipped">
 	> {
@@ -169,7 +201,30 @@ export class ExtrovertSyncService {
 				};
 			});
 		const resolved = await this.filing.resolveContacts(inputs);
+		const contactIds = [
+			...new Set([...resolved.values()].map((contact) => contact.id)),
+		];
+		const definitionsByKey = new Map(
+			linkedinFields.map((definition) => [definition.key, definition]),
+		);
+		const fieldIds = linkedinFields.map((definition) => definition.id);
 		const counts = { prospects: 0, created: 0, fieldSkipped: 0 };
+		if (contactIds.length === 0) return counts;
+
+		const [contacts, fieldValuesByContact] = await Promise.all([
+			this.db.contact.findMany({
+				where: { id: { in: contactIds } },
+				select: {
+					id: true,
+					imageUrl: true,
+					company: { select: { name: true, domain: true } },
+				},
+			}),
+			this.linkedinValues(contactIds, fieldIds),
+		]);
+		const contactsById = new Map(
+			contacts.map((contact) => [contact.id, contact]),
+		);
 		for (const prospect of prospects) {
 			const count = await this.processProspect(
 				prospect,
@@ -182,6 +237,13 @@ export class ExtrovertSyncService {
 			counts.created += count.created;
 			counts.fieldSkipped += count.fieldSkipped;
 		}
+		counts.fieldSkipped += await this.syncLinkedInContacts(
+			prospects,
+			resolved,
+			contactsById,
+			fieldValuesByContact,
+			definitionsByKey,
+		);
 		return counts;
 	}
 
@@ -275,6 +337,258 @@ export class ExtrovertSyncService {
 		return definition;
 	}
 
+	private async linkedinFields(): Promise<LinkedInFieldDefinition[]> {
+		return this.db.fieldDefinition.findMany({
+			where: {
+				entity: "CONTACT",
+				key: { in: Object.values(EXTROVERT.linkedin.fields) },
+				archivedAt: null,
+			},
+			select: {
+				id: true,
+				key: true,
+				type: true,
+				options: {
+					select: { id: true, label: true, archivedAt: true },
+				},
+			},
+		});
+	}
+
+	private async syncLinkedInContacts<
+		TContact extends {
+			id: string;
+			imageUrl: string | null;
+			company: { name: string; domain: string | null } | null;
+		},
+	>(
+		prospects: ExtrovertProspectV2[],
+		resolved: Awaited<ReturnType<ExtrovertFilingService["resolveContacts"]>>,
+		contactsById: Map<string, TContact>,
+		fieldValuesByContact: Map<string, Map<string, LinkedInFieldValue>>,
+		definitionsByKey: Map<string, LinkedInFieldDefinition>,
+	): Promise<number> {
+		const prospectsByContact = new Map<string, ExtrovertProspectV2>();
+		for (const prospect of prospects) {
+			if (prospect.isDeleted || !prospect.linkedInProfile?.linkedInUrl) {
+				continue;
+			}
+			const normalized = normalizeLinkedinUrl(
+				prospect.linkedInProfile.linkedInUrl,
+			);
+			const contact = normalized ? resolved.get(normalized) : undefined;
+			if (contact && !prospectsByContact.has(contact.id)) {
+				prospectsByContact.set(contact.id, prospect);
+			}
+		}
+
+		let fieldSkipped = 0;
+		for (const [contactId, prospect] of prospectsByContact) {
+			const contact = contactsById.get(contactId);
+			if (!contact) continue;
+			const avatarUrl = prospect.linkedInProfile?.avatarUrl?.trim();
+			if (
+				avatarUrl &&
+				avatarUrl !== contact.imageUrl &&
+				isExternalImageUrl(contact.imageUrl)
+			) {
+				await this.db.contact.updateMany({
+					where: { id: contact.id, imageUrl: contact.imageUrl },
+					data: { imageUrl: avatarUrl },
+				});
+			}
+
+			const existingValues = fieldValuesByContact.get(contactId);
+			const changedValues: Record<string, string> = {};
+			const addIfChanged = (key: string, value: string) => {
+				const definition = definitionsByKey.get(key);
+				if (!definition) return;
+				const existing = existingValues?.get(definition.id);
+				if (storedLinkedInValue(definition, existing) !== value) {
+					changedValues[key] = value;
+				}
+			};
+
+			const headline = prospect.linkedInProfile?.headline?.trim();
+			if (headline) addIfChanged(EXTROVERT.linkedin.fields.headline, headline);
+
+			const activity = computeLinkedInActivity({
+				status: prospect.lastPostsFetchStatus,
+				newestPostDate: prospect.statistics?.newestPostDate,
+				lastNewSuccessPostsObtainFinishDate:
+					prospect.statistics?.lastNewSuccessPostsObtainFinishDate,
+				lastNewPostsObtainFinishDate: prospect.lastNewPostsObtainFinishDate,
+			});
+			if (activity) {
+				addIfChanged(EXTROVERT.linkedin.fields.active, activity.active);
+				if (activity.lastPostDate) {
+					addIfChanged(
+						EXTROVERT.linkedin.fields.lastPost,
+						activity.lastPostDate,
+					);
+				}
+				addIfChanged(
+					EXTROVERT.linkedin.fields.activityChecked,
+					activity.checkedDate,
+				);
+			}
+
+			const jobChangeField = definitionsByKey.get(
+				EXTROVERT.linkedin.fields.jobChange,
+			);
+			const currentJobChange = jobChangeField
+				? storedLinkedInValue(
+						jobChangeField,
+						existingValues?.get(jobChangeField.id),
+					)
+				: null;
+			const headlineField = definitionsByKey.get(
+				EXTROVERT.linkedin.fields.headline,
+			);
+			const storedHeadline = headlineField
+				? storedLinkedInValue(
+						headlineField,
+						existingValues?.get(headlineField.id),
+					)
+				: null;
+			const headlineCompany = headline
+				? extractHeadlineCompany(headline)
+				: null;
+			if (
+				jobChangeField &&
+				currentJobChange !== "Confirmed" &&
+				contact.company &&
+				headlineCompany &&
+				(headline !== storedHeadline || currentJobChange === null)
+			) {
+				addIfChanged(
+					EXTROVERT.linkedin.fields.jobChange,
+					companiesMatch(
+						headlineCompany,
+						contact.company.name,
+						contact.company.domain,
+					)
+						? "No change"
+						: "Possible job change",
+				);
+			}
+
+			if (Object.keys(changedValues).length > 0) {
+				fieldSkipped += await this.applyContactFieldValues(
+					contactId,
+					changedValues,
+				);
+			}
+		}
+		return fieldSkipped;
+	}
+
+	private async linkedinValues(
+		contactIds: string[],
+		fieldIds: string[],
+	): Promise<Map<string, Map<string, LinkedInFieldValue>>> {
+		const fieldValuesByContact = new Map<
+			string,
+			Map<string, LinkedInFieldValue>
+		>();
+		if (contactIds.length === 0 || fieldIds.length === 0) {
+			return fieldValuesByContact;
+		}
+
+		const fieldValues = await this.db.fieldValue.findMany({
+			where: {
+				contactId: { in: contactIds },
+				fieldId: { in: fieldIds },
+			},
+			select: {
+				contactId: true,
+				fieldId: true,
+				text: true,
+				date: true,
+				optionId: true,
+			},
+		});
+		const valuesWithContactId = fieldValues.filter(
+			(value): value is typeof value & { contactId: string } =>
+				value.contactId !== null,
+		);
+		for (const value of valuesWithContactId) {
+			const contactValues =
+				fieldValuesByContact.get(value.contactId) ?? new Map();
+			contactValues.set(value.fieldId, value);
+			fieldValuesByContact.set(value.contactId, contactValues);
+		}
+		return fieldValuesByContact;
+	}
+
+	private async markDeletedProspectsInactive(
+		runStartedAt: Date,
+		linkedinFields: LinkedInFieldDefinition[],
+	): Promise<number> {
+		const activeField = linkedinFields.find(
+			(field) => field.key === EXTROVERT.linkedin.fields.active,
+		);
+		if (!activeField) return 0;
+
+		const staleRows = await this.db.extrovertProspect.findMany({
+			where: { lastSeenAt: { lt: runStartedAt } },
+			select: { contactId: true },
+		});
+		const staleContactIds = [
+			...new Set(
+				staleRows.flatMap((row) => (row.contactId ? [row.contactId] : [])),
+			),
+		];
+		if (staleContactIds.length === 0) return 0;
+
+		const recentRows = await this.db.extrovertProspect.findMany({
+			where: {
+				contactId: { in: staleContactIds },
+				lastSeenAt: { gte: runStartedAt },
+			},
+			select: { contactId: true },
+		});
+		const recentlySeen = new Set(
+			recentRows.flatMap((row) => (row.contactId ? [row.contactId] : [])),
+		);
+		const contactIds = staleContactIds.filter(
+			(contactId) => !recentlySeen.has(contactId),
+		);
+		if (contactIds.length === 0) return 0;
+
+		const lastPostField = linkedinFields.find(
+			(field) => field.key === EXTROVERT.linkedin.fields.lastPost,
+		);
+		const fieldIds = [
+			activeField.id,
+			...(lastPostField ? [lastPostField.id] : []),
+		];
+		const fieldValuesByContact = await this.linkedinValues(
+			contactIds,
+			fieldIds,
+		);
+
+		const now = new Date();
+		let fieldSkipped = 0;
+		for (const contactId of contactIds) {
+			const values = fieldValuesByContact.get(contactId);
+			if (
+				storedLinkedInValue(activeField, values?.get(activeField.id)) ===
+				"Inactive"
+			) {
+				continue;
+			}
+			const lastPost = lastPostField
+				? values?.get(lastPostField.id)?.date
+				: null;
+			if (isLinkedInPostRecent(lastPost, now)) continue;
+			fieldSkipped += await this.applyContactFieldValues(contactId, {
+				[activeField.key]: "Inactive",
+			});
+		}
+		return fieldSkipped;
+	}
+
 	private async writeConnectionField(
 		contactId: string,
 		field: Pick<FieldDefinitionWithOptions, "key" | "type">,
@@ -289,11 +603,16 @@ export class ExtrovertSyncService {
 		} else {
 			return 0;
 		}
+		return this.applyContactFieldValues(contactId, { [field.key]: value });
+	}
+
+	private async applyContactFieldValues(
+		contactId: string,
+		values: Record<string, string>,
+	): Promise<number> {
 		try {
 			await this.db.$transaction((tx) =>
-				this.fields.applyValues(tx, "CONTACT", contactId, {
-					[field.key]: value,
-				}),
+				this.fields.applyValues(tx, "CONTACT", contactId, values),
 			);
 			return 0;
 		} catch (error) {
@@ -364,4 +683,31 @@ function dateOrNull(value: string | null | undefined): Date | null {
 	if (!value) return null;
 	const date = new Date(value);
 	return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function storedLinkedInValue(
+	field: LinkedInFieldDefinition,
+	value: LinkedInFieldValue | undefined,
+): string | null {
+	if (!value) return null;
+	if (field.type === "DATE")
+		return value.date?.toISOString().slice(0, 10) ?? null;
+	if (field.type === "SELECT") {
+		return (
+			field.options.find((option) => option.id === value.optionId)?.label ??
+			null
+		);
+	}
+	return value.text;
+}
+
+function isExternalImageUrl(value: string | null): boolean {
+	if (!value) return true;
+	if (isMirrored(value)) return false;
+	try {
+		const { protocol } = new URL(value);
+		return protocol === "http:" || protocol === "https:";
+	} catch {
+		return false;
+	}
 }
