@@ -23,8 +23,13 @@ import { EXTROVERT } from "../src/extrovert/extrovert-config";
 import { ExtrovertEngagementSyncService } from "../src/extrovert/extrovert-engagement-sync.service";
 import { ExtrovertFilingService } from "../src/extrovert/extrovert-filing.service";
 import { ExtrovertIngestService } from "../src/extrovert/extrovert-ingest.service";
+import {
+	companiesMatch,
+	computeLinkedInActivity,
+	extractHeadlineCompany,
+} from "../src/extrovert/extrovert-linkedin";
 import { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
-import type { FieldsService } from "../src/fields/fields.service";
+import { FieldsService } from "../src/fields/fields.service";
 import { withDiscardedCrmEvents } from "./agent-trigger.stub";
 import { noContactEvents } from "./contact-events.stub";
 
@@ -47,6 +52,7 @@ const agent = {
 const stamp = new ActivityStampService(db);
 const filing = new ExtrovertFilingService(db, agent, stamp);
 const ingest = new ExtrovertIngestService(db, filing);
+const fieldsService = new FieldsService(db, agent);
 
 function prospect(
 	id: string,
@@ -79,14 +85,256 @@ type AppliedValues = Parameters<FieldsService["applyValues"]>[3];
 const appliedValues: AppliedValues[] = [];
 const fields = {
 	applyValues: async (
-		_tx: Prisma.TransactionClient,
-		_entity: FieldEntity,
-		_recordId: string,
+		tx: Prisma.TransactionClient,
+		entity: FieldEntity,
+		recordId: string,
 		values: AppliedValues,
 	) => {
 		appliedValues.push(values);
+		await fieldsService.applyValues(tx, entity, recordId, values);
 	},
-} as never;
+} as unknown as FieldsService;
+
+async function createLinkedInFields() {
+	const definitions = [
+		{
+			key: EXTROVERT.linkedin.fields.headline,
+			label: "LinkedIn headline",
+			type: "TEXT",
+			options: [],
+		},
+		{
+			key: EXTROVERT.linkedin.fields.active,
+			label: "LinkedIn active",
+			type: "SELECT",
+			options: ["Active", "Inactive"],
+		},
+		{
+			key: EXTROVERT.linkedin.fields.lastPost,
+			label: "LinkedIn last post",
+			type: "DATE",
+			options: [],
+		},
+		{
+			key: EXTROVERT.linkedin.fields.activityChecked,
+			label: "LinkedIn activity checked",
+			type: "DATE",
+			options: [],
+		},
+		{
+			key: EXTROVERT.linkedin.fields.jobChange,
+			label: "LinkedIn job change",
+			type: "SELECT",
+			options: ["Possible job change", "Confirmed", "No change"],
+		},
+	] as const;
+
+	for (const [position, definition] of definitions.entries()) {
+		const field = await db.fieldDefinition.create({
+			data: {
+				entity: "CONTACT",
+				key: definition.key,
+				label: definition.label,
+				type: definition.type,
+				position: 100 + position,
+			},
+		});
+		if (definition.options.length > 0) {
+			await db.fieldOption.createMany({
+				data: definition.options.map((label, optionPosition) => ({
+					fieldId: field.id,
+					label,
+					position: optionPosition,
+				})),
+			});
+		}
+	}
+}
+
+async function createCompanyContact(
+	linkedinUrl: string,
+	companyName: string,
+	companyDomain: string,
+	imageUrl: string | null = null,
+) {
+	const company = await db.company.create({
+		data: { name: companyName, domain: companyDomain },
+	});
+	const contact = await db.contact.create({
+		data: {
+			firstName: "Taylor",
+			lastName: "Prospect",
+			linkedinUrl,
+			imageUrl,
+			companyId: company.id,
+		},
+	});
+	return { contact, company };
+}
+
+async function setLinkedInFieldValues(
+	contactId: string,
+	values: Record<string, string>,
+) {
+	await db.$transaction((tx) =>
+		fieldsService.applyValues(tx, "CONTACT", contactId, values),
+	);
+}
+
+async function readLinkedInFieldValue(
+	contactId: string,
+	key: string,
+): Promise<string | null> {
+	const field = await db.fieldDefinition.findFirstOrThrow({
+		where: { entity: "CONTACT", key },
+		select: { id: true },
+	});
+	const value = await db.fieldValue.findFirst({
+		where: { contactId, fieldId: field.id },
+		select: {
+			text: true,
+			date: true,
+			option: { select: { label: true } },
+		},
+	});
+	if (!value) return null;
+	return (
+		value.option?.label ?? value.date?.toISOString().slice(0, 10) ?? value.text
+	);
+}
+
+async function enableProspectSync() {
+	await db.appSetting.upsert({
+		where: { id: SETTINGS_ID },
+		create: { id: SETTINGS_ID, extrovertApiKey: "test-key" },
+		update: {
+			extrovertApiKey: "test-key",
+			extrovertSyncResume: Prisma.JsonNull,
+			extrovertConnectionFieldId: null,
+		},
+	});
+}
+
+describe("Extrovert LinkedIn", () => {
+	it.each([
+		[
+			"Lyndex-Nikken",
+			"Chief Financial Officer at Lyndex-Nikken, Inc.",
+			"No change",
+		],
+		[
+			"Galvanize",
+			"Chief Financial Officer at Galvanize Therapeutics, Inc.",
+			"No change",
+		],
+		[
+			"ALCO Lakeshore",
+			"Chief Financial Officer at Alco Manufacturing Corporation, LLC",
+			"No change",
+		],
+		[
+			"Sheffer Corporation",
+			"President at The Sheffer Corporation",
+			"No change",
+		],
+		[
+			"Marsh Bellofram",
+			"Chief Financial Officer at Marsh Bellofram Group of Companies",
+			"No change",
+		],
+		[
+			"Northeast Tool & Manufacturing",
+			"Chief Operating Officer @ Northeast Tool & Manufacturing",
+			"No change",
+		],
+		[
+			"H3 Manufacturing",
+			"Director of Special Projects at Plymouth Tube Company",
+			"Possible job change",
+		],
+		[
+			"Crusoe Industries",
+			"CFO at Easter Owens Electric Co.",
+			"Possible job change",
+		],
+		[
+			"LightForce Orthodontics",
+			"President @ LightForce | Tech CXO | ex-Walmart, Zebra, HP",
+			"No change",
+		],
+	])("matches %s with %s as %s", (companyName, headline, expected) => {
+		const headlineCompany = extractHeadlineCompany(headline);
+
+		expect(headlineCompany).not.toBeNull();
+		expect(
+			headlineCompany ? companiesMatch(headlineCompany, companyName) : null,
+		).toBe(expected === "No change");
+	});
+
+	it.each(["Retired", "Chief Financial Officer & Treasurer"])(
+		"does not extract a company from %s",
+		(headline) => {
+			expect(extractHeadlineCompany(headline)).toBeNull();
+		},
+	);
+
+	it("matches a company domain stem when the CRM name differs", () => {
+		expect(
+			companiesMatch("LightForce", "Orthodontics", "www.lightforceortho.com"),
+		).toBe(true);
+	});
+
+	it("computes post activity and skips statuses without a completed fetch", () => {
+		const now = new Date("2026-10-12T12:00:00.000Z");
+
+		expect(
+			computeLinkedInActivity(
+				{
+					status: "success",
+					newestPostDate: new Date(
+						now.getTime() - 10 * 24 * 60 * 60 * 1000,
+					).toISOString(),
+					lastNewSuccessPostsObtainFinishDate: "2026-10-12T09:30:00.000Z",
+				},
+				now,
+			),
+		).toEqual({
+			active: "Active",
+			lastPostDate: "2026-10-02",
+			checkedDate: "2026-10-12",
+		});
+		expect(
+			computeLinkedInActivity(
+				{
+					status: "success",
+					newestPostDate: new Date(
+						now.getTime() - 40 * 24 * 60 * 60 * 1000,
+					).toISOString(),
+					lastNewPostsObtainFinishDate: "2026-10-11T08:00:00.000Z",
+				},
+				now,
+			),
+		).toMatchObject({ active: "Inactive", lastPostDate: "2026-09-02" });
+		expect(computeLinkedInActivity({ status: "success" }, now)).toMatchObject({
+			active: "Inactive",
+			lastPostDate: null,
+			checkedDate: "2026-10-12",
+		});
+		expect(
+			computeLinkedInActivity({ status: "no_new_post_found" }, now),
+		).toMatchObject({
+			active: "Inactive",
+			lastPostDate: null,
+			checkedDate: "2026-10-12",
+		});
+		expect(
+			computeLinkedInActivity(
+				{ status: "crashed_or_cancelled", newestPostDate: "2026-10-12" },
+				now,
+			),
+		).toBeNull();
+	});
+});
 
 async function clean() {
 	await db.extrovertProspect.deleteMany({
@@ -108,11 +356,22 @@ async function clean() {
 			],
 		},
 	});
+	await db.company.deleteMany({
+		where: { domain: { contains: suffix } },
+	});
 	await db.extrovertMember.deleteMany({
 		where: { id: { startsWith: `extrovert-member-${suffix}` } },
 	});
 	await db.fieldDefinition.deleteMany({
-		where: { key: { startsWith: `extrovert-connected-${suffix}` } },
+		where: {
+			OR: [
+				{ key: { startsWith: `extrovert-connected-${suffix}` } },
+				{
+					entity: "CONTACT",
+					key: { in: Object.values(EXTROVERT.linkedin.fields) },
+				},
+			],
+		},
 	});
 	await db.appSetting.updateMany({
 		data: {
@@ -152,13 +411,16 @@ beforeAll(async () => {
 		},
 		update: {},
 	});
+	await createLinkedInFields();
 });
 
 beforeEach(async () => {
 	queued.length = 0;
 	appliedValues.length = 0;
 	await db.extrovertProspect.deleteMany({
-		where: { id: { startsWith: `extrovert-prospect-${suffix}` } },
+		where: {
+			id: { startsWith: "extrovert-prospect-", contains: suffix },
+		},
 	});
 });
 
@@ -376,6 +638,240 @@ describe("Extrovert connection", () => {
 });
 
 describe("Extrovert sync", () => {
+	it("writes profile fields once for a contact and skips unchanged values", async () => {
+		await enableProspectSync();
+		const linkedinUrl = `https://www.linkedin.com/in/linkedin-sync-${suffix}`;
+		const { contact } = await createCompanyContact(
+			linkedinUrl,
+			"Test Company",
+			`test-company-${suffix}.example`,
+		);
+		const item = prospect(`extrovert-prospect-${suffix}-linkedin`, linkedinUrl);
+		item.linkedInProfile = {
+			...item.linkedInProfile,
+			headline: "Chief Financial Officer at Test Company",
+			avatarUrl: `https://images.example/${suffix}.jpg`,
+		};
+		const newestPostDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+		item.lastPostsFetchStatus = "success";
+		item.lastNewPostsObtainFinishDate = "2026-10-10T12:00:00.000Z";
+		item.statistics = {
+			...item.statistics,
+			newestPostDate: newestPostDate.toISOString(),
+			lastNewSuccessPostsObtainFinishDate: "2026-10-10T10:00:00.000Z",
+		};
+		const duplicate = {
+			...item,
+			id: `extrovert-prospect-${suffix}-linkedin-campaign`,
+			campaign: { id: `campaign-second-${suffix}`, name: "Winter" },
+		};
+		const client = {
+			listTeamMembers: async () => [],
+			listProspectsPage: async () => ({
+				prospects: [item, duplicate],
+				total: 2,
+			}),
+		} as unknown as ExtrovertClient;
+		const sync = new ExtrovertSyncService(db, client, filing, fields);
+
+		await expect(sync.run()).resolves.toMatchObject({
+			complete: true,
+			prospects: 2,
+			error: null,
+		});
+		expect(appliedValues).toHaveLength(1);
+		expect(appliedValues[0]).toEqual({
+			[EXTROVERT.linkedin.fields.headline]:
+				"Chief Financial Officer at Test Company",
+			[EXTROVERT.linkedin.fields.active]: "Active",
+			[EXTROVERT.linkedin.fields.lastPost]: newestPostDate
+				.toISOString()
+				.slice(0, 10),
+			[EXTROVERT.linkedin.fields.activityChecked]: "2026-10-10",
+			[EXTROVERT.linkedin.fields.jobChange]: "No change",
+		});
+		expect(
+			await db.contact.findUnique({
+				where: { id: contact.id },
+				select: { imageUrl: true },
+			}),
+		).toEqual({ imageUrl: `https://images.example/${suffix}.jpg` });
+		expect(
+			await readLinkedInFieldValue(
+				contact.id,
+				EXTROVERT.linkedin.fields.headline,
+			),
+		).toBe("Chief Financial Officer at Test Company");
+		expect(
+			await readLinkedInFieldValue(
+				contact.id,
+				EXTROVERT.linkedin.fields.active,
+			),
+		).toBe("Active");
+		expect(
+			await readLinkedInFieldValue(
+				contact.id,
+				EXTROVERT.linkedin.fields.lastPost,
+			),
+		).toBe(newestPostDate.toISOString().slice(0, 10));
+		expect(
+			await readLinkedInFieldValue(
+				contact.id,
+				EXTROVERT.linkedin.fields.activityChecked,
+			),
+		).toBe("2026-10-10");
+		expect(
+			await readLinkedInFieldValue(
+				contact.id,
+				EXTROVERT.linkedin.fields.jobChange,
+			),
+		).toBe("No change");
+
+		const fieldIds = await db.fieldDefinition.findMany({
+			where: { key: { in: Object.values(EXTROVERT.linkedin.fields) } },
+			select: { id: true },
+		});
+		const before = await db.fieldValue.findMany({
+			where: {
+				contactId: contact.id,
+				fieldId: { in: fieldIds.map(({ id }) => id) },
+			},
+			select: { id: true, updatedAt: true },
+		});
+		await sync.run();
+		const after = await db.fieldValue.findMany({
+			where: {
+				contactId: contact.id,
+				fieldId: { in: fieldIds.map(({ id }) => id) },
+			},
+			select: { id: true, updatedAt: true },
+		});
+		expect(appliedValues).toHaveLength(1);
+		expect(after).toEqual(before);
+	});
+
+	it("keeps mirrored avatars and confirmed job changes", async () => {
+		await enableProspectSync();
+		const linkedinUrl = `https://www.linkedin.com/in/linkedin-confirmed-${suffix}`;
+		const mirroredImage =
+			"https://crm-public.blob.vercel-storage.com/mirrored-avatar.jpg";
+		const { contact } = await createCompanyContact(
+			linkedinUrl,
+			"Current Company",
+			`current-company-${suffix}.example`,
+			mirroredImage,
+		);
+		await setLinkedInFieldValues(contact.id, {
+			[EXTROVERT.linkedin.fields.jobChange]: "Confirmed",
+		});
+		const item = prospect(
+			`extrovert-prospect-${suffix}-confirmed`,
+			linkedinUrl,
+		);
+		item.linkedInProfile = {
+			...item.linkedInProfile,
+			headline: "Chief Executive Officer at New Company",
+			avatarUrl: `https://images.example/new-${suffix}.jpg`,
+		};
+		const client = {
+			listTeamMembers: async () => [],
+			listProspectsPage: async () => ({ prospects: [item], total: 1 }),
+		} as unknown as ExtrovertClient;
+
+		const result = await new ExtrovertSyncService(
+			db,
+			client,
+			filing,
+			fields,
+		).run();
+
+		expect(result.error).toBeNull();
+		expect(
+			await db.contact.findUnique({
+				where: { id: contact.id },
+				select: { imageUrl: true },
+			}),
+		).toEqual({ imageUrl: mirroredImage });
+		expect(
+			await readLinkedInFieldValue(
+				contact.id,
+				EXTROVERT.linkedin.fields.jobChange,
+			),
+		).toBe("Confirmed");
+		expect(appliedValues).toHaveLength(1);
+		expect(appliedValues[0]).toEqual({
+			[EXTROVERT.linkedin.fields.headline]:
+				"Chief Executive Officer at New Company",
+		});
+	});
+
+	it("marks deleted prospects inactive only when their last post is not recent", async () => {
+		await enableProspectSync();
+		const now = Date.now();
+		const contacts = await Promise.all(
+			["empty", "old", "recent"].map((label) =>
+				db.contact.create({
+					data: {
+						firstName: "Taylor",
+						linkedinUrl: `https://www.linkedin.com/in/stale-${label}-${suffix}`,
+					},
+				}),
+			),
+		);
+		const oldPost = new Date(now - 40 * 24 * 60 * 60 * 1000)
+			.toISOString()
+			.slice(0, 10);
+		const recentPost = new Date(now - 10 * 24 * 60 * 60 * 1000)
+			.toISOString()
+			.slice(0, 10);
+		for (const [index, contact] of contacts.entries()) {
+			await db.extrovertProspect.create({
+				data: {
+					id: `extrovert-prospect-${suffix}-stale-${index}`,
+					contactId: contact.id,
+					directComments: 0,
+					indirectComments: 0,
+					likes: 0,
+					lastSeenAt: new Date(now - 90 * 24 * 60 * 60 * 1000),
+				},
+			});
+			await setLinkedInFieldValues(contact.id, {
+				[EXTROVERT.linkedin.fields.active]: "Active",
+				...(index === 1
+					? { [EXTROVERT.linkedin.fields.lastPost]: oldPost }
+					: index === 2
+						? { [EXTROVERT.linkedin.fields.lastPost]: recentPost }
+						: {}),
+			});
+		}
+		const client = {
+			listTeamMembers: async () => [],
+			listProspectsPage: async () => ({ prospects: [], total: 0 }),
+		} as unknown as ExtrovertClient;
+
+		const result = await new ExtrovertSyncService(
+			db,
+			client,
+			filing,
+			fields,
+		).run();
+
+		expect(result).toMatchObject({ complete: true, error: null });
+		expect(
+			await Promise.all(
+				contacts.map((contact) =>
+					readLinkedInFieldValue(contact.id, EXTROVERT.linkedin.fields.active),
+				),
+			),
+		).toEqual(["Inactive", "Inactive", "Active"]);
+		expect(appliedValues).toHaveLength(2);
+		expect(
+			await db.extrovertProspect.count({
+				where: { id: { startsWith: `extrovert-prospect-${suffix}-stale-` } },
+			}),
+		).toBe(0);
+	});
+
 	it("upserts prospects, removes stale rows, and preserves rows on errors", async () => {
 		await db.appSetting.upsert({
 			where: { id: SETTINGS_ID },
@@ -723,7 +1219,7 @@ describe("Extrovert sync", () => {
 		).run();
 
 		expect(result.fieldSkipped).toBe(1);
-		expect(appliedValues).toHaveLength(0);
+		expect(appliedValues).toEqual([]);
 	});
 
 	it("skips an invalid select label without failing the sync", async () => {

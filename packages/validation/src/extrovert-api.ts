@@ -42,6 +42,7 @@ const extrovertLinkedInProfile = z
 		id: z.string().optional(),
 		name: z.string().optional(),
 		headline: z.string().optional(),
+		avatarUrl: z.string().nullable().optional(),
 		linkedInUrl: z.string().optional(),
 	})
 	.passthrough();
@@ -170,6 +171,8 @@ export const extrovertProspectV2 = z
 		sharedBy: extrovertMemberReference.nullable().optional(),
 		user: extrovertMemberReference.nullable().optional(),
 		userConnection: extrovertUserConnection.nullable().optional(),
+		lastPostsFetchStatus: z.string().nullable().optional(),
+		lastNewPostsObtainFinishDate: z.string().nullable().optional(),
 		statistics: z
 			.object({
 				totalPostsCount: z.number().optional().default(0),
@@ -178,6 +181,8 @@ export const extrovertProspectV2 = z
 				indirectAnsweredPostsCount: z.number().optional().default(0),
 				postsLikesCount: z.number().optional().default(0),
 				indirectPostsLikesCount: z.number().optional().default(0),
+				newestPostDate: z.string().nullable().optional(),
+				lastNewSuccessPostsObtainFinishDate: z.string().nullable().optional(),
 			})
 			.passthrough()
 			.optional(),
