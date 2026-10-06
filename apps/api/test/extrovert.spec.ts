@@ -262,6 +262,39 @@ describe("Extrovert LinkedIn", () => {
 			"President @ LightForce | Tech CXO | ex-Walmart, Zebra, HP",
 			"No change",
 		],
+		[
+			"CSC Pails",
+			"VP & CFO at Cleveland Steel Container Corporation",
+			"No change",
+		],
+		["RR Products", "Vice President / CFO at R&R Products, Inc.", "No change"],
+		["Vietnam Forming Technology JSC", "COO at VIET FORM TECH", "No change"],
+		[
+			"Curtis Metal Finishing Group",
+			"Vice President / General Manager at Commercial Steel Treating Corporation",
+			"Possible job change",
+		],
+		[
+			"RAM Mounts",
+			"Pres./CEO at National Products Inc.",
+			"Possible job change",
+		],
+		["Crane Co", "Senior Quality Manager at EWI", "Possible job change"],
+		[
+			"Radius Health, Inc.",
+			"Executive Director, Head of IT at Allergy Partners PLLC",
+			"Possible job change",
+		],
+		[
+			"Acument Global Technologies - North America",
+			"V.P. Operations at Textron Fastening Systems",
+			"Possible job change",
+		],
+		[
+			"John-Richard",
+			"CFO at MVP Group International, Inc",
+			"Possible job change",
+		],
 	])("matches %s with %s as %s", (companyName, headline, expected) => {
 		const headlineCompany = extractHeadlineCompany(headline);
 
@@ -271,12 +304,15 @@ describe("Extrovert LinkedIn", () => {
 		).toBe(expected === "No change");
 	});
 
-	it.each(["Retired", "Chief Financial Officer & Treasurer"])(
-		"does not extract a company from %s",
-		(headline) => {
-			expect(extractHeadlineCompany(headline)).toBeNull();
-		},
-	);
+	it.each([
+		"Retired",
+		"Chief Financial Officer & Treasurer",
+		"CFO | PE, VC & Public Company Finance Leader | Driving Turnarounds, M&A & Scalable Growth | Manufacturing, Gov Contracting & Distribution at Foo",
+		"Strategic Mobility & Tech Leader | CES Innovation Awards Judge | Speaker @ AutoSens, ADAS Expo",
+		"Chief Executive Officer Yerba Madre. Former Godiva President, Global CBO and Head of private label at Sephora, Inc",
+	])("does not extract a company from %s", (headline) => {
+		expect(extractHeadlineCompany(headline)).toBeNull();
+	});
 
 	it("matches a company domain stem when the CRM name differs", () => {
 		expect(
