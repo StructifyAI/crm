@@ -21,6 +21,13 @@ import {
 import { Injectable } from "@nestjs/common";
 import { EXTROVERT } from "./extrovert-config";
 
+type ExtrovertAddUsersToListInput = {
+	listId: string;
+	userUrls: string[];
+	moveOwnDuplicated: false;
+	shouldBeDeletedIfInactive: true;
+};
+
 class ExtrovertHttpError extends Error {
 	constructor(readonly status: number) {
 		super(`Extrovert request failed with status ${status}.`);
@@ -100,12 +107,7 @@ export class ExtrovertClient {
 
 	async addUsersToList(
 		key: string,
-		input: {
-			listId: string;
-			userUrls: string[];
-			moveOwnDuplicated: false;
-			shouldBeDeletedIfInactive: true;
-		},
+		input: ExtrovertAddUsersToListInput,
 	): Promise<ExtrovertAddUsersToListResult> {
 		return parseExtrovertAddUsersToListResult(
 			await this.request(
@@ -114,12 +116,7 @@ export class ExtrovertClient {
 				{},
 				{
 					method: "POST",
-					body: {
-						listId: input.listId,
-						userUrls: input.userUrls,
-						moveOwnDuplicated: input.moveOwnDuplicated,
-						shouldBeDeletedIfInactive: input.shouldBeDeletedIfInactive,
-					},
+					body: input,
 				},
 			),
 		);
@@ -210,7 +207,7 @@ export class ExtrovertClient {
 		options?: {
 			tolerate?: number[];
 			method?: "GET" | "POST";
-			body?: Record<string, unknown>;
+			body?: ExtrovertAddUsersToListInput;
 		},
 	): Promise<unknown> {
 		const now = Date.now();
@@ -223,12 +220,11 @@ export class ExtrovertClient {
 		for (const [name, value] of Object.entries(query ?? {})) {
 			url.searchParams.set(name, value);
 		}
+		const headers: Record<string, string> = { "x-api-key": key };
+		if (options?.body) headers["content-type"] = "application/json";
 		const response = await fetch(url, {
 			method: options?.method ?? "GET",
-			headers: {
-				"x-api-key": key,
-				...(options?.body ? { "content-type": "application/json" } : {}),
-			},
+			headers,
 			body: options?.body ? JSON.stringify(options.body) : undefined,
 		});
 		if (!response.ok) {

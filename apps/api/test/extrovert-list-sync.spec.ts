@@ -246,13 +246,16 @@ async function ensureFields() {
 			) {
 				continue;
 			}
+			const optionData = {
+				fieldId: definition.id,
+				label: option.label,
+				position: optionIndex,
+			};
 			await db.fieldOption.create({
-				data: {
-					...(option.id ? { id: option.id } : {}),
-					fieldId: definition.id,
-					label: option.label,
-					position: optionIndex,
-				},
+				data:
+					option.id === undefined
+						? optionData
+						: { id: option.id, ...optionData },
 			});
 		}
 	}

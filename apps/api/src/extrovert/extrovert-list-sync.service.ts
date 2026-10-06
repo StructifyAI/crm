@@ -473,7 +473,8 @@ export class ExtrovertListSyncService {
 	constructor(
 		@InjectDatabase() private readonly db: Db,
 		private readonly client: ExtrovertClient,
-		private readonly fields: FieldsService,
+		@Inject(FieldsService)
+		private readonly fields: Pick<FieldsService, "applyValues">,
 		@Inject(EXTROVERT_HEADLINE_JUDGE)
 		private readonly judge: HeadlineJudge,
 	) {}
@@ -767,7 +768,9 @@ export class ExtrovertListSyncService {
 
 		const usable = fetched.filter(({ detail }) => !detail.isDeleted);
 		const contacts = await this.loadContacts(
-			usable.map(({ prospect }) => prospect.url).filter(isString),
+			usable
+				.map(({ prospect }) => prospect.url)
+				.filter((url): url is string => url !== null),
 		);
 		const contactsByUrl = new Map<string, SyncContact[]>();
 		for (const contact of contacts) {
@@ -859,13 +862,13 @@ export class ExtrovertListSyncService {
 				judgePending.has(contact.id),
 			);
 			if (Object.keys(plan.values).length === 0 && !plan.imageUrl) continue;
-			const write = {
+			const write: PlannedContactWrite = {
 				contactId: contact.id,
 				name: [contact.firstName, contact.lastName].filter(Boolean).join(" "),
 				url: contact.linkedinUrl,
 				values: plan.values,
-				...(plan.imageUrl ? { imageUrl: plan.imageUrl } : {}),
 			};
+			if (plan.imageUrl) write.imageUrl = plan.imageUrl;
 			writes.push(write);
 			if (apply) await this.applyWrite(contact.id, plan);
 		}
@@ -1168,10 +1171,6 @@ export class ExtrovertListSyncService {
 			queueSize: queuePlan.queue.length,
 		});
 	}
-}
-
-function isString(value: string | null): value is string {
-	return typeof value === "string";
 }
 
 export function normalizeAgentHeadlineAnswer(
