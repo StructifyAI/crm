@@ -30,6 +30,7 @@ const COMPANY_FIELDS = {
 	brandColor: true,
 	industry: true,
 	subIndustry: true,
+	source: true,
 	employeeCount: true,
 	employeeRange: true,
 	employeeSource: true,
