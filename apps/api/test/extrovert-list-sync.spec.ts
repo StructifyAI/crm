@@ -774,11 +774,11 @@ describe("ICP list pure helpers", () => {
 });
 
 describe("ExtrovertListSyncService", () => {
-	it("marks contacts Inactive when Extrovert prunes their previous URL", async () => {
+	it("matches LinkedIn URL variants when Extrovert prunes their previous URL", async () => {
 		const url = `https://www.linkedin.com/in/removed-${suffix}`;
 		const contact = await createContact(
 			`extrovert-list-${suffix}-removed`,
-			url,
+			`https://linkedin.com/in/REMOVED-${suffix}/`,
 		);
 		await setField(contact.id, "linkedin_active", "Active");
 		const client = new StubExtrovertClient();
