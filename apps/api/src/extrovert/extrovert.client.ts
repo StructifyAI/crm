@@ -73,7 +73,7 @@ export class ExtrovertClient {
 		return parseExtrovertListMembership(
 			await this.request(key, EXTROVERT.api.listMembershipPath, {
 				campaignId: input.campaignId,
-				...(input.listId ? { listId: input.listId } : {}),
+				listId: input.listId,
 			}),
 		);
 	}
@@ -238,7 +238,7 @@ export class ExtrovertClient {
 	private async request(
 		key: string,
 		path: string,
-		query?: Record<string, string>,
+		query?: Record<string, string | undefined>,
 		options?: {
 			tolerate?: number[];
 			method?: "GET" | "POST" | "DELETE";
@@ -254,7 +254,7 @@ export class ExtrovertClient {
 		}
 		const url = new URL(`${EXTROVERT.api.baseUrl}${path}`);
 		for (const [name, value] of Object.entries(query ?? {})) {
-			url.searchParams.set(name, value);
+			if (value !== undefined) url.searchParams.set(name, value);
 		}
 		const requestInit: RequestInit = {
 			method: options?.method ?? "GET",
