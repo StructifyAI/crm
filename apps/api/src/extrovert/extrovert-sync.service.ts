@@ -355,11 +355,13 @@ export class ExtrovertSyncService {
 		});
 	}
 
-	private async syncLinkedInContacts<TContact extends {
-		id: string;
-		imageUrl: string | null;
-		company: { name: string; domain: string | null } | null;
-	}>(
+	private async syncLinkedInContacts<
+		TContact extends {
+			id: string;
+			imageUrl: string | null;
+			company: { name: string; domain: string | null } | null;
+		},
+	>(
 		prospects: ExtrovertProspectV2[],
 		resolved: Awaited<ReturnType<ExtrovertFilingService["resolveContacts"]>>,
 		contactsById: Map<string, TContact>,
