@@ -6,7 +6,7 @@ import { assertResearchPurpose } from "../lib/session-purpose";
 
 export default defineTool({
 	description:
-		"Look up a company's brand, industry, location and social links by domain, and fill in the blanks on its record. Fills empty fields only — never overwrites what a person typed.",
+		"Look up a company's brand, industry, location and social links by domain, and fill in the blanks on its record. Fills empty fields only — never overwrites what a person typed. Imported industry labels are replaced with Context.dev's.",
 	inputSchema: z.object({
 		companyId: z.string(),
 		fresh: z

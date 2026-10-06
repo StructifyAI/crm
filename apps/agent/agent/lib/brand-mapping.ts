@@ -1,4 +1,4 @@
-import type { EmployeeSource, Prisma } from "@crm/db";
+import type { EmployeeSource, Prisma, RecordSource } from "@crm/db";
 import type { Brand } from "./context-dev";
 
 export type BrandUpdate = Prisma.CompanyUpdateInput;
@@ -15,6 +15,7 @@ export type CompanySnapshot = {
 	brandColor: string | null;
 	industry: string | null;
 	subIndustry: string | null;
+	source: RecordSource;
 	employeeCount: number | null;
 	employeeRange: string | null;
 	employeeSource: EmployeeSource | null;
@@ -104,6 +105,11 @@ function clean(value: string | null | undefined): string | null {
 function fillable(key: string, current: CompanySnapshot): boolean {
 	if (key === "iconUrl") return true;
 	if (key === "name") return current.nameIsPlaceholder;
+	if (
+		(key === "industry" || key === "subIndustry") &&
+		current.source === "IMPORT"
+	)
+		return true;
 	return current[key as keyof CompanySnapshot] === null;
 }
 
