@@ -44,6 +44,7 @@ function harness(options: {
 	existing?: string[];
 	history?: MailboxResult<HistoryList>;
 	list?: MailboxResult<MessageList>;
+	messages?: Record<string, GmailMessage>;
 }): Harness {
 	const stored: IncomingMessage[] = [];
 	const settled: Settled[] = [];
@@ -76,7 +77,7 @@ function harness(options: {
 		},
 		async getMessage(_token: string, id: string) {
 			fetched.push(id);
-			return ok(message(id));
+			return ok(options.messages?.[id] ?? message(id));
 		},
 	} as unknown as GmailClient;
 
@@ -218,6 +219,22 @@ describe("GmailSyncService first sync", () => {
 			before: first?.before,
 			pageToken: "page-1",
 		});
+	});
+
+	it("skips drafts while storing sent messages", async () => {
+		const kit = harness({
+			pages: [["draft", "sent"]],
+			messages: {
+				draft: { ...message("draft"), labelIds: ["DRAFT"] },
+				sent: { ...message("sent"), labelIds: ["SENT"] },
+			},
+		});
+
+		const outcome = await kit.service.sync(row(null), deadline());
+
+		expect(kit.fetched).toEqual(["draft", "sent"]);
+		expect(kit.stored.map((parsed) => parsed.gmailMessageId)).toEqual(["sent"]);
+		expect(outcome.messagesWritten).toBe(1);
 	});
 
 	it("hands over to incremental history once the last page is drained", async () => {
