@@ -46,7 +46,6 @@ beforeAll(async () => {
 		data: {
 			name: `Fernhill Systems ${suffix}`,
 			domain,
-			industry: "Security software",
 		},
 		select: { id: true },
 	});
@@ -140,19 +139,43 @@ describe("companyPreamble", () => {
 	});
 
 	it("includes employee data in the company identity line", async () => {
+		const naicsLabel = "332 Fabricated Metal Product Manufacturing";
+		let field = await db.fieldDefinition.findUnique({
+			where: { entity_key: { entity: "COMPANY", key: "naics" } },
+			select: { id: true, options: { select: { id: true, label: true } } },
+		});
+		field ??= await db.fieldDefinition.create({
+			data: {
+				entity: "COMPANY",
+				key: "naics",
+				label: "NAICS",
+				type: "SELECT",
+				position: 0,
+				options: { create: [{ label: naicsLabel, position: 0 }] },
+			},
+			select: { id: true, options: { select: { id: true, label: true } } },
+		});
+		let option = field.options.find((entry) => entry.label === naicsLabel);
+		option ??= await db.fieldOption.create({
+			data: { fieldId: field.id, label: naicsLabel, position: 0 },
+			select: { id: true, label: true },
+		});
+		await db.fieldValue.create({
+			data: { fieldId: field.id, companyId, optionId: option.id },
+		});
+
 		await db.company.update({
 			where: { id: companyId },
 			data: {
 				employeeCount: 120,
 				employeeRange: "51 to 200",
-				industry: "manufacturing",
 			},
 		});
 
 		const { markdown } = await companyPreamble(companyId, rep);
 
 		expect(markdown).toContain(
-			", manufacturing, 120 employees, estimated revenue ≈ $33.1M from headcount — company id",
+			", 332 Fabricated Metal Product Manufacturing, 120 employees, estimated revenue ≈ $27.5M from headcount — company id",
 		);
 	});
 

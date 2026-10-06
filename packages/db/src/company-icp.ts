@@ -43,6 +43,13 @@ export const ICP_NAICS_CODES = new Set([
 
 export const NAICS_FIELD_KEY = "naics";
 
+export const NAICS_VALUE_SELECT = {
+	where: {
+		field: { entity: "COMPANY", key: NAICS_FIELD_KEY, archivedAt: null },
+	},
+	select: { option: { select: { label: true } } },
+} satisfies Prisma.Company$fieldValuesArgs;
+
 export function parseEmployeeRange(
 	text: string | null | undefined,
 ): { lo: number; hi: number } | null {
@@ -139,16 +146,7 @@ export async function recomputeCompanyIcp(
 				employeeCount: true,
 				countryCode: true,
 				country: true,
-				fieldValues: {
-					where: {
-						field: {
-							entity: "COMPANY",
-							key: NAICS_FIELD_KEY,
-							archivedAt: null,
-						},
-					},
-					select: { option: { select: { label: true } } },
-				},
+				fieldValues: NAICS_VALUE_SELECT,
 			},
 		});
 

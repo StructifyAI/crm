@@ -30,29 +30,29 @@ describe("normalizeEmployeeRange", () => {
 });
 
 describe("estimateRevenue", () => {
-	it("exports ordered rates and matches industry without case sensitivity", () => {
+	it("exports ordered rates and matches the NAICS prefix", () => {
 		expect(REVENUE_PER_EMPLOYEE_USD.map(({ rate }) => rate)).toEqual([
-			229_000, 283_000, 276_000,
+			229_000, 276_000,
 		]);
 		expect(
 			estimateRevenue({
 				employeeCount: 1,
 				employeeRange: null,
-				industry: "Machine Shop Manufacturer",
+				naics: "332 Fabricated Metal Product Manufacturing",
 			}),
 		).toEqual({ lowUsd: 229_000, highUsd: 229_000 });
 		expect(
 			estimateRevenue({
 				employeeCount: 1,
 				employeeRange: null,
-				industry: "STAMPING",
+				naics: "333 Machinery Manufacturing",
 			}),
-		).toEqual({ lowUsd: 283_000, highUsd: 283_000 });
+		).toEqual({ lowUsd: 276_000, highUsd: 276_000 });
 		expect(
 			estimateRevenue({
 				employeeCount: 1,
 				employeeRange: null,
-				industry: "Aerospace manufacturing",
+				naics: "336 Transportation Equipment Manufacturing",
 			}),
 		).toEqual({ lowUsd: 276_000, highUsd: 276_000 });
 	});
@@ -62,7 +62,7 @@ describe("estimateRevenue", () => {
 			estimateRevenue({
 				employeeCount: 7,
 				employeeRange: "51 to 200",
-				industry: "Machine Shops/Contract Manufacturers",
+				naics: "332 Fabricated Metal Product Manufacturing",
 			}),
 		).toEqual({ lowUsd: 1_603_000, highUsd: 1_603_000 });
 	});
@@ -72,7 +72,7 @@ describe("estimateRevenue", () => {
 			estimateRevenue({
 				employeeCount: null,
 				employeeRange: "51 to 200",
-				industry: "manufacturing",
+				naics: "333 Machinery Manufacturing",
 			}),
 		).toEqual({ lowUsd: 14_076_000, highUsd: 55_200_000 });
 	});
@@ -82,24 +82,38 @@ describe("estimateRevenue", () => {
 			estimateRevenue({
 				employeeCount: null,
 				employeeRange: "10001+",
-				industry: "manufacturing",
+				naics: "333 Machinery Manufacturing",
 			}),
 		).toEqual({ lowUsd: 2_760_276_000, highUsd: null });
 	});
 
-	it("returns no estimate without size or a matching industry", () => {
+	it("returns no estimate without size or a matching NAICS code", () => {
 		expect(
 			estimateRevenue({
 				employeeCount: null,
 				employeeRange: null,
-				industry: "manufacturing",
+				naics: "332 Fabricated Metal Product Manufacturing",
 			}),
 		).toBeNull();
 		expect(
 			estimateRevenue({
 				employeeCount: 10,
 				employeeRange: null,
-				industry: "restaurant",
+				naics: "54 Professional, Scientific, and Technical Services",
+			}),
+		).toBeNull();
+		expect(
+			estimateRevenue({
+				employeeCount: 10,
+				employeeRange: null,
+				naics: "42 Wholesale Trade",
+			}),
+		).toBeNull();
+		expect(
+			estimateRevenue({
+				employeeCount: 10,
+				employeeRange: null,
+				naics: null,
 			}),
 		).toBeNull();
 	});
@@ -121,7 +135,7 @@ describe("formatRevenueEstimate", () => {
 				estimateRevenue({
 					employeeCount: 7,
 					employeeRange: null,
-					industry: "Machine Shops/Contract Manufacturers",
+					naics: "332 Fabricated Metal Product Manufacturing",
 				}),
 			),
 		).toBe("≈ $1.6M");

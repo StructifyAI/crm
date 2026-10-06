@@ -5,6 +5,7 @@ import Partnership from "@carbon/icons-react/es/Partnership";
 import Star from "@carbon/icons-react/es/Star";
 import StarFilled from "@carbon/icons-react/es/StarFilled";
 import UserMultiple from "@carbon/icons-react/es/UserMultiple";
+import { NAICS_FIELD_KEY } from "@crm/db/company-icp";
 import type { FieldValueJson } from "@crm/db/fields";
 import { Button } from "@crm/ui/components/button";
 import { EmptyCellValue } from "@crm/ui/components/empty-cell";
@@ -96,7 +97,6 @@ function employeeSourceLabel(source: Company["employeeSource"]): string | null {
 
 function pendingFields(company: Company): string[] {
 	const missing: string[] = [];
-	if (!company.industry) missing.push("industry");
 	if (!company.description) missing.push("description");
 	if (!hasCompanyLinks(company)) missing.push("social links");
 	return missing;
@@ -246,7 +246,6 @@ export function CompanySheet({ companyId }: { companyId: string }) {
 						}
 						parts={[
 							location,
-							company.industry,
 							company.employeeCount !== null
 								? `${company.employeeCount.toLocaleString()} employees`
 								: company.employeeRange
@@ -347,11 +346,17 @@ function CompanyOverview({ company }: { company: Company }) {
 	const employeeValue =
 		company.employeeCount?.toLocaleString() ?? company.employeeRange;
 	const employeeSource = employeeSourceLabel(company.employeeSource);
+	const naicsField = company.fields.find(
+		(field) => field.key === NAICS_FIELD_KEY,
+	);
+	const naics =
+		naicsField?.options.find((option) => option.id === naicsField.value)
+			?.label ?? null;
 	const estimatedRevenue = formatRevenueEstimate(
 		estimateRevenue({
 			employeeCount: company.employeeCount,
 			employeeRange: company.employeeRange,
-			industry: company.industry,
+			naics,
 		}),
 	);
 

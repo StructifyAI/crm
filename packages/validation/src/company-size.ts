@@ -19,13 +19,12 @@ export function normalizeEmployeeRange(
 export function estimateRevenue(input: {
 	employeeCount: number | null;
 	employeeRange: string | null;
-	industry: string | null;
+	naics: string | null;
 }): RevenueEstimate | null {
-	const industry = input.industry?.trim();
-	const rate = industry
-		? REVENUE_PER_EMPLOYEE_USD.find(({ industry: pattern }) =>
-				pattern.test(industry),
-			)?.rate
+	const naics = input.naics?.trim();
+	const rate = naics
+		? REVENUE_PER_EMPLOYEE_USD.find(({ naics: pattern }) => pattern.test(naics))
+				?.rate
 		: undefined;
 
 	if (rate === undefined) return null;

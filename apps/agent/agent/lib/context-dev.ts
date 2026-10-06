@@ -44,9 +44,6 @@ export type Brand = {
 		country?: string | null;
 		country_code?: string | null;
 	} | null;
-	industries?: {
-		eic?: { industry?: string | null; subindustry?: string | null }[] | null;
-	} | null;
 	employees?: {
 		exact?: number | null;
 		range?: string | null;

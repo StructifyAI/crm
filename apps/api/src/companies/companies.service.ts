@@ -69,7 +69,6 @@ const OWNER_SELECT = {
 const SORTABLE: OrderByColumns<Prisma.CompanyOrderByWithRelationInput> = {
 	name: (dir) => ({ name: dir }),
 	domain: (dir) => ({ domain: dir }),
-	industry: (dir) => ({ industry: dir }),
 	employees: (dir) => ({ employeeCount: { sort: dir, nulls: "last" } }),
 	createdAt: (dir) => ({ createdAt: dir }),
 	contacts: (dir) => ({ contacts: { _count: dir } }),
@@ -118,7 +117,6 @@ export class CompaniesService {
 					iconTone: true,
 					logoUrl: true,
 					brandColor: true,
-					industry: true,
 					employeeCount: true,
 					employeeRange: true,
 					icp: true,
@@ -160,7 +158,6 @@ export class CompaniesService {
 				iconTone: row.iconTone,
 				logoUrl: row.logoUrl,
 				brandColor: row.brandColor,
-				industry: row.industry,
 				employeeCount: row.employeeCount,
 				employeeRange: row.employeeRange,
 				icp: row.icp as IcpStatus,
@@ -203,8 +200,6 @@ export class CompaniesService {
 				iconDarkUrl: true,
 				iconTone: true,
 				brandColor: true,
-				industry: true,
-				subIndustry: true,
 				employeeCount: true,
 				employeeRange: true,
 				icp: true,
@@ -381,8 +376,6 @@ export class CompaniesService {
 		if (input.description !== undefined) {
 			data.description = blankToNull(input.description);
 		}
-		if (input.industry !== undefined)
-			data.industry = blankToNull(input.industry);
 		if (input.city !== undefined) data.city = blankToNull(input.city);
 		if (input.stateCode !== undefined) {
 			data.stateCode = blankToNull(input.stateCode);
@@ -728,8 +721,6 @@ export class CompaniesService {
 		const owner = ownerFilter<Prisma.CompanyWhereInput>(input.owner);
 		if (owner) and.push(owner);
 
-		if (input.industry.length > 0)
-			and.push({ industry: { in: input.industry } });
 		if (input.enrichment.length > 0) {
 			and.push({
 				enrichmentStatus: { in: input.enrichment as EnrichmentStatus[] },
@@ -757,45 +748,33 @@ export class CompaniesService {
 			AND: [this.searchFilter(input.q), archivedFilter(input.archived)],
 		};
 
-		const [
-			owners,
-			industries,
-			enrichment,
-			sources,
-			activity,
-			fieldFacets,
-			icpGroups,
-		] = await Promise.all([
-			this.db.company.groupBy({
-				by: ["ownerId"],
-				where,
-				_count: { _all: true },
-			}),
-			this.db.company.groupBy({
-				by: ["industry"],
-				where,
-				_count: { _all: true },
-			}),
-			this.db.company.groupBy({
-				by: ["enrichmentStatus"],
-				where,
-				_count: { _all: true },
-			}),
-			this.db.company.groupBy({
-				by: ["source"],
-				where,
-				_count: { _all: true },
-			}),
-			activityFacetCounts((activityWhere) =>
-				this.db.company.count({ where: { AND: [where, activityWhere] } }),
-			),
-			this.fields.filterFacetCounts("COMPANY", where, filterableFields),
-			this.db.company.groupBy({
-				by: ["icp"],
-				where,
-				_count: { _all: true },
-			}),
-		]);
+		const [owners, enrichment, sources, activity, fieldFacets, icpGroups] =
+			await Promise.all([
+				this.db.company.groupBy({
+					by: ["ownerId"],
+					where,
+					_count: { _all: true },
+				}),
+				this.db.company.groupBy({
+					by: ["enrichmentStatus"],
+					where,
+					_count: { _all: true },
+				}),
+				this.db.company.groupBy({
+					by: ["source"],
+					where,
+					_count: { _all: true },
+				}),
+				activityFacetCounts((activityWhere) =>
+					this.db.company.count({ where: { AND: [where, activityWhere] } }),
+				),
+				this.fields.filterFacetCounts("COMPANY", where, filterableFields),
+				this.db.company.groupBy({
+					by: ["icp"],
+					where,
+					_count: { _all: true },
+				}),
+			]);
 		const icp = Object.fromEntries(
 			ICP_STATUSES.map((status) => [
 				status,
@@ -805,7 +784,6 @@ export class CompaniesService {
 
 		return {
 			owner: countsByKey(owners, "ownerId", FACET_UNASSIGNED),
-			industry: countsByKey(industries, "industry"),
 			enrichment: countsByKey(enrichment, "enrichmentStatus"),
 			source: countsByKey(sources, "source"),
 			activity,

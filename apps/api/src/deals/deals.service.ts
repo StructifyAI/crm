@@ -236,7 +236,7 @@ export class DealsService {
 				lastContactedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
 				lastRepliedAt: true,
 				lastRepliedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
-				company: { select: { ...COMPANY_SELECT, industry: true } },
+				company: { select: COMPANY_SELECT },
 				owner: { select: OWNER_SELECT },
 				contacts: {
 					select: { role: true, contact: { select: CONTACT_SELECT } },

@@ -55,7 +55,7 @@ export function capabilitiesFrom(
 			id: CONTEXT_DEV,
 			from: "Settings → General",
 			label: "Company brand data",
-			gives: "a company's logo, industry, location and socials from its domain",
+			gives: "a company's logo, location and socials from its domain",
 			enabled: contextDev !== null,
 		},
 		{

@@ -1,4 +1,5 @@
 import { ActivityType, db } from "@crm/db";
+import { NAICS_VALUE_SELECT } from "@crm/db/company-icp";
 import { z } from "zod";
 import { formatCompanyEmployees } from "./brand-mapping";
 import { isDerivedName } from "./names";
@@ -70,7 +71,7 @@ export type CompanyHistory = {
 		name: string;
 		domain: string | null;
 		website: string | null;
-		industry: string | null;
+		naics: string | null;
 		employees: string | null;
 		location: string | null;
 		description: string | null;
@@ -117,8 +118,6 @@ export async function readCompanyHistory(
 			name: true,
 			domain: true,
 			website: true,
-			industry: true,
-			subIndustry: true,
 			employeeCount: true,
 			employeeRange: true,
 			city: true,
@@ -126,6 +125,7 @@ export async function readCompanyHistory(
 			description: true,
 			linkedinUrl: true,
 			enrichmentStatus: true,
+			fieldValues: NAICS_VALUE_SELECT,
 			lastContactedAt: true,
 			lastRepliedAt: true,
 			lastRepliedEventId: true,
@@ -266,9 +266,7 @@ export async function readCompanyHistory(
 			name: company.name,
 			domain: company.domain,
 			website: company.website,
-			industry: [company.industry, company.subIndustry]
-				.filter(Boolean)
-				.join(" / "),
+			naics: company.fieldValues[0]?.option?.label ?? null,
 			employees: formatCompanyEmployees(
 				company.employeeCount,
 				company.employeeRange,

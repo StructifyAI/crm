@@ -99,7 +99,7 @@ function CreateCompanyForm() {
 					<SheetTitle>New company</SheetTitle>
 					<SheetDescription>
 						Give it a name and a domain. The agent fills in the logo,
-						description, industry, address and socials.
+						description, address and socials.
 					</SheetDescription>
 				</SheetHeader>
 
