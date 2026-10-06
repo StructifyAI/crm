@@ -35,7 +35,7 @@ const CONTACT_FIELD_KEYS = [
 const SALES_OR_MARKETING =
 	/\b(sales|marketing|business development|revenue|account executive|account manager|go-to-market|gtm)\b/i;
 const DUAL_ROLE =
-	/\b(operations|ops|technology|engineering|engineer|manufacturing|production|supply chain|quality|plant|president|ceo|coo|cfo|cto|owner|founder|general manager|chief executive|chief operating|chief financial|chief technology)\b/i;
+	/\b(operations|ops|technology|engineering|engineer|manufacturing|production|supply chain|quality|plant|(?<!vice[ -])president|ceo|coo|cfo|cto|owner|founder|general manager|chief executive|chief operating|chief financial|chief technology)\b/i;
 const RETIRED_OR_STUDENT = /\b(retired|retiree|former|student)\b/i;
 const COMPANY_SUFFIXES = new Set([
 	"inc",

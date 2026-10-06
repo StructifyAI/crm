@@ -434,6 +434,9 @@ describe("ICP list pure helpers", () => {
 	it("keeps sales exclusions except for dual-role titles", () => {
 		for (const title of [
 			"VP Sales",
+			"Vice President, Sales",
+			"Vice President of Marketing",
+			"SVP Sales",
 			"Chief Revenue Officer",
 			"Director of Marketing",
 		]) {

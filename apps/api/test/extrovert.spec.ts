@@ -215,6 +215,103 @@ async function enableProspectSync() {
 	});
 }
 
+async function assertOnlyOtherListLinkedInDataSyncs() {
+	await enableProspectSync();
+	const icpLinkedinUrl = `https://www.linkedin.com/in/linkedin-icp-${suffix}`;
+	const otherLinkedinUrl = `https://www.linkedin.com/in/linkedin-other-${suffix}`;
+	const originalIcpImage = `https://images.example/original-icp-${suffix}.jpg`;
+	const originalOtherImage = `https://images.example/original-other-${suffix}.jpg`;
+	const { contact: icpContact } = await createCompanyContact(
+		icpLinkedinUrl,
+		"ICP Company",
+		`icp-company-${suffix}.example`,
+		originalIcpImage,
+	);
+	const { contact: otherContact } = await createCompanyContact(
+		otherLinkedinUrl,
+		"Other Company",
+		`other-company-${suffix}.example`,
+		originalOtherImage,
+	);
+	const icpProspect = prospect(
+		`extrovert-prospect-${suffix}-icp-list`,
+		icpLinkedinUrl,
+		{ list: { id: EXTROVERT.icpList.listId, name: "ICP list" } },
+	);
+	const otherProspect = prospect(
+		`extrovert-prospect-${suffix}-other-list`,
+		otherLinkedinUrl,
+		{ list: { id: `other-list-${suffix}`, name: "Other list" } },
+	);
+	for (const [item, companyName, avatarUrl] of [
+		[
+			icpProspect,
+			"ICP Company",
+			`https://images.example/new-icp-${suffix}.jpg`,
+		],
+		[
+			otherProspect,
+			"Other Company",
+			`https://images.example/new-other-${suffix}.jpg`,
+		],
+	] as const) {
+		item.linkedInProfile = {
+			...item.linkedInProfile,
+			headline: `Chief Executive Officer at ${companyName}`,
+			avatarUrl,
+		};
+		item.lastPostsFetchStatus = "success";
+		item.lastNewPostsObtainFinishDate = "2026-10-05T12:00:00.000Z";
+		item.statistics = {
+			...item.statistics,
+			newestPostDate: "2026-10-01T12:00:00.000Z",
+			lastNewSuccessPostsObtainFinishDate: "2026-10-05T11:00:00.000Z",
+		};
+	}
+	const expectedOtherFields = {
+		[EXTROVERT.linkedin.fields.headline]:
+			"Chief Executive Officer at Other Company",
+		[EXTROVERT.linkedin.fields.active]: "Active",
+		[EXTROVERT.linkedin.fields.lastPost]: "2026-10-01",
+		[EXTROVERT.linkedin.fields.activityChecked]: "2026-10-05",
+		[EXTROVERT.linkedin.fields.jobChange]: "No change",
+	};
+	const client = {
+		listTeamMembers: async () => [],
+		listProspectsPage: async () => ({
+			prospects: [icpProspect, otherProspect],
+			total: 2,
+		}),
+	} as unknown as ExtrovertClient;
+	const result = await new ExtrovertSyncService(
+		db,
+		client,
+		filing,
+		fields,
+	).run();
+
+	expect(result).toMatchObject({ complete: true, error: null });
+	expect(appliedValues).toEqual([expectedOtherFields]);
+	for (const key of Object.values(EXTROVERT.linkedin.fields)) {
+		expect(await readLinkedInFieldValue(icpContact.id, key)).toBeNull();
+	}
+	for (const [key, value] of Object.entries(expectedOtherFields)) {
+		expect(await readLinkedInFieldValue(otherContact.id, key)).toBe(value);
+	}
+	expect(
+		await db.contact.findUnique({
+			where: { id: icpContact.id },
+			select: { imageUrl: true },
+		}),
+	).toEqual({ imageUrl: originalIcpImage });
+	expect(
+		await db.contact.findUnique({
+			where: { id: otherContact.id },
+			select: { imageUrl: true },
+		}),
+	).toEqual({ imageUrl: `https://images.example/new-other-${suffix}.jpg` });
+}
+
 describe("Extrovert LinkedIn", () => {
 	it.each([
 		[
@@ -829,6 +926,10 @@ describe("Extrovert sync", () => {
 		});
 		expect(appliedValues).toHaveLength(1);
 		expect(after).toEqual(before);
+	});
+
+	it("leaves ICP-list LinkedIn fields and avatars to the list sync", async () => {
+		await assertOnlyOtherListLinkedInDataSyncs();
 	});
 
 	it("keeps mirrored avatars and confirmed job changes", async () => {

@@ -372,7 +372,11 @@ export class ExtrovertSyncService {
 	): Promise<number> {
 		const prospectsByContact = new Map<string, ExtrovertProspectV2>();
 		for (const prospect of prospects) {
-			if (prospect.isDeleted || !prospect.linkedInProfile?.linkedInUrl) {
+			if (
+				prospect.isDeleted ||
+				prospect.list?.id === EXTROVERT.icpList.listId ||
+				!prospect.linkedInProfile?.linkedInUrl
+			) {
 				continue;
 			}
 			const normalized = normalizeLinkedinUrl(
