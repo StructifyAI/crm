@@ -6,6 +6,7 @@ import { contactEventExtractionRequest } from "@crm/validation/contact-events";
 import { dealLinkRequest } from "@crm/validation/deal-link";
 import { emailTriageRequest } from "@crm/validation/email-triage";
 import { eveTurnFailure } from "@crm/validation/eve-stream";
+import { headlineJudgeRequest } from "@crm/validation/headline-judge";
 import { defineChannel, GET, POST } from "eve/channels";
 import { z } from "zod";
 import { persistBuilderInputRequest } from "../lib/builder-input";
@@ -34,6 +35,7 @@ import {
 import { DISPATCH } from "../lib/dispatch-config";
 import { triageEmail } from "../lib/email-triage";
 import { settle } from "../lib/enrichment";
+import { judgeHeadlines } from "../lib/headline-judge";
 import { finishRun, runResultOf } from "../lib/run-runtime";
 import { attribute } from "../lib/session-purpose";
 import { createSlackChannel } from "../lib/slack-membership";
@@ -280,6 +282,22 @@ export default defineChannel({
 			}
 
 			return Response.json(await linkDeal(parsed.data));
+		}),
+
+		POST("/internal/crm/judge-headlines", async (request) => {
+			if (!authorised(request)) {
+				return new Response("Unauthorized", { status: 401 });
+			}
+
+			const parsed = headlineJudgeRequest.safeParse(
+				await request.json().catch(() => null),
+			);
+
+			if (!parsed.success) {
+				return Response.json({ verdicts: [] }, { status: 400 });
+			}
+
+			return Response.json(await judgeHeadlines(parsed.data));
 		}),
 
 		POST("/internal/crm/extract-contact-events", async (request) => {

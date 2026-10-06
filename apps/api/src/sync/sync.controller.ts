@@ -26,6 +26,7 @@ import { ContactClockService } from "../contact-events/contact-clock.service";
 import { ContactEventsSyncService } from "../contact-events/contact-events-sync.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { ExtrovertEngagementSyncService } from "../extrovert/extrovert-engagement-sync.service";
+import { ExtrovertListSyncService } from "../extrovert/extrovert-list-sync.service";
 import { ExtrovertSyncService } from "../extrovert/extrovert-sync.service";
 import { InstantlyEmailSyncService } from "../instantly/instantly-email-sync.service";
 import { InstantlySyncService } from "../instantly/instantly-sync.service";
@@ -54,6 +55,7 @@ export class SyncController {
 		private readonly instantlyEmails: InstantlyEmailSyncService,
 		private readonly extrovert: ExtrovertSyncService,
 		private readonly extrovertEngagement: ExtrovertEngagementSyncService,
+		private readonly extrovertIcpList: ExtrovertListSyncService,
 		private readonly dealLinks: DealLinkService,
 		private readonly correspondence: CorrespondenceBackfillService,
 		private readonly activityDirections: ActivityDirectionBackfillService,
@@ -161,6 +163,24 @@ export class SyncController {
 		@Headers("authorization") authorization?: string,
 	) {
 		return this.runExtrovertEngagement(authorization);
+	}
+
+	@Get("extrovert-icp-list")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "Sync the Extrovert ICP LinkedIn prospect list" })
+	async extrovertIcpListViaGet(
+		@Headers("authorization") authorization?: string,
+	) {
+		return this.runExtrovertIcpList(authorization);
+	}
+
+	@Post("extrovert-icp-list")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async extrovertIcpListViaPost(
+		@Headers("authorization") authorization?: string,
+	) {
+		return this.runExtrovertIcpList(authorization);
 	}
 
 	@Get("deal-links")
@@ -393,6 +413,11 @@ export class SyncController {
 	private async runExtrovertEngagement(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.extrovertEngagement.run();
+	}
+
+	private async runExtrovertIcpList(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.extrovertIcpList.run();
 	}
 
 	private async runDealLinks(authorization?: string, cursor?: string) {

@@ -198,9 +198,75 @@ const extrovertEnvelope = <T extends z.ZodType>(data: T) =>
 		})
 		.passthrough();
 
+const extrovertListMembership = z
+	.object({
+		id: z.string(),
+		listId: z.string(),
+		prospectProfileUrl: z.string(),
+	})
+	.passthrough();
+
+const extrovertProspectDetail = z
+	.object({
+		id: z.string(),
+		isDeleted: z.boolean(),
+		lastPostsFetchStatus: z.string().nullable().optional(),
+		linkedInProfile: z
+			.object({
+				id: z.string(),
+				headline: z.string().nullable().optional(),
+				avatarUrl: z.string().nullable().optional(),
+				linkedInUrl: z.string(),
+			})
+			.passthrough(),
+		statistics: z
+			.object({ newestPostDate: z.string().nullable().optional() })
+			.passthrough()
+			.optional(),
+	})
+	.passthrough();
+
+const extrovertCapacityPool = z
+	.object({
+		pool: z.enum(["PROSPECT", "TOPIC"]),
+		available: z.number(),
+	})
+	.passthrough();
+
+const extrovertAddUsersToListResult = z
+	.object({
+		listId: z.string(),
+		submittedUrls: z.array(z.string()),
+		validationRejectedUrls: z.array(z.string()),
+		existedUrlsMap: z.record(
+			z.string(),
+			z.object({ campaignName: z.string(), urls: z.array(z.string()) }),
+		),
+		outOfLimitUrls: z.array(z.string()),
+	})
+	.passthrough();
+
+const extrovertListMembershipResponse = extrovertEnvelope(
+	z.array(extrovertListMembership),
+);
+const extrovertProspectDetailResponse = extrovertEnvelope(
+	extrovertProspectDetail,
+);
+const extrovertCapacityResponse = extrovertEnvelope(
+	z.object({ pools: z.array(extrovertCapacityPool) }).passthrough(),
+);
+const extrovertAddUsersToListResponse = extrovertEnvelope(
+	extrovertAddUsersToListResult,
+);
+
 export type ExtrovertCampaign = z.infer<typeof extrovertCampaign>;
 export type ExtrovertTeamMember = z.infer<typeof extrovertTeamMember>;
 export type ExtrovertProspectV2 = z.infer<typeof extrovertProspectV2>;
+export type ExtrovertListMembership = z.infer<typeof extrovertListMembership>;
+export type ExtrovertProspectDetail = z.infer<typeof extrovertProspectDetail>;
+export type ExtrovertAddUsersToListResult = z.infer<
+	typeof extrovertAddUsersToListResult
+>;
 export type ExtrovertCommentV2 = z.infer<typeof extrovertCommentV2>;
 export type ExtrovertCommentsPage = z.infer<typeof extrovertCommentsPage>;
 export type ExtrovertConversationV2 = z.infer<typeof extrovertConversationV2>;
@@ -253,6 +319,33 @@ export function parseExtrovertProspectsV2(
 ): ExtrovertProspectsV2Page {
 	const parsed = extrovertProspectsV2Response.parse(value).data;
 	return { prospects: parsed.users, total: parsed.pagination.total };
+}
+
+export function parseExtrovertListMembership(
+	value: unknown,
+): ExtrovertListMembership[] {
+	return extrovertListMembershipResponse.parse(value).data;
+}
+
+export function parseExtrovertProspectDetail(
+	value: unknown,
+): ExtrovertProspectDetail {
+	return extrovertProspectDetailResponse.parse(value).data;
+}
+
+export function parseExtrovertProspectCapacity(value: unknown): number {
+	const { pools } = extrovertCapacityResponse.parse(value).data;
+	const prospectPool = pools.find((pool) => pool.pool === "PROSPECT");
+	if (!prospectPool) {
+		throw new Error("Extrovert response has no PROSPECT capacity pool.");
+	}
+	return prospectPool.available;
+}
+
+export function parseExtrovertAddUsersToListResult(
+	value: unknown,
+): ExtrovertAddUsersToListResult {
+	return extrovertAddUsersToListResponse.parse(value).data;
 }
 
 export function parseExtrovertCommentsPage(

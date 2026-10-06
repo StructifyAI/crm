@@ -11,6 +11,11 @@ import { ExtrovertService } from "./extrovert.service";
 import { ExtrovertEngagementSyncService } from "./extrovert-engagement-sync.service";
 import { ExtrovertFilingService } from "./extrovert-filing.service";
 import { ExtrovertIngestService } from "./extrovert-ingest.service";
+import {
+	askAgentToJudgeHeadlines,
+	EXTROVERT_HEADLINE_JUDGE,
+	ExtrovertListSyncService,
+} from "./extrovert-list-sync.service";
 import { ExtrovertSyncService } from "./extrovert-sync.service";
 
 @Module({
@@ -28,9 +33,15 @@ import { ExtrovertSyncService } from "./extrovert-sync.service";
 		ExtrovertIngestService,
 		ExtrovertSyncService,
 		ExtrovertEngagementSyncService,
+		ExtrovertListSyncService,
+		{ provide: EXTROVERT_HEADLINE_JUDGE, useValue: askAgentToJudgeHeadlines },
 		ExtrovertRouter,
 		ExtrovertService,
 	],
-	exports: [ExtrovertSyncService, ExtrovertEngagementSyncService],
+	exports: [
+		ExtrovertSyncService,
+		ExtrovertEngagementSyncService,
+		ExtrovertListSyncService,
+	],
 })
 export class ExtrovertModule {}

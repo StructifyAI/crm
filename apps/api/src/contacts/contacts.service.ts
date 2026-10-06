@@ -600,6 +600,8 @@ export class ContactsService {
 		if (input.linkedinUrl !== undefined) {
 			data.linkedinUrl = blankToNull(input.linkedinUrl);
 		}
+		if (input.imageUrl !== undefined)
+			data.imageUrl = blankToNull(input.imageUrl);
 		if (input.twitterUrl !== undefined) {
 			data.twitterUrl = blankToNull(input.twitterUrl);
 		}

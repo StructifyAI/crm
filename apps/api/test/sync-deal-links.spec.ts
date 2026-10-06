@@ -97,6 +97,7 @@ function controller(secret: string | undefined): SyncController {
 		unused,
 		unused,
 		unused,
+		unused,
 		dealLinks,
 		correspondence,
 		unused,
