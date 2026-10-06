@@ -11,6 +11,7 @@ export const extrovertListSyncCycle = z
 		),
 		offset: z.number().int().nonnegative(),
 		judgeUnavailable: z.boolean().default(false),
+		removalsApplied: z.boolean().default(false),
 		counts: z.object({
 			checked: z.number().int().nonnegative(),
 			crashed: z.number().int().nonnegative(),

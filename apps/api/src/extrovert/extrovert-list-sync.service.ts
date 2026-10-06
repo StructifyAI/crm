@@ -547,6 +547,7 @@ export class ExtrovertListSyncService {
 						writes: 0,
 					},
 					judgeUnavailable: false,
+					removalsApplied: false,
 				};
 				await this.db.extrovertListSync.update({
 					where: { listId: EXTROVERT.icpList.listId },
@@ -659,6 +660,7 @@ export class ExtrovertListSyncService {
 				writes: 0,
 			},
 			judgeUnavailable: false,
+			removalsApplied: false,
 		};
 		const writes: PlannedContactWrite[] = [];
 		for (
@@ -1088,35 +1090,38 @@ export class ExtrovertListSyncService {
 			return true;
 		}
 
-		const removedUrls = previousUrls.filter(
-			(url) => !memberUrls.has(canonicalLinkedinUrl(url) ?? ""),
-		);
-		const removals = await this.planRemovals(removedUrls, now);
-		for (const removal of removals) {
-			if (Date.now() - startedAt >= budgetMs) {
+		if (!cycle.removalsApplied) {
+			const removedUrls = previousUrls.filter(
+				(url) => !memberUrls.has(canonicalLinkedinUrl(url) ?? ""),
+			);
+			const removals = await this.planRemovals(removedUrls, now);
+			for (const removal of removals) {
+				if (Date.now() - startedAt >= budgetMs) {
+					await this.db.extrovertListSync.update({
+						where: { listId: state.listId },
+						data: { cycle, lastError: null, lastSummary: null },
+					});
+					return false;
+				}
+				await this.applyWrite(removal.contactId, {
+					values: removal.values,
+					imageUrl: undefined,
+					activeTransition: "Inactive",
+					jobChangeFlagged: false,
+				});
+				cycle.counts.newlyInactive += 1;
+				cycle.counts.writes += 1;
+				cycle.counts.pruned += 1;
+			}
+
+			cycle.removalsApplied = true;
+			if (Date.now() - startedAt >= fillStartMs) {
 				await this.db.extrovertListSync.update({
 					where: { listId: state.listId },
 					data: { cycle, lastError: null, lastSummary: null },
 				});
 				return false;
 			}
-			await this.applyWrite(removal.contactId, {
-				values: removal.values,
-				imageUrl: undefined,
-				activeTransition: "Inactive",
-				jobChangeFlagged: false,
-			});
-			cycle.counts.newlyInactive += 1;
-			cycle.counts.writes += 1;
-			cycle.counts.pruned += 1;
-		}
-
-		if (Date.now() - startedAt >= fillStartMs) {
-			await this.db.extrovertListSync.update({
-				where: { listId: state.listId },
-				data: { cycle, lastError: null, lastSummary: null },
-			});
-			return false;
 		}
 
 		const queuePlan = buildQueue(await this.loadQueueCandidates(), {

@@ -12,6 +12,7 @@ import type {
 	ExtrovertListMembership,
 	ExtrovertProspectDetail,
 } from "@crm/validation/extrovert-api";
+import { parseExtrovertListSyncCycle } from "@crm/validation/extrovert-list-sync-resume";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { ExtrovertClient } from "../src/extrovert/extrovert.client";
 import { EXTROVERT } from "../src/extrovert/extrovert-config";
@@ -1183,6 +1184,12 @@ describe("ExtrovertListSyncService", () => {
 		).toBeNull();
 	});
 
+	it("defaults removalsApplied to false for a legacy cycle", () => {
+		expect(
+			parseExtrovertListSyncCycle(completedLegacyCycle())?.removalsApplied,
+		).toBe(false);
+	});
+
 	it("defers removals when the tick budget is exhausted", async () => {
 		const client = new StubExtrovertClient();
 		const previousUrls = [
@@ -1256,7 +1263,19 @@ describe("ExtrovertListSyncService", () => {
 			},
 		});
 
-		const first = await makeService(client).run({
+		const service = makeService(client);
+		let removalPlanCalls = 0;
+		const originalPlanRemovals = Reflect.get(
+			Object.getPrototypeOf(service),
+			"planRemovals",
+		).bind(service);
+		Object.defineProperty(service, "planRemovals", {
+			value: (urls: string[], removalNow: Date) => {
+				removalPlanCalls += 1;
+				return originalPlanRemovals(urls, removalNow);
+			},
+		});
+		const first = await service.run({
 			now,
 			apiKey,
 			tickBudgetMs: 60_000,
@@ -1270,15 +1289,18 @@ describe("ExtrovertListSyncService", () => {
 		expect(client.addCalls).toHaveLength(0);
 		expect(deferredState.cycle).toMatchObject({
 			counts: { newlyInactive: 2, writes: 2, pruned: 2 },
+			removalsApplied: true,
 		});
+		expect(removalPlanCalls).toBe(1);
 		expect(deferredState.lastCycleFinishedAt).toEqual(lastCycleFinishedAt);
 		for (const contact of contacts) {
 			expect(await readField(contact.id, "linkedin_active")).toBe("Inactive");
 		}
 
-		const second = await makeService(client).run({
+		const second = await service.run({
 			now: new Date(now.getTime() + 1_000),
 			apiKey,
+			fillStartMs: 0,
 		});
 		const completedState = await db.extrovertListSync.findUniqueOrThrow({
 			where: { listId },
@@ -1286,6 +1308,7 @@ describe("ExtrovertListSyncService", () => {
 
 		expect(second).toMatchObject({ complete: true, resumed: true });
 		expect(client.addCalls).toHaveLength(1);
+		expect(removalPlanCalls).toBe(1);
 		expect(completedState.cycle).toBeNull();
 		expect(completedState.lastSummary).toContain(
 			"newly Inactive 2 (2 pruned by Extrovert)",
