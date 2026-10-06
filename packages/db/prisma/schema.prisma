@@ -1593,6 +1593,22 @@ model ExtrovertProspect {
   @@map("extrovertProspect")
 }
 
+model ExtrovertListSync {
+  listId              String    @id
+  enabled             Boolean   @default(false)
+  previousUrls        Json      @default("[]")
+  skippedUrls         Json      @default("[]")
+  cycle               Json?
+  lastCycleStartedAt  DateTime?
+  lastCycleFinishedAt DateTime?
+  lastSummary         String?
+  lastError           String?
+  alert               String?
+  updatedAt           DateTime  @updatedAt
+
+  @@map("extrovertListSync")
+}
+
 enum DomainScope {
   SITE_AND_SUBDOMAINS
   EXACT_HOST

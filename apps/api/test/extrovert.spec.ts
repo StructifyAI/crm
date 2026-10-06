@@ -199,6 +199,56 @@ describe("Extrovert client", () => {
 		}
 	});
 
+	it("adds prospects with the expected JSON body", async () => {
+		const originalFetch = globalThis.fetch;
+		const listId = EXTROVERT.icpList.listId;
+		const profileUrl = "https://www.linkedin.com/in/test-person";
+		globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+			expect(String(input)).toBe(
+				`https://api.goextrovert.com/client/v2/prospect-list/${listId}/add-users-to-list`,
+			);
+			expect(init?.method).toBe("POST");
+			expect(init?.headers).toEqual({
+				"x-api-key": "valid-key",
+				"content-type": "application/json",
+			});
+			expect(JSON.parse(String(init?.body))).toEqual({
+				listId,
+				userUrls: [profileUrl],
+				moveOwnDuplicated: false,
+				shouldBeDeletedIfInactive: true,
+			});
+			return new Response(
+				JSON.stringify({
+					status: "success",
+					statusCode: 200,
+					data: {
+						listId,
+						submittedUrls: [profileUrl],
+						validationRejectedUrls: [],
+						existedUrlsMap: {},
+						outOfLimitUrls: [],
+					},
+				}),
+			);
+		}) as unknown as typeof fetch;
+		try {
+			await expect(
+				new ExtrovertClient().addUsersToList("valid-key", {
+					listId,
+					userUrls: [profileUrl],
+					moveOwnDuplicated: false,
+					shouldBeDeletedIfInactive: true,
+				}),
+			).resolves.toMatchObject({
+				listId,
+				submittedUrls: [profileUrl],
+			});
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
 	it("reports invalid keys and uses the prospect query path", async () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (input: string | URL) => {

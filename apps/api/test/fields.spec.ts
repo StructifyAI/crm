@@ -732,6 +732,23 @@ describe("a record update that fails", () => {
 		).toBe(0);
 	});
 
+	it("persists a contact image URL through update", async () => {
+		const contact = await db.contact.create({
+			data: { firstName: "Ada", companyId },
+			select: { id: true },
+		});
+
+		await contacts.update(contact.id, {
+			imageUrl: "https://images.example.test/ada.jpg",
+		});
+
+		const updated = await db.contact.findUniqueOrThrow({
+			where: { id: contact.id },
+			select: { imageUrl: true },
+		});
+		expect(updated.imageUrl).toBe("https://images.example.test/ada.jpg");
+	});
+
 	it("leaves a deal's field values as they were", async () => {
 		await fields.create({
 			entity: "DEAL",

@@ -247,6 +247,8 @@ Two rules follow for the serverless build:
   it offered, so a closed deal is never linked, and it never overwrites a `dealId` a
   rep already set. No candidate, no call: a thread with no open deal costs nothing.
   The call shares the tick `Deadline`, so a slow model cannot stall the mailbox sync.
+- **The Extrovert ICP list sync asks `/internal/crm/judge-headlines` through the agent bridge**
+  to classify employer changes; missing, invalid or timed-out answers become `none`.
 - **Only correspondence moves the clocks.** `ThreadWriterService` stores every message
   on a thread it already files, but sets `EmailMessage.correspondence` from the sender:
   the synced mailbox, an Instantly mailbox account, any internal address or domain, a known contact's email, or a

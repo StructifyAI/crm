@@ -50,6 +50,7 @@ const contactUpdateInput = z.object({
 	phone: z.string().optional(),
 	title: z.string().optional(),
 	linkedinUrl: z.string().optional(),
+	imageUrl: z.string().optional(),
 	twitterUrl: z.string().optional(),
 	githubUrl: z.string().optional(),
 	companyId: z.string().nullable().optional(),

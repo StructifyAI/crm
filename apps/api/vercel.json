@@ -26,6 +26,10 @@
 			"schedule": "*/15 * * * *"
 		},
 		{
+			"path": "/internal/sync/extrovert-icp-list",
+			"schedule": "*/10 * * * *"
+		},
+		{
 			"path": "/internal/sync/extrovert-engagement",
 			"schedule": "*/15 * * * *"
 		},
