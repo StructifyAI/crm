@@ -481,6 +481,37 @@ describe("Extrovert client", () => {
 		}
 	});
 
+	it("checks prospect existence and only treats 404 as missing", async () => {
+		const originalFetch = globalThis.fetch;
+		let status = 200;
+		const paths: string[] = [];
+		globalThis.fetch = (async (input: string | URL) => {
+			paths.push(String(input));
+			return new Response("{}", { status });
+		}) as unknown as typeof fetch;
+		try {
+			const client = new ExtrovertClient();
+			await expect(client.prospectExists("valid-key", "live-id")).resolves.toBe(
+				true,
+			);
+			status = 404;
+			await expect(
+				client.prospectExists("valid-key", "deleted-id"),
+			).resolves.toBe(false);
+			status = 500;
+			await expect(
+				client.prospectExists("valid-key", "error-id"),
+			).rejects.toThrow("Extrovert request failed with status 500.");
+			expect(paths).toEqual([
+				"https://api.goextrovert.com/client/v2/prospects/live-id",
+				"https://api.goextrovert.com/client/v2/prospects/deleted-id",
+				"https://api.goextrovert.com/client/v2/prospects/error-id",
+			]);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
 	it("treats missing posted comments as an empty page", async () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async () =>
@@ -808,6 +839,7 @@ describe("Extrovert sync", () => {
 	it("marks deleted prospects inactive only when their last post is not recent", async () => {
 		await enableProspectSync();
 		const now = Date.now();
+		const checkedProspectIds: string[] = [];
 		const contacts = await Promise.all(
 			["empty", "old", "recent"].map((label) =>
 				db.contact.create({
@@ -844,32 +876,111 @@ describe("Extrovert sync", () => {
 						: {}),
 			});
 		}
-		const client = {
-			listTeamMembers: async () => [],
-			listProspectsPage: async () => ({ prospects: [], total: 0 }),
-		} as unknown as ExtrovertClient;
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (input: string | URL) => {
+			const id = new URL(String(input)).pathname.split("/").pop();
+			if (!id) throw new Error("Missing prospect id.");
+			checkedProspectIds.push(id);
+			return new Response("not found", { status: 404 });
+		}) as unknown as typeof fetch;
+		const client = new ExtrovertClient();
+		client.listTeamMembers = async () => [];
+		client.listProspectsPage = async () => ({ prospects: [], total: 0 });
 
-		const result = await new ExtrovertSyncService(
-			db,
-			client,
-			filing,
-			fields,
-		).run();
+		try {
+			const result = await new ExtrovertSyncService(
+				db,
+				client,
+				filing,
+				fields,
+			).run();
 
-		expect(result).toMatchObject({ complete: true, error: null });
-		expect(
-			await Promise.all(
-				contacts.map((contact) =>
-					readLinkedInFieldValue(contact.id, EXTROVERT.linkedin.fields.active),
+			expect(result).toMatchObject({ complete: true, error: null });
+			expect(
+				await Promise.all(
+					contacts.map((contact) =>
+						readLinkedInFieldValue(
+							contact.id,
+							EXTROVERT.linkedin.fields.active,
+						),
+					),
 				),
-			),
-		).toEqual(["Inactive", "Inactive", "Active"]);
-		expect(appliedValues).toHaveLength(2);
-		expect(
-			await db.extrovertProspect.count({
-				where: { id: { startsWith: `extrovert-prospect-${suffix}-stale-` } },
-			}),
-		).toBe(0);
+			).toEqual(["Inactive", "Inactive", "Active"]);
+			expect(appliedValues).toHaveLength(2);
+			expect(checkedProspectIds).toEqual([
+				`extrovert-prospect-${suffix}-stale-0`,
+				`extrovert-prospect-${suffix}-stale-1`,
+			]);
+			expect(
+				await db.extrovertProspect.count({
+					where: { id: { startsWith: `extrovert-prospect-${suffix}-stale-` } },
+				}),
+			).toBe(0);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it("keeps a live stale prospect active and deletes its row", async () => {
+		await enableProspectSync();
+		const contact = await db.contact.create({
+			data: {
+				firstName: "Taylor",
+				linkedinUrl: `https://www.linkedin.com/in/stale-live-${suffix}`,
+			},
+		});
+		const staleProspectId = `extrovert-prospect-${suffix}-stale-live`;
+		await db.extrovertProspect.create({
+			data: {
+				id: staleProspectId,
+				contactId: contact.id,
+				directComments: 0,
+				indirectComments: 0,
+				likes: 0,
+				lastSeenAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+			},
+		});
+		await setLinkedInFieldValues(contact.id, {
+			[EXTROVERT.linkedin.fields.active]: "Active",
+		});
+		const checkedProspectIds: string[] = [];
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (input: string | URL) => {
+			checkedProspectIds.push(
+				new URL(String(input)).pathname.split("/").pop() ?? "",
+			);
+			return new Response(
+				JSON.stringify({ status: "success", data: { id: staleProspectId } }),
+			);
+		}) as unknown as typeof fetch;
+		const client = new ExtrovertClient();
+		client.listTeamMembers = async () => [];
+		client.listProspectsPage = async () => ({ prospects: [], total: 0 });
+
+		try {
+			const result = await new ExtrovertSyncService(
+				db,
+				client,
+				filing,
+				fields,
+			).run();
+
+			expect(result).toMatchObject({ complete: true, error: null });
+			expect(checkedProspectIds).toEqual([staleProspectId]);
+			expect(
+				await readLinkedInFieldValue(
+					contact.id,
+					EXTROVERT.linkedin.fields.active,
+				),
+			).toBe("Active");
+			expect(
+				await db.extrovertProspect.findUnique({
+					where: { id: staleProspectId },
+				}),
+			).toBeNull();
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 
 	it("upserts prospects, removes stale rows, and preserves rows on errors", async () => {
@@ -896,6 +1007,7 @@ describe("Extrovert sync", () => {
 				prospects: includeSecond ? [first, second] : [first],
 				total: includeSecond ? 2 : 1,
 			}),
+			prospectExists: async () => false,
 		} as unknown as ExtrovertClient;
 		const sync = new ExtrovertSyncService(db, client, filing, fields);
 

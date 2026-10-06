@@ -140,6 +140,8 @@ export class ExtrovertSyncService {
 			}
 
 			result.fieldSkipped += await this.markDeletedProspectsInactive(
+				setting.extrovertApiKey,
+				startedAt,
 				new Date(runStartedAt),
 				linkedinFields,
 			);
@@ -522,6 +524,8 @@ export class ExtrovertSyncService {
 	}
 
 	private async markDeletedProspectsInactive(
+		apiKey: string,
+		startedAt: number,
 		runStartedAt: Date,
 		linkedinFields: LinkedInFieldDefinition[],
 	): Promise<number> {
@@ -532,13 +536,16 @@ export class ExtrovertSyncService {
 
 		const staleRows = await this.db.extrovertProspect.findMany({
 			where: { lastSeenAt: { lt: runStartedAt } },
-			select: { contactId: true },
+			select: { id: true, contactId: true },
 		});
-		const staleContactIds = [
-			...new Set(
-				staleRows.flatMap((row) => (row.contactId ? [row.contactId] : [])),
-			),
-		];
+		const staleProspectsByContact = new Map<string, string[]>();
+		for (const row of staleRows) {
+			if (!row.contactId) continue;
+			const prospectIds = staleProspectsByContact.get(row.contactId) ?? [];
+			prospectIds.push(row.id);
+			staleProspectsByContact.set(row.contactId, prospectIds);
+		}
+		const staleContactIds = [...staleProspectsByContact.keys()];
 		if (staleContactIds.length === 0) return 0;
 
 		const recentRows = await this.db.extrovertProspect.findMany({
@@ -582,6 +589,23 @@ export class ExtrovertSyncService {
 				? values?.get(lastPostField.id)?.date
 				: null;
 			if (isLinkedInPostRecent(lastPost, now)) continue;
+			if (this.budgetExpired(startedAt)) break;
+
+			let confirmedDeleted = true;
+			for (const prospectId of staleProspectsByContact.get(contactId) ?? []) {
+				if (this.budgetExpired(startedAt)) {
+					confirmedDeleted = false;
+					break;
+				}
+				if (await this.client.prospectExists(apiKey, prospectId)) {
+					confirmedDeleted = false;
+					break;
+				}
+			}
+			if (!confirmedDeleted) {
+				if (this.budgetExpired(startedAt)) break;
+				continue;
+			}
 			fieldSkipped += await this.applyContactFieldValues(contactId, {
 				[activeField.key]: "Inactive",
 			});
