@@ -212,6 +212,24 @@ function queueCandidate(
 	};
 }
 
+function completedLegacyCycle() {
+	return {
+		startedAt: now.toISOString(),
+		prospects: [],
+		offset: 0,
+		judgeUnavailable: false,
+		counts: {
+			checked: 0,
+			crashed: 0,
+			notChecked: 0,
+			newlyActive: 0,
+			newlyInactive: 0,
+			jobChanges: 0,
+			writes: 0,
+		},
+	};
+}
+
 async function ensureFields() {
 	for (const [index, spec] of fieldSpecs.entries()) {
 		let definition = await db.fieldDefinition.findUnique({
@@ -1163,6 +1181,115 @@ describe("ExtrovertListSyncService", () => {
 			(await db.extrovertListSync.findUniqueOrThrow({ where: { listId } }))
 				.cycle,
 		).toBeNull();
+	});
+
+	it("defers removals when the tick budget is exhausted", async () => {
+		const client = new StubExtrovertClient();
+		const previousUrls = [
+			`https://www.linkedin.com/in/extrovert-list-${suffix}-previous-1`,
+			`https://www.linkedin.com/in/extrovert-list-${suffix}-previous-2`,
+		];
+		const contacts = await Promise.all(
+			previousUrls.map((url, index) =>
+				createContact(`extrovert-list-${suffix}-previous-${index + 1}`, url),
+			),
+		);
+		for (const contact of contacts) {
+			await setField(contact.id, "linkedin_active", "Active");
+		}
+		const lastCycleFinishedAt = new Date(now.getTime() - 1_000);
+		await db.extrovertListSync.update({
+			where: { listId },
+			data: {
+				enabled: true,
+				previousUrls,
+				cycle: completedLegacyCycle(),
+				lastCycleFinishedAt,
+			},
+		});
+
+		const result = await makeService(client).run({
+			now,
+			apiKey,
+			tickBudgetMs: 0,
+		});
+		const state = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+
+		expect(result).toMatchObject({ complete: false, resumed: true });
+		expect(client.addCalls).toHaveLength(0);
+		expect(state.cycle).toMatchObject({
+			offset: 0,
+			counts: { newlyInactive: 0, writes: 0, pruned: 0 },
+		});
+		expect(state.lastCycleFinishedAt).toEqual(lastCycleFinishedAt);
+		for (const contact of contacts) {
+			expect(await readField(contact.id, "linkedin_active")).toBe("Active");
+		}
+	});
+
+	it("defers filling after removals and resumes with cumulative counts", async () => {
+		const client = new StubExtrovertClient();
+		client.capacity = 101;
+		const previousUrls = [
+			`https://www.linkedin.com/in/extrovert-list-${suffix}-previous-1`,
+			`https://www.linkedin.com/in/extrovert-list-${suffix}-previous-2`,
+		];
+		const contacts = await Promise.all(
+			previousUrls.map((url, index) =>
+				createContact(`extrovert-list-${suffix}-previous-${index + 1}`, url),
+			),
+		);
+		for (const contact of contacts) {
+			await setField(contact.id, "linkedin_active", "Active");
+		}
+		await createQueueContacts(1);
+		const lastCycleFinishedAt = new Date(now.getTime() - 1_000);
+		await db.extrovertListSync.update({
+			where: { listId },
+			data: {
+				enabled: true,
+				previousUrls,
+				cycle: completedLegacyCycle(),
+				lastCycleFinishedAt,
+			},
+		});
+
+		const first = await makeService(client).run({
+			now,
+			apiKey,
+			tickBudgetMs: 60_000,
+			fillStartMs: 0,
+		});
+		const deferredState = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+
+		expect(first).toMatchObject({ complete: false, resumed: true });
+		expect(client.addCalls).toHaveLength(0);
+		expect(deferredState.cycle).toMatchObject({
+			counts: { newlyInactive: 2, writes: 2, pruned: 2 },
+		});
+		expect(deferredState.lastCycleFinishedAt).toEqual(lastCycleFinishedAt);
+		for (const contact of contacts) {
+			expect(await readField(contact.id, "linkedin_active")).toBe("Inactive");
+		}
+
+		const second = await makeService(client).run({
+			now: new Date(now.getTime() + 1_000),
+			apiKey,
+		});
+		const completedState = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+
+		expect(second).toMatchObject({ complete: true, resumed: true });
+		expect(client.addCalls).toHaveLength(1);
+		expect(completedState.cycle).toBeNull();
+		expect(completedState.lastSummary).toContain(
+			"newly Inactive 2 (2 pruned by Extrovert)",
+		);
 	});
 
 	it("skips a disabled state without calling Extrovert", async () => {

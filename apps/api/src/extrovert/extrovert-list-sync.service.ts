@@ -163,6 +163,7 @@ type SyncOptions = {
 	dryRun?: boolean;
 	now?: Date;
 	tickBudgetMs?: number;
+	fillStartMs?: number;
 	apiKey?: string;
 };
 
@@ -511,6 +512,7 @@ export class ExtrovertListSyncService {
 		const resumed = Boolean(state.cycle);
 		const startedAt = Date.now();
 		const budgetMs = options.tickBudgetMs ?? EXTROVERT.icpList.tickBudgetMs;
+		const fillStartMs = options.fillStartMs ?? EXTROVERT.icpList.fillStartMs;
 
 		try {
 			cycle = parseExtrovertListSyncCycle(state.cycle);
@@ -540,6 +542,7 @@ export class ExtrovertListSyncService {
 						notChecked: 0,
 						newlyActive: 0,
 						newlyInactive: 0,
+						pruned: 0,
 						jobChanges: 0,
 						writes: 0,
 					},
@@ -598,8 +601,20 @@ export class ExtrovertListSyncService {
 				return { complete: false, resumed };
 			}
 
-			await this.finishCycle(key, state, cycle, urls, skippedUrls, now);
-			return { complete: true, resumed };
+			return {
+				complete: await this.finishCycle(
+					key,
+					state,
+					cycle,
+					urls,
+					skippedUrls,
+					now,
+					startedAt,
+					budgetMs,
+					fillStartMs,
+				),
+				resumed,
+			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			await this.db.extrovertListSync.update({
@@ -639,6 +654,7 @@ export class ExtrovertListSyncService {
 				notChecked: 0,
 				newlyActive: 0,
 				newlyInactive: 0,
+				pruned: 0,
 				jobChanges: 0,
 				writes: 0,
 			},
@@ -1046,7 +1062,10 @@ export class ExtrovertListSyncService {
 		previousUrls: string[],
 		priorSkippedUrls: string[],
 		now: Date,
-	) {
+		startedAt: number,
+		budgetMs: number,
+		fillStartMs: number,
+	): Promise<boolean> {
 		const memberUrls = new Set(
 			cycle.prospects
 				.map(({ url }) => url)
@@ -1066,7 +1085,7 @@ export class ExtrovertListSyncService {
 					lastSummary: `${alert}${cycle.judgeUnavailable ? " job-change judge unavailable." : ""}`,
 				},
 			});
-			return;
+			return true;
 		}
 
 		const removedUrls = previousUrls.filter(
@@ -1074,15 +1093,31 @@ export class ExtrovertListSyncService {
 		);
 		const removals = await this.planRemovals(removedUrls, now);
 		for (const removal of removals) {
+			if (Date.now() - startedAt >= budgetMs) {
+				await this.db.extrovertListSync.update({
+					where: { listId: state.listId },
+					data: { cycle, lastError: null, lastSummary: null },
+				});
+				return false;
+			}
 			await this.applyWrite(removal.contactId, {
 				values: removal.values,
 				imageUrl: undefined,
 				activeTransition: "Inactive",
 				jobChangeFlagged: false,
 			});
+			cycle.counts.newlyInactive += 1;
+			cycle.counts.writes += 1;
+			cycle.counts.pruned += 1;
 		}
-		cycle.counts.newlyInactive += removals.length;
-		cycle.counts.writes += removals.length;
+
+		if (Date.now() - startedAt >= fillStartMs) {
+			await this.db.extrovertListSync.update({
+				where: { listId: state.listId },
+				data: { cycle, lastError: null, lastSummary: null },
+			});
+			return false;
+		}
 
 		const queuePlan = buildQueue(await this.loadQueueCandidates(), {
 			inListUrls: memberUrls,
@@ -1152,7 +1187,7 @@ export class ExtrovertListSyncService {
 			queuePlan.queue.length - added - existed,
 		);
 		const capacityLeft = Math.max(0, capacity - added);
-		const summary = `Extrovert ICP list cycle ${cycle.startedAt}: added ${added} (${existed} already in other campaigns, ${outOfLimit} out of limit), newly Active ${cycle.counts.newlyActive}, newly Inactive ${cycle.counts.newlyInactive} (${removals.length} pruned by Extrovert), job changes flagged ${cycle.counts.jobChanges}, checked ${cycle.counts.checked} of ${cycle.prospects.length} (${cycle.counts.notChecked} not checked yet, ${cycle.counts.crashed} crashed), queue remaining ${queueRemaining}, capacity left ${capacityLeft}.${cycle.judgeUnavailable ? " job-change judge unavailable." : ""}`;
+		const summary = `Extrovert ICP list cycle ${cycle.startedAt}: added ${added} (${existed} already in other campaigns, ${outOfLimit} out of limit), newly Active ${cycle.counts.newlyActive}, newly Inactive ${cycle.counts.newlyInactive} (${cycle.counts.pruned} pruned by Extrovert), job changes flagged ${cycle.counts.jobChanges}, checked ${cycle.counts.checked} of ${cycle.prospects.length} (${cycle.counts.notChecked} not checked yet, ${cycle.counts.crashed} crashed), queue remaining ${queueRemaining}, capacity left ${capacityLeft}.${cycle.judgeUnavailable ? " job-change judge unavailable." : ""}`;
 
 		await this.db.extrovertListSync.update({
 			where: { listId: state.listId },
@@ -1171,6 +1206,7 @@ export class ExtrovertListSyncService {
 			attempted,
 			queueSize: queuePlan.queue.length,
 		});
+		return true;
 	}
 }
 
