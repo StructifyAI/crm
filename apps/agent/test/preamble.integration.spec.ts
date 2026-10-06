@@ -140,19 +140,18 @@ describe("companyPreamble", () => {
 
 	it("includes employee data in the company identity line", async () => {
 		const naicsLabel = "332 Fabricated Metal Product Manufacturing";
-		let field = await db.fieldDefinition.findUnique({
+		const field = await db.fieldDefinition.upsert({
 			where: { entity_key: { entity: "COMPANY", key: "naics" } },
-			select: { id: true, options: { select: { id: true, label: true } } },
-		});
-		field ??= await db.fieldDefinition.create({
-			data: {
+			create: {
 				entity: "COMPANY",
 				key: "naics",
 				label: "NAICS",
 				type: "SELECT",
 				position: 0,
+				agentFilled: false,
 				options: { create: [{ label: naicsLabel, position: 0 }] },
 			},
+			update: { archivedAt: null },
 			select: { id: true, options: { select: { id: true, label: true } } },
 		});
 		let option = field.options.find((entry) => entry.label === naicsLabel);
