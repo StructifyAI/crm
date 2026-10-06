@@ -596,6 +596,7 @@ describe("Extrovert client", () => {
 
 	it("adds prospects with the expected JSON body", async () => {
 		const originalFetch = globalThis.fetch;
+		const campaignId = EXTROVERT.icpList.campaignId;
 		const listId = EXTROVERT.icpList.listId;
 		const profileUrl = "https://www.linkedin.com/in/test-person";
 		globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
@@ -608,6 +609,7 @@ describe("Extrovert client", () => {
 				"content-type": "application/json",
 			});
 			expect(JSON.parse(String(init?.body))).toEqual({
+				campaignId,
 				listId,
 				userUrls: [profileUrl],
 				moveOwnDuplicated: false,
@@ -630,6 +632,7 @@ describe("Extrovert client", () => {
 		try {
 			await expect(
 				new ExtrovertClient().addUsersToList("valid-key", {
+					campaignId,
 					listId,
 					userUrls: [profileUrl],
 					moveOwnDuplicated: false,

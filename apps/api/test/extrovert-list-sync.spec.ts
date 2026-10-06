@@ -837,6 +837,11 @@ describe("ExtrovertListSyncService", () => {
 		]);
 		expect(client.addCalls.every((call) => call.listId === listId)).toBe(true);
 		expect(
+			client.addCalls.every(
+				(call) => call.campaignId === "20be03ab-ad2e-4e18-a1f0-0fdb13fda739",
+			),
+		).toBe(true);
+		expect(
 			client.addCalls.every((call) => call.moveOwnDuplicated === false),
 		).toBe(true);
 		expect(
