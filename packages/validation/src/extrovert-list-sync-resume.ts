@@ -17,6 +17,7 @@ export const extrovertListSyncCycle = z
 			notChecked: z.number().int().nonnegative(),
 			newlyActive: z.number().int().nonnegative(),
 			newlyInactive: z.number().int().nonnegative(),
+			pruned: z.number().int().nonnegative().default(0),
 			jobChanges: z.number().int().nonnegative(),
 			writes: z.number().int().nonnegative(),
 		}),

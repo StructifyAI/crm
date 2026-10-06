@@ -53,6 +53,7 @@ export const EXTROVERT = {
 		activeDays: 30,
 		cycleIntervalMs: 4 * HOUR_MS,
 		tickBudgetMs: 40_000,
+		fillStartMs: 15_000,
 		judgeBatchSize: 40,
 		judgeTimeoutMs: 25_000,
 	},
