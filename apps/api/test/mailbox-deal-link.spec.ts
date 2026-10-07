@@ -69,6 +69,7 @@ function agentIsDown() {
 }
 
 async function clean() {
+	await db.activity.deleteMany({ where: { createdById: userId } });
 	await db.emailThread.deleteMany({
 		where: { rootMessageId: { startsWith: `<deal-link-${suffix}` } },
 	});
@@ -124,6 +125,36 @@ async function thread(
 	});
 
 	return row.id;
+}
+
+async function note(
+	body: string,
+	occurredAt: string,
+	type: ActivityType = ActivityType.NOTE,
+) {
+	const row = await db.activity.create({
+		data: {
+			type,
+			subject: "iMessage to A Buyer",
+			body,
+			occurredAt: new Date(occurredAt),
+			companyId,
+			contactId,
+			createdById: userId,
+		},
+		select: { id: true },
+	});
+
+	return row.id;
+}
+
+async function dealOfActivity(id: string): Promise<string | null> {
+	const activity = await db.activity.findUniqueOrThrow({
+		where: { id },
+		select: { dealId: true },
+	});
+
+	return activity.dealId;
 }
 
 async function dealOf(threadId: string): Promise<string | null> {
@@ -446,6 +477,92 @@ describe("linking a synced thread to an open deal", () => {
 	});
 });
 
+describe("linking a logged note to an open deal", () => {
+	beforeEach(async () => {
+		await db.activity.deleteMany({
+			where: { createdById: userId, emailThreadId: null },
+		});
+	});
+
+	it("files the note on the deal the agent picks, showing the contact's earlier notes", async () => {
+		await note("Great meeting you at the booth.", "2026-03-01T09:00:00Z");
+		const latest = await note(
+			"Who should I talk to about the rollout?",
+			"2026-03-02T09:00:00Z",
+		);
+		agentAnswers(
+			200,
+			JSON.stringify({
+				verdict: "linked",
+				dealId: openDealId,
+				reason: "Rollout follow-up.",
+			}),
+		);
+
+		expect(await service.attachActivity(latest, deadlineIn(60_000))).toBe(
+			openDealId,
+		);
+
+		expect(asked).toHaveLength(1);
+		expect(asked[0]?.subject).toBe("iMessage to A Buyer");
+		expect(asked[0]?.messages.map((message) => message.body)).toEqual([
+			"iMessage to A Buyer\nGreat meeting you at the booth.",
+			"iMessage to A Buyer\nWho should I talk to about the rollout?",
+		]);
+		expect(asked[0]?.messages[1]).toMatchObject({
+			direction: "outbound",
+			from: { email: `${userId}@example.test`, name: "Deal Rep" },
+			recipients: [{ email: buyer, name: "A Buyer" }],
+		});
+		expect(await dealOfActivity(latest)).toBe(openDealId);
+
+		const deal = await db.deal.findUniqueOrThrow({
+			where: { id: openDealId },
+			select: { lastActivityAt: true },
+		});
+		expect(deal.lastActivityAt?.toISOString()).toBe("2026-03-02T09:00:00.000Z");
+	});
+
+	it("does not ask about tasks or notes that already have a deal", async () => {
+		const task = await note(
+			"Call back",
+			"2026-03-03T09:00:00Z",
+			ActivityType.TASK,
+		);
+		const filed = await note("Sent the quote", "2026-03-03T09:00:00Z");
+		await db.activity.update({
+			where: { id: filed },
+			data: { dealId: secondOpenDealId },
+		});
+		agentAnswers(
+			200,
+			JSON.stringify({ verdict: "linked", dealId: openDealId, reason: "x" }),
+		);
+
+		expect(await service.attachActivity(task, deadlineIn(60_000))).toBeNull();
+		expect(await service.attachActivity(filed, deadlineIn(60_000))).toBeNull();
+		expect(asked).toHaveLength(0);
+		expect(await dealOfActivity(filed)).toBe(secondOpenDealId);
+	});
+
+	it("is picked up by the backfill", async () => {
+		const id = await note("Pricing for 40 seats?", "2026-03-04T09:00:00Z");
+		agentAnswers(
+			200,
+			JSON.stringify({ verdict: "linked", dealId: openDealId, reason: "x" }),
+		);
+
+		let cursor: string | null = null;
+		let passes = 0;
+		do {
+			cursor = (await service.backfill(cursor)).next;
+			passes += 1;
+		} while (cursor && passes < 50);
+
+		expect(await dealOfActivity(id)).toBe(openDealId);
+	});
+});
+
 describe("backfilling stored emails onto open deals", () => {
 	const pageSize = MAILBOX_DEAL_LINK.backfillPage;
 
@@ -473,6 +590,9 @@ describe("backfilling stored emails onto open deals", () => {
 	beforeEach(async () => {
 		await db.emailThread.deleteMany({
 			where: { rootMessageId: { startsWith: `<deal-link-${suffix}` } },
+		});
+		await db.activity.deleteMany({
+			where: { createdById: userId, emailThreadId: null },
 		});
 	});
 

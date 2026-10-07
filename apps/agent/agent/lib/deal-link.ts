@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEAL_LINK } from "./deal-link-config";
 import { selectedModel } from "./model";
 
-const INSTRUCTIONS = `You file email for a B2B sales team's CRM. You are given one email thread and a short list of the team's open deals. Decide whether the thread is part of exactly one of those deals.
+const INSTRUCTIONS = `You file email and logged notes (texts, calls) for a B2B sales team's CRM. You are given one thread (an email thread, or the latest notes logged with a contact, newest last) and a short list of the team's open deals. Decide whether the thread is part of exactly one of those deals.
 
 Pick a deal only when the thread is clearly about it: the people on the thread are the deal's contacts or work at the deal's company, and what they discuss (pricing, a demo, a contract, a trial, a renewal, an introduction toward that purchase) is the deal's subject. A deal name, a product name or a contact name in the thread is strong evidence. A thread about an unrelated topic with the same company (a job application, an invoice for something else, a social note) is not that deal.
 

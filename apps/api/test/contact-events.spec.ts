@@ -25,6 +25,7 @@ import { ContactEventsSyncService } from "../src/contact-events/contact-events-s
 import { ContactExtractionService } from "../src/contact-events/contact-extraction.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { deadlineIn } from "../src/mailbox/deadline";
+import { DealLinkService } from "../src/mailbox/deal-link.service";
 import { classifyEmail } from "../src/mailbox/email-classification";
 import { EmailClassificationService } from "../src/mailbox/email-classification.service";
 import { ActivityDirectionBackfillService } from "../src/sync/activity-direction-backfill.service";
@@ -47,6 +48,7 @@ const activities = new ActivitiesService(
 	db,
 	new ActivityStampService(db),
 	events,
+	new DealLinkService(db, new ActivityStampService(db), events),
 );
 
 const classificationContext = {
