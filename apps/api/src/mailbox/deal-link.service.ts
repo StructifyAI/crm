@@ -1,8 +1,15 @@
-import { ActivityType, type Db, EmailDirection, type Prisma } from "@crm/db";
+import {
+	ActivityType,
+	ContactDirection,
+	type Db,
+	EmailDirection,
+	type Prisma,
+} from "@crm/db";
 import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import {
 	type DealLinkAnswer,
 	type DealLinkCandidate,
+	type DealLinkMessage,
 	type DealLinkRequest,
 	dealLinkAnswer,
 } from "@crm/validation/deal-link";
@@ -32,6 +39,26 @@ const OPEN_DEAL: Prisma.DealWhereInput = {
 	stage: { in: [...OPEN_DEAL_STAGES] },
 };
 
+const LOGGED_TYPES: ActivityType[] = [ActivityType.NOTE, ActivityType.CALL];
+
+const LINKABLE = {
+	id: true,
+	type: true,
+	direction: true,
+	subject: true,
+	body: true,
+	occurredAt: true,
+	createdAt: true,
+	companyId: true,
+	contactId: true,
+	dealId: true,
+	emailThreadId: true,
+	createdBy: { select: { email: true, name: true } },
+	contact: { select: { email: true, firstName: true, lastName: true } },
+} satisfies Prisma.ActivitySelect;
+
+type Linkable = Prisma.ActivityGetPayload<{ select: typeof LINKABLE }>;
+
 @Injectable()
 export class DealLinkService {
 	private readonly logger = new Logger(DealLinkService.name);
@@ -47,57 +74,24 @@ export class DealLinkService {
 		target: DealLinkTarget,
 		deadline: Deadline,
 	): Promise<string | null> {
-		if (!bridge()) return null;
-
 		const activity = await this.db.activity.findUnique({
 			where: { emailThreadId: threadId },
-			select: { id: true, dealId: true },
-		});
-		if (!activity || activity.dealId) return null;
-
-		const deals = await this.candidates(target);
-		if (deals.length === 0) return null;
-
-		const request = await this.describe(threadId, deals);
-		if (!request) return null;
-
-		const answer = await this.ask(request, deadline);
-		if (answer.verdict !== "linked") return null;
-
-		if (!deals.some((deal) => deal.id === answer.dealId)) {
-			this.logger.warn({
-				message: "The agent named a deal that was not offered; not linking",
-				threadId,
-			});
-			return null;
-		}
-
-		const linked = await this.db.activity.updateMany({
-			where: { id: activity.id, dealId: null },
-			data: { dealId: answer.dealId },
-		});
-		if (linked.count === 0) return null;
-
-		const span = await correspondenceSpan(this.db, threadId);
-		if (span) {
-			await this.stamp.touch({ dealId: answer.dealId }, span.lastMessageAt);
-		}
-		const messages = await this.db.emailMessage.findMany({
-			where: { threadId },
-			select: { id: true },
-		});
-		await Promise.all(
-			messages.map((message) => this.contactEvents.recordMessage(message.id)),
-		);
-
-		this.logger.log({
-			message: "Mailbox sync attached an email thread to an open deal",
-			threadId,
-			dealId: answer.dealId,
-			reason: answer.reason,
+			select: LINKABLE,
 		});
 
-		return answer.dealId;
+		return activity ? this.link(activity, target, deadline) : null;
+	}
+
+	async attachActivity(
+		activityId: string,
+		deadline: Deadline,
+	): Promise<string | null> {
+		const activity = await this.db.activity.findUnique({
+			where: { id: activityId },
+			select: LINKABLE,
+		});
+
+		return activity ? this.link(activity, activity, deadline) : null;
 	}
 
 	async backfill(cursor: string | null): Promise<DealLinkBackfill> {
@@ -113,24 +107,27 @@ export class DealLinkService {
 
 		const page = await this.db.activity.findMany({
 			where: {
-				type: ActivityType.EMAIL,
 				dealId: null,
-				emailThreadId: { not: null },
 				id: cursor ? { lt: cursor } : undefined,
-				OR: [
-					{ company: { deals: { some: OPEN_DEAL } } },
-					{ contact: { deals: { some: { deal: OPEN_DEAL } } } },
-					{ contact: { company: { deals: { some: OPEN_DEAL } } } },
+				AND: [
+					{
+						OR: [
+							{ type: ActivityType.EMAIL, emailThreadId: { not: null } },
+							{ type: { in: LOGGED_TYPES }, emailThreadId: null },
+						],
+					},
+					{
+						OR: [
+							{ company: { deals: { some: OPEN_DEAL } } },
+							{ contact: { deals: { some: { deal: OPEN_DEAL } } } },
+							{ contact: { company: { deals: { some: OPEN_DEAL } } } },
+						],
+					},
 				],
 			},
 			orderBy: { id: "desc" },
 			take: MAILBOX_DEAL_LINK.backfillPage,
-			select: {
-				id: true,
-				emailThreadId: true,
-				companyId: true,
-				contactId: true,
-			},
+			select: { id: true },
 		});
 
 		let examined = 0;
@@ -143,14 +140,8 @@ export class DealLinkService {
 			}
 
 			last = activity.id;
-			if (!activity.emailThreadId) continue;
-
 			examined += 1;
-			const dealId = await this.attach(
-				activity.emailThreadId,
-				{ companyId: activity.companyId, contactId: activity.contactId },
-				deadline,
-			);
+			const dealId = await this.attachActivity(activity.id, deadline);
 			if (dealId) linked += 1;
 		}
 
@@ -163,6 +154,72 @@ export class DealLinkService {
 		this.logger.log({ message: "Deal-link backfill pass finished", ...result });
 
 		return result;
+	}
+
+	private async link(
+		activity: Linkable,
+		target: DealLinkTarget,
+		deadline: Deadline,
+	): Promise<string | null> {
+		if (!bridge() || activity.dealId) return null;
+
+		const threadId = activity.emailThreadId;
+		if (!threadId && !LOGGED_TYPES.includes(activity.type)) return null;
+
+		const deals = await this.candidates(target);
+		if (deals.length === 0) return null;
+
+		const request = threadId
+			? await this.describe(threadId, deals)
+			: await this.describeLogged(activity, deals);
+		if (!request) return null;
+
+		const answer = await this.ask(request, deadline);
+		if (answer.verdict !== "linked") return null;
+
+		if (!deals.some((deal) => deal.id === answer.dealId)) {
+			this.logger.warn({
+				message: "The agent named a deal that was not offered; not linking",
+				activityId: activity.id,
+			});
+			return null;
+		}
+
+		const linked = await this.db.activity.updateMany({
+			where: { id: activity.id, dealId: null },
+			data: { dealId: answer.dealId },
+		});
+		if (linked.count === 0) return null;
+
+		if (threadId) {
+			const span = await correspondenceSpan(this.db, threadId);
+			if (span) {
+				await this.stamp.touch({ dealId: answer.dealId }, span.lastMessageAt);
+			}
+			const messages = await this.db.emailMessage.findMany({
+				where: { threadId },
+				select: { id: true },
+			});
+			await Promise.all(
+				messages.map((message) => this.contactEvents.recordMessage(message.id)),
+			);
+		} else {
+			await this.stamp.touch(
+				{ dealId: answer.dealId },
+				activity.occurredAt ?? activity.createdAt,
+			);
+			await this.contactEvents.recordActivity(activity.id);
+		}
+
+		this.logger.log({
+			message: "Attached an activity to an open deal",
+			activityId: activity.id,
+			threadId,
+			dealId: answer.dealId,
+			reason: answer.reason,
+		});
+
+		return answer.dealId;
 	}
 
 	private async candidates(
@@ -268,6 +325,32 @@ export class DealLinkService {
 		};
 	}
 
+	private async describeLogged(
+		activity: Linkable,
+		deals: DealLinkCandidate[],
+	): Promise<DealLinkRequest> {
+		const earlier = activity.contactId
+			? await this.db.activity.findMany({
+					where: {
+						id: { not: activity.id },
+						contactId: activity.contactId,
+						type: { in: LOGGED_TYPES },
+						emailThreadId: null,
+						occurredAt: { lte: activity.occurredAt ?? activity.createdAt },
+					},
+					orderBy: { occurredAt: "desc" },
+					take: MAILBOX_DEAL_LINK.messagesShown - 1,
+					select: LINKABLE,
+				})
+			: [];
+
+		return {
+			subject: activity.subject,
+			messages: [...earlier.reverse(), activity].map(loggedMessage),
+			deals,
+		};
+	}
+
 	private async ask(
 		request: DealLinkRequest,
 		deadline: Deadline,
@@ -320,10 +403,37 @@ export class DealLinkService {
 	private cannotTell(reason: string): DealLinkAnswer {
 		this.logger.warn({
 			message:
-				"Could not ask which deal an email belongs to; leaving it unlinked",
+				"Could not ask which deal an activity belongs to; leaving it unlinked",
 			reason: reason.slice(0, MAILBOX_DEAL_LINK.reasonChars),
 		});
 
 		return { verdict: "unknown", reason };
 	}
+}
+
+function loggedMessage(activity: Linkable): DealLinkMessage {
+	const author = {
+		email: activity.createdBy.email,
+		name: activity.createdBy.name,
+	};
+	const contact = activity.contact?.email
+		? {
+				email: activity.contact.email,
+				name: [activity.contact.firstName, activity.contact.lastName]
+					.filter(Boolean)
+					.join(" "),
+			}
+		: null;
+	const inbound = activity.direction === ContactDirection.IN && contact;
+
+	return {
+		direction: inbound ? "inbound" : "outbound",
+		from: inbound ? contact : author,
+		recipients: inbound ? [author] : contact ? [contact] : [],
+		sentAt: (activity.occurredAt ?? activity.createdAt).toISOString(),
+		body: [activity.subject, activity.body]
+			.filter(Boolean)
+			.join("\n")
+			.slice(0, MAILBOX_DEAL_LINK.messageChars),
+	};
 }

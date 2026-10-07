@@ -10,6 +10,9 @@ import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { blankToNull } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
+import { deadlineIn } from "../mailbox/deadline";
+import { DealLinkService } from "../mailbox/deal-link.service";
+import { MAILBOX_DEAL_LINK } from "../mailbox/mailbox-config";
 import type {
 	ActivityCreateInput,
 	ActivityEntry,
@@ -79,6 +82,7 @@ export class ActivitiesService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly stamp: ActivityStampService,
 		private readonly contactEvents: ContactEventsService,
+		private readonly dealLinks: DealLinkService,
 	) {}
 
 	async timeline(input: TimelineInput): Promise<TimelineResult> {
@@ -161,13 +165,27 @@ export class ActivitiesService {
 		);
 		await this.contactEvents.recordActivity(activity.id);
 
+		const linkedDealId = input.dealId
+			? null
+			: await this.dealLinks.attachActivity(
+					activity.id,
+					deadlineIn(MAILBOX_DEAL_LINK.timeoutMs),
+				);
+
 		this.logger.log({
 			message: "Activity logged",
 			activityId: activity.id,
 			type: activity.type,
 		});
 
-		return serializeEntry(activity);
+		return serializeEntry(
+			linkedDealId
+				? await this.db.activity.findUniqueOrThrow({
+						where: { id: activity.id },
+						select: ENTRY_SELECT,
+					})
+				: activity,
+		);
 	}
 
 	async complete(id: string, completed: boolean): Promise<ActivityEntry> {
