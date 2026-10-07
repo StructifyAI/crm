@@ -382,7 +382,11 @@ export class ContactEventsService {
 		if (!activity) return 0;
 
 		let written = 0;
-		const channel = ACTIVITY_CHANNELS[activity.type];
+		const imessage = imessageDirection(activity);
+		const channel = imessage
+			? ContactChannel.TEXT
+			: ACTIVITY_CHANNELS[activity.type];
+		const direction = activity.direction ?? imessage;
 		const baseKey = `act:${activity.id}`;
 		const splitKeys = [`${baseKey}:OUT`, `${baseKey}:IN`];
 		const calendarAttendees =
@@ -438,7 +442,7 @@ export class ContactEventsService {
 					options,
 				);
 			}
-		} else if (!activity.emailThreadId && activity.direction && channel) {
+		} else if (!activity.emailThreadId && direction && channel) {
 			written += await this.supersedeMany(splitKeys, options);
 			const occurredAt = activity.occurredAt ?? activity.createdAt;
 			const duplicate =
@@ -448,7 +452,7 @@ export class ContactEventsService {
 								origin: ContactEventOrigin.RECORDED,
 								sourceKey: { startsWith: "msg:" },
 								contactId: activity.contactId,
-								direction: activity.direction,
+								direction,
 								channel: ContactChannel.EMAIL,
 								supersededAt: null,
 								occurredAt: {
@@ -477,7 +481,7 @@ export class ContactEventsService {
 						occurredAt,
 						datePrecision: ContactDatePrecision.EXACT,
 						channel,
-						direction: activity.direction,
+						direction,
 						origin: ContactEventOrigin.RECORDED,
 						sourceActivityId: activity.id,
 						sourceMessageId: null,
@@ -765,3 +769,13 @@ const ACTIVITY_CHANNELS: ActivityChannelMap = {
 	[ActivityType.CALL]: ContactChannel.CALL,
 	[ActivityType.MEETING]: ContactChannel.MEETING,
 };
+
+function imessageDirection(activity: {
+	type: ActivityType;
+	subject: string | null;
+}): ContactDirection | null {
+	if (activity.type !== ActivityType.NOTE) return null;
+	const match = activity.subject?.match(/^iMessage (to|from) /);
+	if (!match) return null;
+	return match[1] === "to" ? ContactDirection.OUT : ContactDirection.IN;
+}

@@ -125,6 +125,15 @@ export class ContactEventsSyncService {
 					)
 				)
 				OR (
+					activity."type"::text = 'NOTE'
+					AND activity."direction" IS NULL
+					AND activity."emailThreadId" IS NULL
+					AND (
+						activity."subject" LIKE 'iMessage to %'
+						OR activity."subject" LIKE 'iMessage from %'
+					)
+				)
+				OR (
 					activity."meta"->>'source' = 'extrovert'
 					AND activity."meta"->'extrovert'->>'kind' = 'dm'
 					AND activity."body" IS NOT NULL

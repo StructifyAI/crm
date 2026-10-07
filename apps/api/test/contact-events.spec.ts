@@ -1320,6 +1320,50 @@ describe("contact event ledger", () => {
 		]);
 	});
 
+	it("backfills an iMessage note as a text event", async () => {
+		const fixture = await createFixture("imessage-backfill");
+		const noteAt = ago(3);
+		const note = await createActivity(fixture, {
+			id: `zzzzzzzzzzzzzzzzzzzzzzzzimsg${suffix}`,
+			type: ActivityType.NOTE,
+			direction: null,
+			occurredAt: noteAt,
+			subject: "iMessage from Buyer",
+			dealId: fixture.dealId,
+		});
+
+		const result = await contactEventsBackfill(note.id).backfill(
+			null,
+			null,
+			false,
+		);
+
+		expect(result.activityExamined).toBe(1);
+		expect(result.recordedActivities).toBe(1);
+		expect(
+			await db.contactEvent.findMany({
+				where: { sourceActivityId: note.id, supersededAt: null },
+				select: {
+					sourceKey: true,
+					channel: true,
+					direction: true,
+					origin: true,
+					datePrecision: true,
+					occurredAt: true,
+				},
+			}),
+		).toEqual([
+			{
+				sourceKey: `act:${note.id}`,
+				channel: ContactChannel.TEXT,
+				direction: ContactDirection.IN,
+				origin: ContactEventOrigin.RECORDED,
+				datePrecision: ContactDatePrecision.EXACT,
+				occurredAt: noteAt,
+			},
+		]);
+	});
+
 	it("skips recorded sources by default and reprocesses them idempotently with all", async () => {
 		const fixture = await createFixture("all-backfill");
 		const sentAt = ago(3);
@@ -1595,6 +1639,99 @@ describe("contact event ledger", () => {
 			{ channel: ContactChannel.LINKEDIN, direction: ContactDirection.OUT },
 			{ channel: ContactChannel.LINKEDIN, direction: ContactDirection.IN },
 		]);
+	});
+
+	it("records iMessage notes as text events", async () => {
+		const fixture = await createFixture("imessage");
+		const outboundAt = ago(2);
+		const inboundAt = ago(1);
+		const outbound = await createActivity(fixture, {
+			type: ActivityType.NOTE,
+			subject: "iMessage to Buyer",
+			occurredAt: outboundAt,
+		});
+		const inbound = await createActivity(fixture, {
+			type: ActivityType.NOTE,
+			subject: "iMessage from Buyer",
+			occurredAt: inboundAt,
+		});
+		const threadNote = await createActivity(fixture, {
+			type: ActivityType.NOTE,
+			subject: "iMessage thread with Alex, Sep 22 2026",
+			body: "Thread transcript",
+		});
+
+		expect(await events.recordActivity(outbound.id)).toBe(1);
+		expect(await events.recordActivity(inbound.id)).toBe(1);
+		expect(await events.recordActivity(threadNote.id)).toBe(0);
+		expect(await events.recordActivity(outbound.id)).toBe(0);
+		expect(await events.recordActivity(inbound.id)).toBe(0);
+
+		expect(
+			await db.contactEvent.findMany({
+				where: {
+					sourceActivityId: { in: [outbound.id, inbound.id] },
+					origin: ContactEventOrigin.RECORDED,
+					supersededAt: null,
+				},
+				select: {
+					sourceKey: true,
+					channel: true,
+					direction: true,
+					origin: true,
+					datePrecision: true,
+					occurredAt: true,
+					sourceActivityId: true,
+				},
+				orderBy: { occurredAt: "asc" },
+			}),
+		).toEqual([
+			{
+				sourceKey: `act:${outbound.id}`,
+				channel: ContactChannel.TEXT,
+				direction: ContactDirection.OUT,
+				origin: ContactEventOrigin.RECORDED,
+				datePrecision: ContactDatePrecision.EXACT,
+				occurredAt: outboundAt,
+				sourceActivityId: outbound.id,
+			},
+			{
+				sourceKey: `act:${inbound.id}`,
+				channel: ContactChannel.TEXT,
+				direction: ContactDirection.IN,
+				origin: ContactEventOrigin.RECORDED,
+				datePrecision: ContactDatePrecision.EXACT,
+				occurredAt: inboundAt,
+				sourceActivityId: inbound.id,
+			},
+		]);
+		expect(
+			await db.contactEvent.count({
+				where: {
+					sourceActivityId: threadNote.id,
+					origin: ContactEventOrigin.RECORDED,
+				},
+			}),
+		).toBe(0);
+
+		const [contact, deal] = await Promise.all([
+			db.contact.findUniqueOrThrow({
+				where: { id: fixture.contactId },
+				select: { lastContactedAt: true, lastRepliedAt: true },
+			}),
+			db.deal.findUniqueOrThrow({
+				where: { id: fixture.dealId },
+				select: { lastContactedAt: true, lastRepliedAt: true },
+			}),
+		]);
+		expect(contact).toEqual({
+			lastContactedAt: outboundAt,
+			lastRepliedAt: inboundAt,
+		});
+		expect(deal).toEqual({
+			lastContactedAt: outboundAt,
+			lastRepliedAt: inboundAt,
+		});
 	});
 
 	it("extracts once per body hash, supersedes changed bodies, and retries failures", async () => {
