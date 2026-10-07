@@ -210,6 +210,7 @@ const dealListRowOutput = z.object({
 	lastContacted: contactClockOutput.nullable(),
 	lastReplied: contactClockOutput.nullable(),
 	createdAt: z.string(),
+	updatedAt: z.string(),
 	archivedAt: z.string().nullable(),
 	fields: recordFieldTableValuesOutput,
 });

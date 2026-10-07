@@ -152,6 +152,7 @@ export class DealsService {
 						lastRepliedAt: true,
 						lastRepliedEvent: { select: CONTACT_CLOCK_EVENT_SELECT },
 						createdAt: true,
+						updatedAt: true,
 						archivedAt: true,
 					},
 				}),
@@ -182,6 +183,7 @@ export class DealsService {
 					lastRepliedAt,
 					lastRepliedEvent,
 					createdAt,
+					updatedAt,
 					archivedAt,
 					...row
 				}) => ({
@@ -197,6 +199,7 @@ export class DealsService {
 					),
 					lastReplied: serializeContactClock(lastRepliedAt, lastRepliedEvent),
 					createdAt: createdAt.toISOString(),
+					updatedAt: updatedAt.toISOString(),
 					archivedAt: archivedAt?.toISOString() ?? null,
 					fields: tableFields.get(row.id) ?? {},
 				}),
