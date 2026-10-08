@@ -169,8 +169,8 @@ export async function recomputeCompanyIcp(
 
 		for (const row of rows) {
 			const naics =
-				row.fieldValues.find(({ field }) => field.key === NAICS_FIELD_KEY)?.option
-					?.label ?? null;
+				row.fieldValues.find(({ field }) => field.key === NAICS_FIELD_KEY)
+					?.option?.label ?? null;
 			const vcBacked =
 				row.fieldValues.find(({ field }) => field.key === VC_BACKED_FIELD_KEY)
 					?.option?.label ?? null;

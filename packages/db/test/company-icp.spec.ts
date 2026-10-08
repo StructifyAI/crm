@@ -86,9 +86,7 @@ describe("computeCompanyIcp", () => {
 		);
 		expect(compute("51 to 200", null, NAICS, "US", null, "No")).toBe("ICP");
 		expect(compute("51 to 200", null, NAICS, "US", null, null)).toBe("ICP");
-		expect(compute("51 to 200", null, null, "US", null, "Yes")).toBe(
-			"Not ICP",
-		);
+		expect(compute("51 to 200", null, null, "US", null, "Yes")).toBe("Not ICP");
 	});
 
 	it("uses the count for a range that crosses the upper bound", () => {
