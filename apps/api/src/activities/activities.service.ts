@@ -146,6 +146,7 @@ export class ActivitiesService {
 				contactId: input.contactId ?? null,
 				dealId: input.dealId ?? null,
 				createdById: actingUserId,
+				meta: input.meta,
 			},
 			select: ENTRY_SELECT,
 		});

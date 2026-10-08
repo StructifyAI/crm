@@ -1,5 +1,8 @@
 import { ActivityType } from "@crm/db";
-import { activityMeta } from "@crm/validation/activity-meta";
+import {
+	activityMeta,
+	activityMetaFields,
+} from "@crm/validation/activity-meta";
 import { z } from "zod";
 
 const COMPOSABLE_TYPES = [
@@ -63,6 +66,7 @@ export const activityCreateInput = z
 		companyId: z.string().optional(),
 		contactId: z.string().optional(),
 		dealId: z.string().optional(),
+		meta: activityMetaFields.optional(),
 	})
 	.refine((input) => input.companyId || input.contactId || input.dealId, {
 		message: "An activity has to be about a company, a contact or a deal.",
