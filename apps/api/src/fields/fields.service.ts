@@ -4,7 +4,7 @@ import {
 	type Prisma,
 	Prisma as PrismaNamespace,
 } from "@crm/db";
-import { NAICS_FIELD_KEY, recomputeCompanyIcp } from "@crm/db/company-icp";
+import { ICP_FIELD_KEYS, recomputeCompanyIcp } from "@crm/db/company-icp";
 import {
 	attachValues,
 	FIELD_VALUE_OPTIONS_INCLUDE,
@@ -226,7 +226,7 @@ export class FieldsService {
 		if (
 			data.options !== undefined &&
 			existing.entity === "COMPANY" &&
-			existing.key === NAICS_FIELD_KEY
+			ICP_FIELD_KEYS.has(existing.key)
 		) {
 			await recomputeCompanyIcp(this.db, {});
 		}
@@ -287,7 +287,7 @@ export class FieldsService {
 			});
 			if (
 				definition.entity === "COMPANY" &&
-				definition.key === NAICS_FIELD_KEY
+				ICP_FIELD_KEYS.has(definition.key)
 			) {
 				await recomputeCompanyIcp(this.db, {});
 			}
@@ -307,7 +307,7 @@ export class FieldsService {
 			});
 			if (
 				definition.entity === "COMPANY" &&
-				definition.key === NAICS_FIELD_KEY
+				ICP_FIELD_KEYS.has(definition.key)
 			) {
 				await recomputeCompanyIcp(this.db, {});
 			}
@@ -327,7 +327,7 @@ export class FieldsService {
 			await this.db.fieldDefinition.delete({ where: { id } });
 			if (
 				definition?.entity === "COMPANY" &&
-				definition.key === NAICS_FIELD_KEY
+				ICP_FIELD_KEYS.has(definition.key)
 			) {
 				await recomputeCompanyIcp(this.db, {});
 			}

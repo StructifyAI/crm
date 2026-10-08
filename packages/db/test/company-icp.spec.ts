@@ -61,6 +61,7 @@ describe("computeCompanyIcp", () => {
 		naics: string | null = NAICS,
 		countryCode: string | null = "US",
 		country: string | null = null,
+		vcBacked: string | null = null,
 	) =>
 		computeCompanyIcp({
 			naics,
@@ -68,6 +69,7 @@ describe("computeCompanyIcp", () => {
 			employeeCount,
 			countryCode,
 			country,
+			vcBacked,
 		});
 
 	it("marks a range entirely below the band as not ICP", () => {
@@ -76,6 +78,15 @@ describe("computeCompanyIcp", () => {
 
 	it("marks a range inside the band as ICP", () => {
 		expect(compute("51 to 200", null)).toBe("ICP");
+	});
+
+	it("excludes VC-backed startups from ICP", () => {
+		expect(compute("51 to 200", null, NAICS, "US", null, "Yes")).toBe(
+			"Not ICP",
+		);
+		expect(compute("51 to 200", null, NAICS, "US", null, "No")).toBe("ICP");
+		expect(compute("51 to 200", null, NAICS, "US", null, null)).toBe("ICP");
+		expect(compute("51 to 200", null, null, "US", null, "Yes")).toBe("Not ICP");
 	});
 
 	it("uses the count for a range that crosses the upper bound", () => {
