@@ -151,9 +151,11 @@ export function externalParticipants(
 		if (isMachineAddress(participant.email)) return false;
 
 		const domain = workDomain(participant.email);
-		if (!domain) return false;
-		if (options.ourDomains.has(domain)) return false;
-		if (options.suppressedDomains.has(domain)) return false;
+		if (
+			domain &&
+			(options.ourDomains.has(domain) || options.suppressedDomains.has(domain))
+		)
+			return false;
 		if (isAutomatedAddress(participant.email)) return false;
 
 		return true;
