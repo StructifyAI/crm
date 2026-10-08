@@ -160,7 +160,7 @@ describe("externalParticipants", () => {
 		expect(result).toEqual([person("jane@acme.com", "Jane")]);
 	});
 
-	it("drops free hosts, suppressed domains and machines", () => {
+	it("keeps free-mail people but drops suppressed domains and machines", () => {
 		const result = externalParticipants(
 			[
 				person("someone@gmail.com"),
@@ -171,7 +171,10 @@ describe("externalParticipants", () => {
 			options,
 		);
 
-		expect(result).toEqual([person("jane@acme.com")]);
+		expect(result).toEqual([
+			person("someone@gmail.com"),
+			person("jane@acme.com"),
+		]);
 	});
 
 	it("never files a shared calendar as a person at a company", () => {
