@@ -42,6 +42,8 @@ export const ICP_NAICS_CODES = new Set([
 ]);
 
 export const NAICS_FIELD_KEY = "naics";
+export const VC_BACKED_FIELD_KEY = "vc_backed_startup";
+export const ICP_FIELD_KEYS = new Set([NAICS_FIELD_KEY, VC_BACKED_FIELD_KEY]);
 
 export const NAICS_VALUE_SELECT = {
 	where: {
@@ -80,9 +82,11 @@ export function computeCompanyIcp(company: {
 	employeeCount: number | null;
 	countryCode: string | null;
 	country: string | null;
+	vcBacked: string | null;
 }): IcpStatus {
 	const country = icpCountry(company);
 	if (country && !ICP_COUNTRIES.has(country)) return "Not ICP";
+	if (company.vcBacked === "Yes") return "Not ICP";
 
 	const status = (() => {
 		const code = company.naics?.trim().slice(0, 3);
@@ -115,6 +119,7 @@ export type IcpChange = {
 	oldIcp: string;
 	newIcp: IcpStatus;
 	naics: string | null;
+	vcBacked: string | null;
 	employeeRange: string | null;
 	employeeCount: number | null;
 	countryCode: string | null;
@@ -146,14 +151,32 @@ export async function recomputeCompanyIcp(
 				employeeCount: true,
 				countryCode: true,
 				country: true,
-				fieldValues: NAICS_VALUE_SELECT,
+				fieldValues: {
+					where: {
+						field: {
+							entity: "COMPANY",
+							key: { in: [...ICP_FIELD_KEYS] },
+							archivedAt: null,
+						},
+					},
+					select: {
+						field: { select: { key: true } },
+						option: { select: { label: true } },
+					},
+				},
 			},
 		});
 
 		for (const row of rows) {
-			const naics = row.fieldValues[0]?.option?.label ?? null;
+			const naics =
+				row.fieldValues.find(({ field }) => field.key === NAICS_FIELD_KEY)?.option
+					?.label ?? null;
+			const vcBacked =
+				row.fieldValues.find(({ field }) => field.key === VC_BACKED_FIELD_KEY)
+					?.option?.label ?? null;
 			const newIcp = computeCompanyIcp({
 				naics,
+				vcBacked,
 				employeeRange: row.employeeRange,
 				employeeCount: row.employeeCount,
 				countryCode: row.countryCode,
@@ -167,6 +190,7 @@ export async function recomputeCompanyIcp(
 				oldIcp: row.icp,
 				newIcp,
 				naics,
+				vcBacked,
 				employeeRange: row.employeeRange,
 				employeeCount: row.employeeCount,
 				countryCode: row.countryCode,

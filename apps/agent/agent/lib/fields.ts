@@ -1,5 +1,5 @@
 import { db } from "@crm/db";
-import { NAICS_FIELD_KEY, recomputeCompanyIcp } from "@crm/db/company-icp";
+import { ICP_FIELD_KEYS, recomputeCompanyIcp } from "@crm/db/company-icp";
 import type { FieldEntity, FieldType } from "@crm/db/enums";
 import {
 	attachValues,
@@ -230,7 +230,7 @@ export async function archiveField(input: {
 		where: { id: existing.id },
 		data: { archivedAt: new Date() },
 	});
-	if (existing.entity === "COMPANY" && existing.key === NAICS_FIELD_KEY) {
+	if (existing.entity === "COMPANY" && ICP_FIELD_KEYS.has(existing.key)) {
 		await recomputeCompanyIcp(db, {});
 	}
 

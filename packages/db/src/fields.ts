@@ -1,4 +1,4 @@
-import { NAICS_FIELD_KEY, recomputeCompanyIcp } from "./company-icp";
+import { ICP_FIELD_KEYS, recomputeCompanyIcp } from "./company-icp";
 import {
 	columnFor,
 	FieldValueError,
@@ -404,7 +404,7 @@ export async function writeValues(
 
 	if (
 		entity === "COMPANY" &&
-		writes.some(({ definition }) => definition.key === NAICS_FIELD_KEY)
+		writes.some(({ definition }) => ICP_FIELD_KEYS.has(definition.key))
 	) {
 		await recomputeCompanyIcp(tx, { id: recordId });
 	}
