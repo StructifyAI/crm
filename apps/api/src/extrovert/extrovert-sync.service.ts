@@ -289,29 +289,11 @@ export class ExtrovertSyncService {
 			connectedDate: dateOrNull(prospect.userConnection?.connectedDate),
 			lastSeenAt: new Date(runStartedAt),
 		};
-		const existing =
-			data.connectionStatus === "connected"
-				? await this.db.extrovertProspect.findUnique({
-						where: { id: prospect.id },
-						select: { connectionStatus: true },
-					})
-				: null;
 		await this.db.extrovertProspect.upsert({
 			where: { id: prospect.id },
 			create: { id: prospect.id, ...data },
 			update: data,
 		});
-		if (
-			data.connectionStatus === "connected" &&
-			existing?.connectionStatus !== "connected"
-		) {
-			await this.filing.linkDeal({
-				activityId: null,
-				contactId: contact.id,
-				ownerId: connectedMember?.ownerId ?? null,
-				opensDeal: true,
-			});
-		}
 		return {
 			prospects: 1,
 			created: contact.created ? 1 : 0,

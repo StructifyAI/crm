@@ -2,7 +2,6 @@ import { Module } from "@nestjs/common";
 import { AgentModule } from "../agent/agent.module";
 import { CompaniesModule } from "../companies/companies.module";
 import { ContactEventsModule } from "../contact-events/contact-events.module";
-import { DealsModule } from "../deals/deals.module";
 import { FieldsModule } from "../fields/fields.module";
 import { TrpcModule } from "../trpc/trpc.module";
 import { ExtrovertClient } from "./extrovert.client";
@@ -25,7 +24,6 @@ import { ExtrovertSyncService } from "./extrovert-sync.service";
 		AgentModule,
 		CompaniesModule,
 		ContactEventsModule,
-		DealsModule,
 		FieldsModule,
 	],
 	controllers: [ExtrovertController],

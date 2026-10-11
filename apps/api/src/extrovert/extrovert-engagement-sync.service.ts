@@ -325,8 +325,6 @@ export class ExtrovertEngagementSyncService {
 		const linked = await this.filing.linkDeal({
 			activityId: activity.id,
 			contactId: match.id,
-			ownerId: member.ownerId,
-			opensDeal: false,
 		});
 		await this.stamp.touch(
 			{
@@ -414,10 +412,6 @@ export class ExtrovertEngagementSyncService {
 		const linked = await this.filing.linkDeal({
 			activityId: activity.id,
 			contactId: match.id,
-			ownerId: member.ownerId,
-			opensDeal: detail.messages.some(
-				(message) => message.author === "Prospect",
-			),
 		});
 		await this.stamp.touch(
 			{

@@ -16,8 +16,6 @@ import { BadRequestException } from "@nestjs/common";
 import { AgentAccessService } from "../src/agent/agent-access.service";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
-import { ConversionService } from "../src/currency/conversion.service";
-import { DealsService } from "../src/deals/deals.service";
 import { ExtrovertClient } from "../src/extrovert/extrovert.client";
 import { ExtrovertController } from "../src/extrovert/extrovert.controller";
 import { ExtrovertService } from "../src/extrovert/extrovert.service";
@@ -52,17 +50,7 @@ const agent = {
 } as unknown as AgentTriggerService;
 
 const stamp = new ActivityStampService(db);
-const deals = new DealsService(
-	db,
-	agent,
-	stamp,
-	new ConversionService(db),
-	{
-		queueBackfillForNewRecord: async () => undefined,
-	} as unknown as FieldsService,
-	noContactEvents,
-);
-const filing = new ExtrovertFilingService(db, agent, stamp, deals);
+const filing = new ExtrovertFilingService(db, agent, stamp);
 const ingest = new ExtrovertIngestService(db, filing);
 const fieldsService = new FieldsService(db, agent);
 
@@ -1664,131 +1652,6 @@ describe("Extrovert sync", () => {
 	});
 });
 
-describe("Extrovert sync new connections", () => {
-	async function syncConnectedProspect(
-		key: string,
-		input: {
-			icp?: "ICP" | "Not ICP";
-			previousStatus?: "pending" | "connected";
-		} = {},
-	) {
-		await enableProspectSync();
-		const linkedInUrl = `https://www.linkedin.com/in/connection-${key}-${suffix}`;
-		const { company, contact } = await createCompanyContact(
-			linkedInUrl,
-			`Connection ${key}`,
-			`connection-${key}-${suffix}.example`,
-		);
-		await db.company.update({
-			where: { id: company.id },
-			data: { icp: input.icp ?? "ICP" },
-		});
-
-		const connectedMemberId = `${memberId}-connection-${key}`;
-		const member = {
-			id: connectedMemberId,
-			name: "Mapped Member",
-			firstName: "Mapped",
-			lastName: "Member",
-			linkedInProfile: {
-				email: `${ownerId}@example.test`,
-				linkedInUrl: `https://www.linkedin.com/in/member-${suffix}`,
-			},
-		} satisfies ExtrovertTeamMember;
-		const item = prospect(
-			`extrovert-prospect-${suffix}-connection-${key}`,
-			linkedInUrl,
-			{
-				userConnection: {
-					userId: connectedMemberId,
-					status: "connected",
-					connectedDate: null,
-				},
-			},
-		);
-		if (input.previousStatus) {
-			await db.extrovertProspect.create({
-				data: {
-					id: item.id,
-					contactId: contact.id,
-					campaignId: item.campaign?.id ?? null,
-					campaignName: item.campaign?.name ?? null,
-					directComments: 0,
-					indirectComments: 0,
-					likes: 0,
-					connectionStatus: input.previousStatus,
-					lastSeenAt: new Date(),
-				},
-			});
-		}
-		const client = {
-			listTeamMembers: async () => [member],
-			listProspectsPage: async () => ({ prospects: [item], total: 1 }),
-		} as unknown as ExtrovertClient;
-		const result = await new ExtrovertSyncService(
-			db,
-			client,
-			filing,
-			fields,
-		).run();
-		expect(result).toMatchObject({
-			complete: true,
-			error: null,
-			prospects: 1,
-		});
-		return { company, contact };
-	}
-
-	it("opens and attaches an ENGAGED deal when a prospect becomes connected", async () => {
-		const { company, contact } = await syncConnectedProspect(
-			"pending-to-connected",
-			{ previousStatus: "pending" },
-		);
-		const deals = await db.deal.findMany({
-			where: { companyId: company.id },
-			select: { id: true, ownerId: true, stage: true },
-		});
-
-		expect(deals).toHaveLength(1);
-		const deal = deals.at(0);
-		if (!deal) throw new Error("Expected an ENGAGED deal");
-		expect(deal).toMatchObject({ ownerId, stage: "ENGAGED" });
-		expect(
-			await db.dealContact.findUnique({
-				where: {
-					dealId_contactId: { dealId: deal.id, contactId: contact.id },
-				},
-			}),
-		).not.toBeNull();
-	});
-
-	it("does not open a deal for a prospect that was already connected", async () => {
-		const { company } = await syncConnectedProspect("already-connected", {
-			previousStatus: "connected",
-		});
-
-		expect(await db.deal.count({ where: { companyId: company.id } })).toBe(0);
-	});
-
-	it("does not open a deal for a newly connected prospect at a non-ICP company", async () => {
-		const { company } = await syncConnectedProspect("not-icp", {
-			icp: "Not ICP",
-		});
-
-		expect(await db.deal.count({ where: { companyId: company.id } })).toBe(0);
-	});
-
-	it("opens an ENGAGED deal for a new connected ICP prospect", async () => {
-		const { company } = await syncConnectedProspect("new-connected");
-		const deals = await db.deal.findMany({
-			where: { companyId: company.id },
-			select: { ownerId: true, stage: true },
-		});
-
-		expect(deals).toEqual([{ ownerId, stage: "ENGAGED" }]);
-	});
-});
-
 describe("Extrovert sync connected prospect safety", () => {
 	it("does not mark stale connected prospects inactive", async () => {
 		await enableProspectSync();
@@ -1976,7 +1839,7 @@ describe("Extrovert engagement sync", () => {
 			},
 		});
 
-		let messages = input.messages ?? [
+		const messages = input.messages ?? [
 			{
 				dmId: `dm-${key}`,
 				text: "Interested in learning more",
@@ -2069,12 +1932,6 @@ describe("Extrovert engagement sync", () => {
 			company,
 			contact,
 			run,
-			setMessages(next: typeof messages) {
-				messages = next;
-			},
-			get messages() {
-				return messages;
-			},
 		};
 	}
 
@@ -2295,103 +2152,9 @@ describe("Extrovert engagement sync", () => {
 		).toBe(1);
 	});
 
-	it("opens one ENGAGED deal for an ICP company's prospect reply and reuses it", async () => {
-		const fixture = await syncFixture("reply-deal");
-		await expect(fixture.run.run()).resolves.toMatchObject({
-			complete: true,
-			dms: 1,
-		});
-
-		const createdDeals = await db.deal.findMany({
-			where: { companyId: fixture.company.id },
-			select: { id: true, name: true, ownerId: true, stage: true },
-		});
-		expect(createdDeals).toHaveLength(1);
-		const deal = createdDeals.at(0);
-		if (!deal) throw new Error("Expected an ENGAGED deal");
-		expect(deal).toMatchObject({
-			name: fixture.company.name,
-			ownerId,
-			stage: "ENGAGED",
-		});
-		expect(
-			await db.dealContact.findUnique({
-				where: {
-					dealId_contactId: { dealId: deal.id, contactId: fixture.contact.id },
-				},
-			}),
-		).not.toBeNull();
-		const activity = await db.activity.findFirstOrThrow({
-			where: {
-				contactId: fixture.contact.id,
-				subject: "LinkedIn messages with Mapped Member",
-			},
-			select: { dealId: true },
-		});
-		expect(activity.dealId).toBe(deal.id);
-
-		fixture.setMessages([
-			...fixture.messages,
-			{
-				dmId: "dm-reply-follow-up",
-				text: "Another reply",
-				author: "Prospect",
-				sentAt: "2026-09-12T03:00:00.000Z",
-			},
-		]);
-		await fixture.run.run();
-		expect(
-			await db.deal.count({ where: { companyId: fixture.company.id } }),
-		).toBe(1);
-	});
-
-	it("does not reopen a company with a closed-lost deal", async () => {
-		const fixture = await syncFixture("reply-closed-deal");
-		await db.deal.create({
-			data: {
-				name: fixture.company.name,
-				companyId: fixture.company.id,
-				ownerId,
-				stage: "CLOSED_LOST",
-			},
-		});
-
-		await fixture.run.run();
-
-		expect(
-			await db.deal.count({ where: { companyId: fixture.company.id } }),
-		).toBe(1);
-		expect(
-			await db.activity.findFirstOrThrow({
-				where: {
-					contactId: fixture.contact.id,
-					subject: "LinkedIn messages with Mapped Member",
-				},
-				select: { dealId: true },
-			}),
-		).toMatchObject({ dealId: null });
-	});
-
-	it("does not open a deal for a company that is not ICP", async () => {
-		const fixture = await syncFixture("reply-not-icp", { icp: "Not ICP" });
-
-		await fixture.run.run();
-
-		expect(
-			await db.deal.count({ where: { companyId: fixture.company.id } }),
-		).toBe(0);
-	});
-
-	it("does not open a deal when the conversation has no prospect messages", async () => {
-		const fixture = await syncFixture("reply-owner-only", {
-			messages: [
-				{
-					dmId: "dm-owner-only",
-					text: "Checking in",
-					author: "Owner",
-					sentAt: "2026-09-12T02:00:00.000Z",
-				},
-			],
+	it("does not link LinkedIn activities when the company has no open deal", async () => {
+		const fixture = await syncFixture("no-open-deal", {
+			includeComment: true,
 		});
 
 		await fixture.run.run();
@@ -2399,6 +2162,17 @@ describe("Extrovert engagement sync", () => {
 		expect(
 			await db.deal.count({ where: { companyId: fixture.company.id } }),
 		).toBe(0);
+		for (const subject of [
+			"LinkedIn messages with Mapped Member",
+			"LinkedIn comment by Mapped Member",
+		]) {
+			expect(
+				await db.activity.findFirstOrThrow({
+					where: { contactId: fixture.contact.id, subject },
+					select: { dealId: true },
+				}),
+			).toMatchObject({ dealId: null });
+		}
 	});
 
 	it("links LinkedIn DMs and comments to the company's single open deal", async () => {
