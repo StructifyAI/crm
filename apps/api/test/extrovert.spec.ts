@@ -1664,6 +1664,131 @@ describe("Extrovert sync", () => {
 	});
 });
 
+describe("Extrovert sync new connections", () => {
+	async function syncConnectedProspect(
+		key: string,
+		input: {
+			icp?: "ICP" | "Not ICP";
+			previousStatus?: "pending" | "connected";
+		} = {},
+	) {
+		await enableProspectSync();
+		const linkedInUrl = `https://www.linkedin.com/in/connection-${key}-${suffix}`;
+		const { company, contact } = await createCompanyContact(
+			linkedInUrl,
+			`Connection ${key}`,
+			`connection-${key}-${suffix}.example`,
+		);
+		await db.company.update({
+			where: { id: company.id },
+			data: { icp: input.icp ?? "ICP" },
+		});
+
+		const connectedMemberId = `${memberId}-connection-${key}`;
+		const member = {
+			id: connectedMemberId,
+			name: "Mapped Member",
+			firstName: "Mapped",
+			lastName: "Member",
+			linkedInProfile: {
+				email: `${ownerId}@example.test`,
+				linkedInUrl: `https://www.linkedin.com/in/member-${suffix}`,
+			},
+		} satisfies ExtrovertTeamMember;
+		const item = prospect(
+			`extrovert-prospect-${suffix}-connection-${key}`,
+			linkedInUrl,
+			{
+				userConnection: {
+					userId: connectedMemberId,
+					status: "connected",
+					connectedDate: null,
+				},
+			},
+		);
+		if (input.previousStatus) {
+			await db.extrovertProspect.create({
+				data: {
+					id: item.id,
+					contactId: contact.id,
+					campaignId: item.campaign?.id ?? null,
+					campaignName: item.campaign?.name ?? null,
+					directComments: 0,
+					indirectComments: 0,
+					likes: 0,
+					connectionStatus: input.previousStatus,
+					lastSeenAt: new Date(),
+				},
+			});
+		}
+		const client = {
+			listTeamMembers: async () => [member],
+			listProspectsPage: async () => ({ prospects: [item], total: 1 }),
+		} as unknown as ExtrovertClient;
+		const result = await new ExtrovertSyncService(
+			db,
+			client,
+			filing,
+			fields,
+		).run();
+		expect(result).toMatchObject({
+			complete: true,
+			error: null,
+			prospects: 1,
+		});
+		return { company, contact };
+	}
+
+	it("opens and attaches an ENGAGED deal when a prospect becomes connected", async () => {
+		const { company, contact } = await syncConnectedProspect(
+			"pending-to-connected",
+			{ previousStatus: "pending" },
+		);
+		const deals = await db.deal.findMany({
+			where: { companyId: company.id },
+			select: { id: true, ownerId: true, stage: true },
+		});
+
+		expect(deals).toHaveLength(1);
+		const deal = deals.at(0);
+		if (!deal) throw new Error("Expected an ENGAGED deal");
+		expect(deal).toMatchObject({ ownerId, stage: "ENGAGED" });
+		expect(
+			await db.dealContact.findUnique({
+				where: {
+					dealId_contactId: { dealId: deal.id, contactId: contact.id },
+				},
+			}),
+		).not.toBeNull();
+	});
+
+	it("does not open a deal for a prospect that was already connected", async () => {
+		const { company } = await syncConnectedProspect("already-connected", {
+			previousStatus: "connected",
+		});
+
+		expect(await db.deal.count({ where: { companyId: company.id } })).toBe(0);
+	});
+
+	it("does not open a deal for a newly connected prospect at a non-ICP company", async () => {
+		const { company } = await syncConnectedProspect("not-icp", {
+			icp: "Not ICP",
+		});
+
+		expect(await db.deal.count({ where: { companyId: company.id } })).toBe(0);
+	});
+
+	it("opens an ENGAGED deal for a new connected ICP prospect", async () => {
+		const { company } = await syncConnectedProspect("new-connected");
+		const deals = await db.deal.findMany({
+			where: { companyId: company.id },
+			select: { ownerId: true, stage: true },
+		});
+
+		expect(deals).toEqual([{ ownerId, stage: "ENGAGED" }]);
+	});
+});
+
 describe("Extrovert sync connected prospect safety", () => {
 	it("does not mark stale connected prospects inactive", async () => {
 		await enableProspectSync();

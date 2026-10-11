@@ -45,10 +45,12 @@ export class ExtrovertFilingService {
 		private readonly deals: DealsService,
 	) {}
 
-	async linkDeal(
-		activityId: string,
-		input: { contactId: string; ownerId: string | null; replied: boolean },
-	): Promise<{ dealId: string | null; companyId: string | null }> {
+	async linkDeal(input: {
+		activityId: string | null;
+		contactId: string;
+		ownerId: string | null;
+		opensDeal: boolean;
+	}): Promise<{ dealId: string | null; companyId: string | null }> {
 		const contact = await this.db.contact.findUnique({
 			where: { id: input.contactId },
 			select: {
@@ -66,14 +68,16 @@ export class ExtrovertFilingService {
 
 		const dealId = await singleOpenDealId(this.db, contact.companyId);
 		if (dealId) {
-			await this.db.activity.updateMany({
-				where: { id: activityId, dealId: null },
-				data: { dealId, companyId: contact.companyId },
-			});
+			if (input.activityId !== null) {
+				await this.db.activity.updateMany({
+					where: { id: input.activityId, dealId: null },
+					data: { dealId, companyId: contact.companyId },
+				});
+			}
 			return { dealId, companyId: contact.companyId };
 		}
 
-		if (!input.replied || company.icp !== ("ICP" satisfies IcpStatus)) {
+		if (!input.opensDeal || company.icp !== ("ICP" satisfies IcpStatus)) {
 			return { dealId: null, companyId: contact.companyId };
 		}
 
@@ -96,10 +100,12 @@ export class ExtrovertFilingService {
 			dealId: deal.id,
 			contactId: input.contactId,
 		});
-		await this.db.activity.updateMany({
-			where: { id: activityId, dealId: null },
-			data: { dealId: deal.id, companyId: contact.companyId },
-		});
+		if (input.activityId !== null) {
+			await this.db.activity.updateMany({
+				where: { id: input.activityId, dealId: null },
+				data: { dealId: deal.id, companyId: contact.companyId },
+			});
+		}
 		return { dealId: deal.id, companyId: contact.companyId };
 	}
 

@@ -322,10 +322,11 @@ export class ExtrovertEngagementSyncService {
 			},
 			select: { id: true, createdAt: true, occurredAt: true },
 		});
-		const linked = await this.filing.linkDeal(activity.id, {
+		const linked = await this.filing.linkDeal({
+			activityId: activity.id,
 			contactId: match.id,
 			ownerId: member.ownerId,
-			replied: false,
+			opensDeal: false,
 		});
 		await this.stamp.touch(
 			{
@@ -410,10 +411,13 @@ export class ExtrovertEngagementSyncService {
 					select: { id: true, createdAt: true, occurredAt: true },
 				});
 
-		const linked = await this.filing.linkDeal(activity.id, {
+		const linked = await this.filing.linkDeal({
+			activityId: activity.id,
 			contactId: match.id,
 			ownerId: member.ownerId,
-			replied: detail.messages.some((message) => message.author === "Prospect"),
+			opensDeal: detail.messages.some(
+				(message) => message.author === "Prospect",
+			),
 		});
 		await this.stamp.touch(
 			{
