@@ -1,5 +1,5 @@
 import { ActivityType, type Db, RecordSource } from "@crm/db";
-import { ICP_STATUSES } from "@crm/db/company-icp";
+import type { IcpStatus } from "@crm/db/company-icp";
 import type { ExtrovertWebhookEvent } from "@crm/validation/extrovert-webhook";
 import {
 	linkedinSlug,
@@ -73,7 +73,7 @@ export class ExtrovertFilingService {
 			return { dealId, companyId: contact.companyId };
 		}
 
-		if (!input.replied || company.icp !== ICP_STATUSES[0]) {
+		if (!input.replied || company.icp !== ("ICP" satisfies IcpStatus)) {
 			return { dealId: null, companyId: contact.companyId };
 		}
 
