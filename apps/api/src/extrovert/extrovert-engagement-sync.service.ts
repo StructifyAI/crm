@@ -320,9 +320,20 @@ export class ExtrovertEngagementSyncService {
 					},
 				},
 			},
-			select: { createdAt: true, occurredAt: true },
+			select: { id: true, createdAt: true, occurredAt: true },
 		});
-		await this.stamp.touch({ contactId: match.id }, activityTime(activity));
+		const linked = await this.filing.linkDeal({
+			activityId: activity.id,
+			contactId: match.id,
+		});
+		await this.stamp.touch(
+			{
+				contactId: match.id,
+				companyId: linked.companyId,
+				dealId: linked.dealId,
+			},
+			activityTime(activity),
+		);
 		existing.add(key);
 		return "created";
 	}
@@ -375,33 +386,43 @@ export class ExtrovertEngagementSyncService {
 				lastMessageAt: lastMessage.sentAt,
 			},
 		};
-		if (previous) {
-			const activity = await this.db.activity.update({
-				where: { id: previous.id },
-				data: {
-					body: transcript,
-					occurredAt: new Date(lastMessage.sentAt),
-					meta: metadata,
-				},
-				select: { id: true, createdAt: true, occurredAt: true },
-			});
-			await this.stamp.touch({ contactId: match.id }, activityTime(activity));
-			await this.contactEvents.recordActivity(activity.id);
-		} else {
-			const activity = await this.db.activity.create({
-				data: {
-					type: ActivityType.NOTE,
-					subject: `LinkedIn messages with ${safeText(member.name)}`,
-					body: transcript,
-					contactId: match.id,
-					occurredAt: new Date(lastMessage.sentAt),
-					createdById: author,
-					meta: metadata,
-				},
-				select: { id: true, createdAt: true, occurredAt: true },
-			});
-			await this.stamp.touch({ contactId: match.id }, activityTime(activity));
-			await this.contactEvents.recordActivity(activity.id);
+		const activity = previous
+			? await this.db.activity.update({
+					where: { id: previous.id },
+					data: {
+						body: transcript,
+						occurredAt: new Date(lastMessage.sentAt),
+						meta: metadata,
+					},
+					select: { id: true, createdAt: true, occurredAt: true },
+				})
+			: await this.db.activity.create({
+					data: {
+						type: ActivityType.NOTE,
+						subject: `LinkedIn messages with ${safeText(member.name)}`,
+						body: transcript,
+						contactId: match.id,
+						occurredAt: new Date(lastMessage.sentAt),
+						createdById: author,
+						meta: metadata,
+					},
+					select: { id: true, createdAt: true, occurredAt: true },
+				});
+
+		const linked = await this.filing.linkDeal({
+			activityId: activity.id,
+			contactId: match.id,
+		});
+		await this.stamp.touch(
+			{
+				contactId: match.id,
+				companyId: linked.companyId,
+				dealId: linked.dealId,
+			},
+			activityTime(activity),
+		);
+		await this.contactEvents.recordActivity(activity.id);
+		if (!previous) {
 			existing.set(conversation.connectionId, {
 				id: activity.id,
 				lastMessageAt: lastMessage.sentAt,

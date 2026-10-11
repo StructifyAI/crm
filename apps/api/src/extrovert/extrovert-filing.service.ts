@@ -10,6 +10,7 @@ import {
 	ActivityStampService,
 	activityTime,
 } from "../crm/activity-stamp.service";
+import { singleOpenDealId } from "../crm/single-open-deal";
 import { InjectDatabase } from "../database/database.constants";
 
 type ResolveContactInput = {
@@ -40,6 +41,34 @@ export class ExtrovertFilingService {
 		private readonly agent: AgentTriggerService,
 		private readonly stamp: ActivityStampService,
 	) {}
+
+	async linkDeal(input: {
+		activityId: string;
+		contactId: string;
+	}): Promise<{ dealId: string | null; companyId: string | null }> {
+		const contact = await this.db.contact.findUnique({
+			where: { id: input.contactId },
+			select: {
+				companyId: true,
+				company: {
+					select: { archivedAt: true },
+				},
+			},
+		});
+		const company = contact?.company;
+		if (!contact?.companyId || !company || company.archivedAt) {
+			return { dealId: null, companyId: null };
+		}
+
+		const dealId = await singleOpenDealId(this.db, contact.companyId);
+		if (dealId) {
+			await this.db.activity.updateMany({
+				where: { id: input.activityId, dealId: null },
+				data: { dealId, companyId: contact.companyId },
+			});
+		}
+		return { dealId, companyId: contact.companyId };
+	}
 
 	async resolveContact(
 		input: ResolveContactInput,

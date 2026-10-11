@@ -1787,6 +1787,154 @@ describe("Extrovert webhook", () => {
 });
 
 describe("Extrovert engagement sync", () => {
+	async function syncFixture(
+		key: string,
+		input: {
+			icp?: string;
+			messages?: Array<{
+				dmId: string;
+				text: string;
+				author: "Owner" | "Prospect";
+				sentAt: string;
+			}>;
+			includeComment?: boolean;
+		} = {},
+	) {
+		const testMemberId = `${memberId}-${key}`;
+		const profileUrl = `https://www.linkedin.com/in/${key}-${suffix}`;
+		const company = await db.company.create({
+			data: {
+				name: `${key} Company`,
+				domain: `${key}-${suffix}.example`,
+				icp: input.icp ?? "ICP",
+			},
+			select: { id: true, name: true },
+		});
+		const contact = await db.contact.create({
+			data: {
+				firstName: "Taylor",
+				lastName: "Prospect",
+				linkedinUrl: profileUrl,
+				companyId: company.id,
+			},
+			select: { id: true },
+		});
+		await db.extrovertMember.upsert({
+			where: { id: testMemberId },
+			create: {
+				id: testMemberId,
+				name: "Mapped Member",
+				ownerId,
+				lastSeenAt: new Date(),
+			},
+			update: { name: "Mapped Member", ownerId },
+		});
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, extrovertApiKey: "test-key" },
+			update: {
+				extrovertApiKey: "test-key",
+				extrovertEngagementResume: Prisma.JsonNull,
+				extrovertEngagementSyncAt: null,
+			},
+		});
+
+		const messages = input.messages ?? [
+			{
+				dmId: `dm-${key}`,
+				text: "Interested in learning more",
+				author: "Prospect" as const,
+				sentAt: "2026-09-12T02:00:00.000Z",
+			},
+		];
+		const comments = input.includeComment
+			? [
+					{
+						postId: `post-${key}-${suffix}`,
+						ownerId: testMemberId,
+						author: { name: "Mapped Member", linkedInUrl: null },
+						prospect: { name: "Taylor Prospect", linkedInUrl: profileUrl },
+						engagementRoute: "Direct",
+						post: {
+							text: "A prospect post",
+							linkedInUrl: "https://www.linkedin.com/posts/example",
+						},
+						draft: { text: "A posted comment" },
+						state: "Posted",
+						completedAt: "2026-09-12T01:00:00.000Z",
+						updatedAt: "2026-09-12T01:00:00.000Z",
+					},
+				]
+			: [];
+		const client = {
+			listCampaigns: async () => [
+				{
+					id: `campaign-${key}-${suffix}`,
+					name: "Campaign",
+					isActive: true,
+					isDeleted: false,
+				},
+			],
+			listPostedCommentsPage: async (
+				_apiKey: string,
+				page: { ownerId: string },
+			) =>
+				page.ownerId === testMemberId
+					? { comments, total: comments.length }
+					: { comments: [], total: 0 },
+			listConversationsPage: async (
+				_apiKey: string,
+				page: { ownerId: string },
+			) => {
+				if (page.ownerId !== testMemberId) {
+					return { conversations: [], total: 0 };
+				}
+				const lastMessage = messages.at(-1);
+				if (!lastMessage) return { conversations: [], total: 0 };
+				return {
+					conversations: [
+						{
+							connectionId: `connection-${key}-${suffix}`,
+							prospect: { name: "Taylor Prospect", linkedInUrl: profileUrl },
+							lastMessage: {
+								text: lastMessage.text,
+								author: lastMessage.author,
+								sentAt: lastMessage.sentAt,
+							},
+						},
+					],
+					total: 1,
+				};
+			},
+			getConversation: async () => ({
+				connectionId: `connection-${key}-${suffix}`,
+				prospect: { name: "Taylor Prospect", linkedInUrl: profileUrl },
+				messages,
+				messagePagination: { limit: 30, offset: 0, total: messages.length },
+			}),
+		} as unknown as ExtrovertClient;
+		const memberLoader = {
+			loadMembers: async () =>
+				new Map([
+					[testMemberId, { id: testMemberId, name: "Mapped Member", ownerId }],
+				]),
+		} as unknown as ExtrovertSyncService;
+		const run = new ExtrovertEngagementSyncService(
+			db,
+			client,
+			memberLoader,
+			filing,
+			stamp,
+			noContactEvents,
+		);
+
+		return {
+			company,
+			contact,
+			run,
+		};
+	}
+
 	it("files and deduplicates comments, and updates DM activities in place", async () => {
 		const engagementMemberId = `${memberId}-engagement`;
 		const engagementUrl = `https://www.linkedin.com/in/engagement-${suffix}-engagement`;
@@ -2002,6 +2150,61 @@ describe("Extrovert engagement sync", () => {
 				},
 			}),
 		).toBe(1);
+	});
+
+	it("does not link LinkedIn activities when the company has no open deal", async () => {
+		const fixture = await syncFixture("no-open-deal", {
+			includeComment: true,
+		});
+
+		await fixture.run.run();
+
+		expect(
+			await db.deal.count({ where: { companyId: fixture.company.id } }),
+		).toBe(0);
+		for (const subject of [
+			"LinkedIn messages with Mapped Member",
+			"LinkedIn comment by Mapped Member",
+		]) {
+			expect(
+				await db.activity.findFirstOrThrow({
+					where: { contactId: fixture.contact.id, subject },
+					select: { dealId: true },
+				}),
+			).toMatchObject({ dealId: null });
+		}
+	});
+
+	it("links LinkedIn DMs and comments to the company's single open deal", async () => {
+		const fixture = await syncFixture("reply-existing-open", {
+			includeComment: true,
+		});
+		const deal = await db.deal.create({
+			data: {
+				name: fixture.company.name,
+				companyId: fixture.company.id,
+				ownerId,
+				stage: "ENGAGED",
+			},
+			select: { id: true },
+		});
+
+		await fixture.run.run();
+
+		expect(
+			await db.deal.count({ where: { companyId: fixture.company.id } }),
+		).toBe(1);
+		for (const subject of [
+			"LinkedIn messages with Mapped Member",
+			"LinkedIn comment by Mapped Member",
+		]) {
+			expect(
+				await db.activity.findFirstOrThrow({
+					where: { contactId: fixture.contact.id, subject },
+					select: { dealId: true },
+				}),
+			).toMatchObject({ dealId: deal.id });
+		}
 	});
 
 	it("skips forbidden conversation owners and continues to the next owner", async () => {
