@@ -1,4 +1,5 @@
 import { ActivityType, type Db, RecordSource } from "@crm/db";
+import { ICP_STATUSES } from "@crm/db/company-icp";
 import type { ExtrovertWebhookEvent } from "@crm/validation/extrovert-webhook";
 import {
 	linkedinSlug,
@@ -10,7 +11,9 @@ import {
 	ActivityStampService,
 	activityTime,
 } from "../crm/activity-stamp.service";
+import { singleOpenDealId } from "../crm/single-open-deal";
 import { InjectDatabase } from "../database/database.constants";
+import { DealsService } from "../deals/deals.service";
 
 type ResolveContactInput = {
 	linkedinUrl: string;
@@ -39,7 +42,66 @@ export class ExtrovertFilingService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly agent: AgentTriggerService,
 		private readonly stamp: ActivityStampService,
+		private readonly deals: DealsService,
 	) {}
+
+	async linkDeal(
+		activityId: string,
+		input: { contactId: string; ownerId: string | null; replied: boolean },
+	): Promise<{ dealId: string | null; companyId: string | null }> {
+		const contact = await this.db.contact.findUnique({
+			where: { id: input.contactId },
+			select: {
+				companyId: true,
+				ownerId: true,
+				company: {
+					select: { name: true, icp: true, archivedAt: true },
+				},
+			},
+		});
+		const company = contact?.company;
+		if (!contact?.companyId || !company || company.archivedAt) {
+			return { dealId: null, companyId: null };
+		}
+
+		const dealId = await singleOpenDealId(this.db, contact.companyId);
+		if (dealId) {
+			await this.db.activity.updateMany({
+				where: { id: activityId, dealId: null },
+				data: { dealId, companyId: contact.companyId },
+			});
+			return { dealId, companyId: contact.companyId };
+		}
+
+		if (!input.replied || company.icp !== ICP_STATUSES[0]) {
+			return { dealId: null, companyId: contact.companyId };
+		}
+
+		const existingDeal = await this.db.deal.findFirst({
+			where: { companyId: contact.companyId, archivedAt: null },
+			select: { id: true },
+		});
+		if (existingDeal) return { dealId: null, companyId: contact.companyId };
+
+		const ownerId = input.ownerId ?? contact.ownerId;
+		if (!ownerId) return { dealId: null, companyId: contact.companyId };
+
+		const deal = await this.deals.create({
+			name: company.name,
+			companyId: contact.companyId,
+			ownerId,
+			stage: "ENGAGED",
+		});
+		await this.deals.attachContact({
+			dealId: deal.id,
+			contactId: input.contactId,
+		});
+		await this.db.activity.updateMany({
+			where: { id: activityId, dealId: null },
+			data: { dealId: deal.id, companyId: contact.companyId },
+		});
+		return { dealId: deal.id, companyId: contact.companyId };
+	}
 
 	async resolveContact(
 		input: ResolveContactInput,
