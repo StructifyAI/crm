@@ -32,6 +32,7 @@ describe("calendar meeting deal link", () => {
 				},
 			},
 			calendarEvent: {
+				deleteMany: async () => ({ count: 0 }),
 				upsert: async () => ({ id: "calendar-event-1" }),
 			},
 			activity: {
