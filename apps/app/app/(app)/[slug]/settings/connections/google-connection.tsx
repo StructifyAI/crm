@@ -130,13 +130,7 @@ const CONNECT_ERRORS = new Map([
 	],
 ]);
 
-function ConnectGoogle({
-	slug,
-	connectError,
-}: {
-	slug: string;
-	connectError?: string;
-}) {
+function useConnectGoogle(slug: string) {
 	const [pending, setPending] = useState(false);
 
 	function fail(message?: string) {
@@ -159,6 +153,33 @@ function ConnectGoogle({
 		if (error) fail(error.message);
 	}
 
+	const connect = () => handleConnect().catch(() => fail());
+
+	return { pending, connect };
+}
+
+function GoogleConnectError({ connectError }: { connectError: string }) {
+	return (
+		<Alert variant="destructive">
+			<Icon icon={Warning} />
+			<AlertTitle>Google did not finish connecting</AlertTitle>
+			<AlertDescription>
+				{CONNECT_ERRORS.get(connectError) ??
+					"Google returned an error before the connection was made. Try again."}
+			</AlertDescription>
+		</Alert>
+	);
+}
+
+function ConnectGoogle({
+	slug,
+	connectError,
+}: {
+	slug: string;
+	connectError?: string;
+}) {
+	const { pending, connect } = useConnectGoogle(slug);
+
 	return (
 		<Card>
 			<CardHeader>
@@ -174,14 +195,7 @@ function ConnectGoogle({
 				</CardDescription>
 
 				<CardAction>
-					<Button
-						size="sm"
-						disabled={pending}
-						onClick={() => {
-							handleConnect().catch(() => fail());
-						}}
-						type="button"
-					>
+					<Button size="sm" disabled={pending} onClick={connect} type="button">
 						{pending ? (
 							<Spinner data-icon="inline-start" />
 						) : (
@@ -194,14 +208,7 @@ function ConnectGoogle({
 
 			{connectError ? (
 				<CardContent>
-					<Alert variant="destructive">
-						<Icon icon={Warning} />
-						<AlertTitle>Google did not finish connecting</AlertTitle>
-						<AlertDescription>
-							{CONNECT_ERRORS.get(connectError) ??
-								"Google returned an error before the connection was made. Try again."}
-						</AlertDescription>
-					</Alert>
+					<GoogleConnectError connectError={connectError} />
 				</CardContent>
 			) : null}
 		</Card>
@@ -218,6 +225,7 @@ export function GoogleConnection({
 	const trpc = useTRPC();
 	const cache = useCrmCache();
 	const queryClient = useQueryClient();
+	const { pending, connect } = useConnectGoogle(slug);
 
 	const status = useQuery({
 		...trpc.google.status.queryOptions(),
@@ -311,6 +319,22 @@ export function GoogleConnection({
 				</CardDescription>
 
 				<CardAction>
+					{!healthy ? (
+						<Button
+							variant="contrast"
+							size="sm"
+							disabled={pending}
+							onClick={connect}
+							type="button"
+						>
+							{pending ? (
+								<Spinner data-icon="inline-start" />
+							) : (
+								<GoogleLogo data-icon="inline-start" className="size-4" />
+							)}
+							Reconnect
+						</Button>
+					) : null}
 					<Button
 						variant="contrast"
 						size="sm"
@@ -323,11 +347,16 @@ export function GoogleConnection({
 			</CardHeader>
 
 			<CardContent>
+				{connectError ? (
+					<GoogleConnectError connectError={connectError} />
+				) : null}
 				{!hasRefreshToken ? (
 					<Alert variant="destructive" attention={insistence}>
 						<Icon icon={Warning} />
 						<AlertTitle>Google did not return a refresh token</AlertTitle>
-						<AlertDescription>Sign out and back in.</AlertDescription>
+						<AlertDescription>
+							Reconnect Google to grant offline access.
+						</AlertDescription>
 					</Alert>
 				) : failing.length > 0 ? (
 					failing.map((source) => {
