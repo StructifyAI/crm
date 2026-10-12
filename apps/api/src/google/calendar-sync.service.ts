@@ -254,16 +254,16 @@ export class CalendarSyncService {
 		const start = eventTime(event.start);
 		const originalStart = eventTime(event.originalStartTime) ?? start;
 
-		if (!originalStart) return "ignored";
-
-		const key = {
-			iCalUid_originalStartTime: {
-				iCalUid,
-				originalStartTime: originalStart.at,
-			},
-		};
-
 		if (event.status === "cancelled") {
+			if (!event.recurringEventId) {
+				const deleted = await this.db.calendarEvent.deleteMany({
+					where: { iCalUid, recurringEventId: null },
+				});
+				return deleted.count > 0 ? "removed" : "ignored";
+			}
+
+			if (!originalStart) return "ignored";
+
 			const deleted = await this.db.calendarEvent.deleteMany({
 				where: {
 					iCalUid,
@@ -272,6 +272,15 @@ export class CalendarSyncService {
 			});
 			return deleted.count > 0 ? "removed" : "ignored";
 		}
+
+		if (!originalStart) return "ignored";
+
+		const key = {
+			iCalUid_originalStartTime: {
+				iCalUid,
+				originalStartTime: originalStart.at,
+			},
+		};
 
 		const end = eventTime(event.end);
 		if (!start || !end) return "ignored";
@@ -298,6 +307,16 @@ export class CalendarSyncService {
 
 		const dealId = await singleOpenDealId(this.db, match.companyId);
 		const organizer = event.organizer?.email?.toLowerCase() ?? null;
+
+		if (!event.recurringEventId) {
+			await this.db.calendarEvent.deleteMany({
+				where: {
+					iCalUid,
+					recurringEventId: null,
+					originalStartTime: { not: originalStart.at },
+				},
+			});
+		}
 
 		const record = await this.db.calendarEvent.upsert({
 			where: key,
