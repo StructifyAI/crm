@@ -575,34 +575,6 @@ export class ExtrovertListSyncService {
 					},
 				});
 			}
-			if (cycle.targetMemberCounts === undefined) {
-				const membership = await this.listMembership(key);
-				const existingUrls = new Set(
-					cycle.prospects
-						.map(({ url }) => (url ? canonicalLinkedinUrl(url) : null))
-						.filter((url): url is string => Boolean(url)),
-				);
-				cycle.prospects.push(
-					...membership
-						.filter(
-							({ prospectProfileUrl }) =>
-								!existingUrls.has(
-									canonicalLinkedinUrl(prospectProfileUrl) ?? "",
-								),
-						)
-						.map((prospect) => ({
-							id: prospect.id,
-							url: canonicalLinkedinUrl(prospect.prospectProfileUrl),
-						})),
-				);
-				cycle.targetMemberCounts = Object.fromEntries(
-					EXTROVERT.icpList.targets.map((target) => [
-						target.listId,
-						membership.filter(({ listId }) => listId === target.listId).length,
-					]),
-				);
-			}
-
 			while (
 				cycle.offset < cycle.prospects.length &&
 				Date.now() - startedAt < budgetMs
@@ -1328,16 +1300,12 @@ export class ExtrovertListSyncService {
 			]),
 		);
 		for (const item of selected) {
-			let target: (typeof EXTROVERT.icpList.targets)[number] =
-				EXTROVERT.icpList.targets[0];
-			for (const candidate of EXTROVERT.icpList.targets.slice(1)) {
-				if (
-					(targetCounts.get(candidate.listId) ?? 0) <
-					(targetCounts.get(target.listId) ?? 0)
-				) {
-					target = candidate;
-				}
-			}
+			const target = EXTROVERT.icpList.targets.reduce((best, candidate) =>
+				(targetCounts.get(candidate.listId) ?? 0) <
+				(targetCounts.get(best.listId) ?? 0)
+					? candidate
+					: best,
+			);
 			selectedByList.get(target.listId)?.push(item);
 			targetCounts.set(
 				target.listId,
