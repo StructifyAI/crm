@@ -32,7 +32,8 @@ import { FieldsService } from "../src/fields/fields.service";
 const suffix = crypto.randomUUID();
 const apiKey = `extrovert-test-${suffix}`;
 const companyId = `extrovert-list-company-${suffix}`;
-const listId = EXTROVERT.icpList.listId;
+const listId = EXTROVERT.icpList.stateListId;
+const [alexTarget, ronakTarget] = EXTROVERT.icpList.targets;
 const now = new Date("2026-06-10T12:00:00.000Z");
 
 type AddInput = Parameters<ExtrovertClient["addUsersToList"]>[1];
@@ -92,7 +93,9 @@ const fieldSpecs: FieldSpec[] = [
 
 class StubExtrovertClient {
 	members: ExtrovertListMembership[] = [];
+	ronakMembers: ExtrovertListMembership[] = [];
 	campaignMembers: ExtrovertListMembership[] = [];
+	ronakCampaignMembers: ExtrovertListMembership[] = [];
 	details = new Map<string, ExtrovertProspectDetail | null>();
 	capacity = 0;
 	membershipCalls: Array<{ campaignId: string; listId?: string }> = [];
@@ -111,31 +114,52 @@ class StubExtrovertClient {
 		_key: string,
 		input: { campaignId: string; listId?: string },
 	) {
-		if (
-			input.campaignId !== EXTROVERT.icpList.campaignId ||
-			(input.listId && input.listId !== EXTROVERT.icpList.listId)
-		) {
+		const target = EXTROVERT.icpList.targets.find(
+			(candidate) => candidate.campaignId === input.campaignId,
+		);
+		if (!target || (input.listId && input.listId !== target.listId)) {
 			throw new Error("The sync used an unexpected campaign or list.");
 		}
 		this.membershipCalls.push(structuredClone(input));
-		return input.listId ? this.members : this.campaignMembers;
+		if (input.listId) {
+			return target.listId === alexTarget.listId
+				? this.members
+				: this.ronakMembers;
+		}
+		return target.campaignId === alexTarget.campaignId
+			? this.campaignMembers
+			: this.ronakCampaignMembers;
 	}
 
 	async removeProspectFromCampaign(
 		_key: string,
 		input: { prospectProfileUrl: string; campaignId: string },
 	) {
-		if (input.campaignId !== EXTROVERT.icpList.campaignId) {
+		const target = EXTROVERT.icpList.targets.find(
+			(candidate) => candidate.campaignId === input.campaignId,
+		);
+		if (!target) {
 			throw new Error("The sync used an unexpected campaign.");
 		}
 		this.removalCalls.push(structuredClone(input));
 		const url = canonicalLinkedinUrl(input.prospectProfileUrl);
-		this.members = this.members.filter(
+		const members =
+			target.listId === alexTarget.listId ? this.members : this.ronakMembers;
+		const campaignMembers =
+			target.campaignId === alexTarget.campaignId
+				? this.campaignMembers
+				: this.ronakCampaignMembers;
+		const remainingMembers = members.filter(
 			(member) => canonicalLinkedinUrl(member.prospectProfileUrl) !== url,
 		);
-		this.campaignMembers = this.campaignMembers.filter(
+		if (target.listId === alexTarget.listId) this.members = remainingMembers;
+		else this.ronakMembers = remainingMembers;
+		const remainingCampaignMembers = campaignMembers.filter(
 			(member) => canonicalLinkedinUrl(member.prospectProfileUrl) !== url,
 		);
+		if (target.campaignId === alexTarget.campaignId) {
+			this.campaignMembers = remainingCampaignMembers;
+		} else this.ronakCampaignMembers = remainingCampaignMembers;
 	}
 
 	async getProspectDetail(_key: string, id: string) {
@@ -144,7 +168,7 @@ class StubExtrovertClient {
 	}
 
 	async getProspectCapacity(_key: string, campaignId: string) {
-		if (campaignId !== EXTROVERT.icpList.campaignId) {
+		if (campaignId !== alexTarget.campaignId) {
 			throw new Error("The sync used an unexpected campaign.");
 		}
 		this.capacityCalls.push(campaignId);
@@ -152,7 +176,13 @@ class StubExtrovertClient {
 	}
 
 	async addUsersToList(_key: string, input: AddInput) {
-		if (input.listId !== EXTROVERT.icpList.listId) {
+		if (
+			!EXTROVERT.icpList.targets.some(
+				(target) =>
+					target.listId === input.listId &&
+					target.campaignId === input.campaignId,
+			)
+		) {
 			throw new Error("The sync used an unexpected list.");
 		}
 		this.addCalls.push(structuredClone(input));
@@ -195,7 +225,12 @@ function membership(
 	url: string,
 	overrides: Partial<ExtrovertListMembership> = {},
 ): ExtrovertListMembership {
-	return { id, listId, prospectProfileUrl: url, ...overrides };
+	return {
+		id,
+		listId: alexTarget.listId,
+		prospectProfileUrl: url,
+		...overrides,
+	};
 }
 
 function canonicalUrls(urls: string[]) {
@@ -896,16 +931,18 @@ describe("ExtrovertListSyncService", () => {
 				listId: "another-gm-list",
 				connectionStatus: "connected",
 			}),
-			membership("crm-connected", urls[2] ?? "", {
-				listId: "another-gm-list",
-				connectionStatus: "not_connected",
-			}),
 			membership("pending", urls[4] ?? "", {
 				listId: "another-gm-list",
 				connectionStatus: "pending",
 			}),
 			membership("not-connected", urls[5] ?? "", {
 				listId: "another-gm-list",
+				connectionStatus: "not_connected",
+			}),
+		];
+		client.ronakCampaignMembers = [
+			membership("crm-connected", urls[2] ?? "", {
+				listId: ronakTarget.listId,
 				connectionStatus: "not_connected",
 			}),
 		];
@@ -923,15 +960,17 @@ describe("ExtrovertListSyncService", () => {
 		await service.run({ now, apiKey });
 
 		expect(client.removalCalls).toEqual(
-			urls.slice(0, 3).map((prospectProfileUrl) => ({
+			urls.slice(0, 3).map((prospectProfileUrl, index) => ({
 				prospectProfileUrl,
-				campaignId: EXTROVERT.icpList.campaignId,
+				campaignId:
+					index === 2 ? ronakTarget.campaignId : alexTarget.campaignId,
 			})),
 		);
 		expect(client.campaignMembers.map(({ id }) => id)).toEqual([
 			"pending",
 			"not-connected",
 		]);
+		expect(client.ronakCampaignMembers).toEqual([]);
 		expect(client.addCalls).toHaveLength(0);
 		const firstState = await db.extrovertListSync.findUniqueOrThrow({
 			where: { listId },
@@ -1002,6 +1041,12 @@ describe("ExtrovertListSyncService", () => {
 		const candidates = await createQueueContacts(550);
 		const client = new StubExtrovertClient();
 		client.capacity = 650;
+		client.members = Array.from({ length: 550 }, (_, index) =>
+			membership(
+				`alex-member-${index}`,
+				`https://www.linkedin.com/in/${suffix}-alex-member-${index}`,
+			),
+		);
 		await db.extrovertListSync.update({
 			where: { listId },
 			data: { enabled: true },
@@ -1012,10 +1057,12 @@ describe("ExtrovertListSyncService", () => {
 		expect(client.addCalls.map((call) => call.userUrls.length)).toEqual([
 			500, 50,
 		]);
-		expect(client.addCalls.every((call) => call.listId === listId)).toBe(true);
+		expect(
+			client.addCalls.every((call) => call.listId === ronakTarget.listId),
+		).toBe(true);
 		expect(
 			client.addCalls.every(
-				(call) => call.campaignId === "20be03ab-ad2e-4e18-a1f0-0fdb13fda739",
+				(call) => call.campaignId === ronakTarget.campaignId,
 			),
 		).toBe(true);
 		expect(
@@ -1025,10 +1072,12 @@ describe("ExtrovertListSyncService", () => {
 			client.addCalls.every((call) => call.shouldBeDeletedIfInactive === true),
 		).toBe(true);
 		expect(client.membershipCalls).toEqual([
-			{ campaignId: EXTROVERT.icpList.campaignId, listId },
-			{ campaignId: EXTROVERT.icpList.campaignId },
+			{ campaignId: alexTarget.campaignId, listId: alexTarget.listId },
+			{ campaignId: ronakTarget.campaignId, listId: ronakTarget.listId },
+			{ campaignId: alexTarget.campaignId },
+			{ campaignId: ronakTarget.campaignId },
 		]);
-		expect(client.capacityCalls).toEqual([EXTROVERT.icpList.campaignId]);
+		expect(client.capacityCalls).toEqual([alexTarget.campaignId]);
 		expect(candidates).toHaveLength(550);
 	});
 
@@ -1074,7 +1123,7 @@ describe("ExtrovertListSyncService", () => {
 		expect(client.addCalls).toHaveLength(1);
 	});
 
-	it("stops add batches after Extrovert returns out-of-limit URLs", async () => {
+	it("stops adding to Ronak after Alex returns out-of-limit URLs", async () => {
 		const candidates = await createQueueContacts(501);
 		const client = new StubExtrovertClient();
 		client.capacity = 651;
@@ -1096,7 +1145,11 @@ describe("ExtrovertListSyncService", () => {
 		});
 
 		expect(client.addCalls).toHaveLength(1);
-		expect(client.addCalls[0]?.userUrls).toHaveLength(500);
+		expect(client.addCalls[0]).toMatchObject({
+			campaignId: alexTarget.campaignId,
+			listId: alexTarget.listId,
+		});
+		expect(client.addCalls[0]?.userUrls).toHaveLength(251);
 		expect(candidates).toHaveLength(501);
 	});
 
@@ -1214,6 +1267,18 @@ describe("ExtrovertListSyncService", () => {
 				},
 			),
 		];
+		const ronakConnectedUrl = `https://www.linkedin.com/in/${suffix}-dry-ronak`;
+		client.ronakMembers = [
+			membership("dry-ronak", ronakConnectedUrl, {
+				listId: ronakTarget.listId,
+			}),
+		];
+		client.ronakCampaignMembers = [
+			membership("dry-ronak-connected", ronakConnectedUrl, {
+				listId: ronakTarget.listId,
+				connectionStatus: "connected",
+			}),
+		];
 		client.details.set(
 			"dry",
 			detail("dry", url, {
@@ -1246,10 +1311,10 @@ describe("ExtrovertListSyncService", () => {
 		});
 
 		expect(plan).toHaveProperty("writes");
-		expect(plan).toMatchObject({ connectedRemovals: 1 });
+		expect(plan).toMatchObject({ members: 2, connectedRemovals: 2 });
 		if (!("summary" in plan))
 			throw new Error("The dry run did not return a plan.");
-		expect(plan.summary).toContain("would remove 1 connected");
+		expect(plan.summary).toContain("would remove 2 connected");
 		expect(client.addCalls).toHaveLength(0);
 		expect(afterState).toEqual(beforeState);
 		expect(afterContact).toEqual(beforeContact);
@@ -1571,5 +1636,92 @@ describe("ExtrovertListSyncService", () => {
 		expect(result).toEqual({ skipped: "disabled" });
 		expect(client.membershipCalls).toHaveLength(0);
 		expect(client.addCalls).toHaveLength(0);
+	});
+});
+
+describe("ExtrovertListSyncService two-target pool", () => {
+	it("keeps Ronak list members in the cycle and does not prune them", async () => {
+		const url = `https://www.linkedin.com/in/${suffix}-ronak-member`;
+		const contact = await createContact(
+			`extrovert-list-${suffix}-ronak-member`,
+			url,
+		);
+		await setField(contact.id, "linkedin_active", "Active");
+		const client = new StubExtrovertClient();
+		client.ronakMembers = [
+			membership("ronak-member", url, { listId: ronakTarget.listId }),
+		];
+		client.details.set("ronak-member", detail("ronak-member", url));
+		await db.extrovertListSync.update({
+			where: { listId },
+			data: { enabled: true, previousUrls: [url] },
+		});
+
+		await makeService(client).run({ now, apiKey });
+
+		const state = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+		expect(await readField(contact.id, "linkedin_active")).toBe("Active");
+		expect(state.previousUrls).toContain(url);
+		expect(client.addCalls.flatMap(({ userUrls }) => userUrls)).not.toContain(
+			url,
+		);
+	});
+
+	it("balances new prospects toward Ronak when Alex has more members", async () => {
+		const client = new StubExtrovertClient();
+		client.capacity = 104;
+		client.members = Array.from({ length: 3 }, (_, index) =>
+			membership(
+				`alex-member-${index}`,
+				`https://www.linkedin.com/in/${suffix}-balance-alex-${index}`,
+			),
+		);
+		client.ronakMembers = [
+			membership(
+				"ronak-member",
+				`https://www.linkedin.com/in/${suffix}-balance-ronak`,
+				{ listId: ronakTarget.listId },
+			),
+		];
+		for (const member of [...client.members, ...client.ronakMembers]) {
+			client.details.set(
+				member.id,
+				detail(member.id, member.prospectProfileUrl, {
+					lastPostsFetchStatus: "waiting_for_initialization",
+				}),
+			);
+		}
+		const candidates = Array.from({ length: 4 }, (_, index) =>
+			queueCandidate(`balanced-${index}`, {
+				url: `https://www.linkedin.com/in/${suffix}-balanced-${index}`,
+			}),
+		);
+		await db.extrovertListSync.update({
+			where: { listId },
+			data: { enabled: true },
+		});
+
+		await makeService(client, undefined, candidates).run({ now, apiKey });
+
+		expect(
+			client.addCalls.map(({ campaignId, listId, userUrls }) => ({
+				campaignId,
+				listId,
+				count: userUrls.length,
+			})),
+		).toEqual([
+			{
+				campaignId: alexTarget.campaignId,
+				listId: alexTarget.listId,
+				count: 1,
+			},
+			{
+				campaignId: ronakTarget.campaignId,
+				listId: ronakTarget.listId,
+				count: 3,
+			},
+		]);
 	});
 });

@@ -218,14 +218,22 @@ async function enableProspectSync() {
 async function assertOnlyOtherListLinkedInDataSyncs() {
 	await enableProspectSync();
 	const icpLinkedinUrl = `https://www.linkedin.com/in/linkedin-icp-${suffix}`;
+	const ronakIcpLinkedinUrl = `https://www.linkedin.com/in/linkedin-ronak-icp-${suffix}`;
 	const otherLinkedinUrl = `https://www.linkedin.com/in/linkedin-other-${suffix}`;
 	const originalIcpImage = `https://images.example/original-icp-${suffix}.jpg`;
+	const originalRonakIcpImage = `https://images.example/original-ronak-icp-${suffix}.jpg`;
 	const originalOtherImage = `https://images.example/original-other-${suffix}.jpg`;
 	const { contact: icpContact } = await createCompanyContact(
 		icpLinkedinUrl,
 		"ICP Company",
 		`icp-company-${suffix}.example`,
 		originalIcpImage,
+	);
+	const { contact: ronakIcpContact } = await createCompanyContact(
+		ronakIcpLinkedinUrl,
+		"Ronak ICP Company",
+		`ronak-icp-company-${suffix}.example`,
+		originalRonakIcpImage,
 	);
 	const { contact: otherContact } = await createCompanyContact(
 		otherLinkedinUrl,
@@ -236,7 +244,22 @@ async function assertOnlyOtherListLinkedInDataSyncs() {
 	const icpProspect = prospect(
 		`extrovert-prospect-${suffix}-icp-list`,
 		icpLinkedinUrl,
-		{ list: { id: EXTROVERT.icpList.listId, name: "ICP list" } },
+		{
+			list: {
+				id: EXTROVERT.icpList.targets[0].listId,
+				name: "ICP list",
+			},
+		},
+	);
+	const ronakIcpProspect = prospect(
+		`extrovert-prospect-${suffix}-ronak-icp-list`,
+		ronakIcpLinkedinUrl,
+		{
+			list: {
+				id: EXTROVERT.icpList.targets[1].listId,
+				name: "Ronak ICP list",
+			},
+		},
 	);
 	const otherProspect = prospect(
 		`extrovert-prospect-${suffix}-other-list`,
@@ -248,6 +271,11 @@ async function assertOnlyOtherListLinkedInDataSyncs() {
 			icpProspect,
 			"ICP Company",
 			`https://images.example/new-icp-${suffix}.jpg`,
+		],
+		[
+			ronakIcpProspect,
+			"Ronak ICP Company",
+			`https://images.example/new-ronak-icp-${suffix}.jpg`,
 		],
 		[
 			otherProspect,
@@ -279,8 +307,8 @@ async function assertOnlyOtherListLinkedInDataSyncs() {
 	const client = {
 		listTeamMembers: async () => [],
 		listProspectsPage: async () => ({
-			prospects: [icpProspect, otherProspect],
-			total: 2,
+			prospects: [icpProspect, ronakIcpProspect, otherProspect],
+			total: 3,
 		}),
 	} as unknown as ExtrovertClient;
 	const result = await new ExtrovertSyncService(
@@ -294,6 +322,7 @@ async function assertOnlyOtherListLinkedInDataSyncs() {
 	expect(appliedValues).toEqual([expectedOtherFields]);
 	for (const key of Object.values(EXTROVERT.linkedin.fields)) {
 		expect(await readLinkedInFieldValue(icpContact.id, key)).toBeNull();
+		expect(await readLinkedInFieldValue(ronakIcpContact.id, key)).toBeNull();
 	}
 	for (const [key, value] of Object.entries(expectedOtherFields)) {
 		expect(await readLinkedInFieldValue(otherContact.id, key)).toBe(value);
@@ -304,6 +333,12 @@ async function assertOnlyOtherListLinkedInDataSyncs() {
 			select: { imageUrl: true },
 		}),
 	).toEqual({ imageUrl: originalIcpImage });
+	expect(
+		await db.contact.findUnique({
+			where: { id: ronakIcpContact.id },
+			select: { imageUrl: true },
+		}),
+	).toEqual({ imageUrl: originalRonakIcpImage });
 	expect(
 		await db.contact.findUnique({
 			where: { id: otherContact.id },
@@ -596,8 +631,8 @@ describe("Extrovert client", () => {
 
 	it("adds prospects with the expected JSON body", async () => {
 		const originalFetch = globalThis.fetch;
-		const campaignId = EXTROVERT.icpList.campaignId;
-		const listId = EXTROVERT.icpList.listId;
+		const campaignId = EXTROVERT.icpList.targets[0].campaignId;
+		const listId = EXTROVERT.icpList.targets[0].listId;
 		const profileUrl = "https://www.linkedin.com/in/test-person";
 		globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
 			expect(String(input)).toBe(
@@ -649,7 +684,7 @@ describe("Extrovert client", () => {
 
 	it("lists campaign members and removes a prospect from one campaign", async () => {
 		const originalFetch = globalThis.fetch;
-		const campaignId = EXTROVERT.icpList.campaignId;
+		const campaignId = EXTROVERT.icpList.targets[0].campaignId;
 		const profileUrl = "https://www.linkedin.com/in/connected-person";
 		let status = 200;
 		globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {

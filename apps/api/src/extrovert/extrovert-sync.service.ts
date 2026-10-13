@@ -374,7 +374,9 @@ export class ExtrovertSyncService {
 		for (const prospect of prospects) {
 			if (
 				prospect.isDeleted ||
-				prospect.list?.id === EXTROVERT.icpList.listId ||
+				EXTROVERT.icpList.targets.some(
+					(target) => prospect.list?.id === target.listId,
+				) ||
 				!prospect.linkedInProfile?.linkedInUrl
 			) {
 				continue;

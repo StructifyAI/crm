@@ -9,6 +9,9 @@ export const extrovertListSyncCycle = z
 				url: z.string().nullable(),
 			}),
 		),
+		targetMemberCounts: z
+			.record(z.string(), z.number().int().nonnegative())
+			.optional(),
 		offset: z.number().int().nonnegative(),
 		judgeUnavailable: z.boolean().default(false),
 		removalsApplied: z.boolean().default(false),

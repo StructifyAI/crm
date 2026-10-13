@@ -510,7 +510,7 @@ export class ExtrovertListSyncService {
 		if (options.dryRun) return this.runDry(key, now);
 
 		const state = await this.db.extrovertListSync.findUnique({
-			where: { listId: EXTROVERT.icpList.listId },
+			where: { listId: EXTROVERT.icpList.stateListId },
 		});
 		if (!state?.enabled) return { skipped: "disabled" };
 
@@ -543,6 +543,13 @@ export class ExtrovertListSyncService {
 						id: prospect.id,
 						url: canonicalLinkedinUrl(prospect.prospectProfileUrl),
 					})),
+					targetMemberCounts: Object.fromEntries(
+						EXTROVERT.icpList.targets.map((target) => [
+							target.listId,
+							membership.filter(({ listId }) => listId === target.listId)
+								.length,
+						]),
+					),
 					offset: 0,
 					counts: {
 						checked: 0,
@@ -559,7 +566,7 @@ export class ExtrovertListSyncService {
 					connectedRemovedUrls: [],
 				};
 				await this.db.extrovertListSync.update({
-					where: { listId: EXTROVERT.icpList.listId },
+					where: { listId: EXTROVERT.icpList.stateListId },
 					data: {
 						cycle,
 						lastCycleStartedAt: now,
@@ -567,6 +574,33 @@ export class ExtrovertListSyncService {
 						lastSummary: null,
 					},
 				});
+			}
+			if (cycle.targetMemberCounts === undefined) {
+				const membership = await this.listMembership(key);
+				const existingUrls = new Set(
+					cycle.prospects
+						.map(({ url }) => (url ? canonicalLinkedinUrl(url) : null))
+						.filter((url): url is string => Boolean(url)),
+				);
+				cycle.prospects.push(
+					...membership
+						.filter(
+							({ prospectProfileUrl }) =>
+								!existingUrls.has(
+									canonicalLinkedinUrl(prospectProfileUrl) ?? "",
+								),
+						)
+						.map((prospect) => ({
+							id: prospect.id,
+							url: canonicalLinkedinUrl(prospect.prospectProfileUrl),
+						})),
+				);
+				cycle.targetMemberCounts = Object.fromEntries(
+					EXTROVERT.icpList.targets.map((target) => [
+						target.listId,
+						membership.filter(({ listId }) => listId === target.listId).length,
+					]),
+				);
 			}
 
 			while (
@@ -601,7 +635,7 @@ export class ExtrovertListSyncService {
 			if (cycle.offset < cycle.prospects.length) {
 				cycle.counts.notChecked = cycle.prospects.length - cycle.counts.checked;
 				await this.db.extrovertListSync.update({
-					where: { listId: EXTROVERT.icpList.listId },
+					where: { listId: EXTROVERT.icpList.stateListId },
 					data: {
 						cycle,
 						lastError: null,
@@ -614,7 +648,6 @@ export class ExtrovertListSyncService {
 			return {
 				complete: await this.finishCycle(
 					key,
-					state,
 					cycle,
 					urls,
 					skippedUrls,
@@ -628,7 +661,7 @@ export class ExtrovertListSyncService {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			await this.db.extrovertListSync.update({
-				where: { listId: EXTROVERT.icpList.listId },
+				where: { listId: EXTROVERT.icpList.stateListId },
 				data: { cycle: cycle ?? undefined, lastError: message },
 			});
 			this.logger.error({
@@ -641,7 +674,7 @@ export class ExtrovertListSyncService {
 
 	private async runDry(key: string, now: Date): Promise<DryRunPlan> {
 		const state = await this.db.extrovertListSync.findUnique({
-			where: { listId: EXTROVERT.icpList.listId },
+			where: { listId: EXTROVERT.icpList.stateListId },
 			select: { previousUrls: true, skippedUrls: true },
 		});
 		const previousUrls = state
@@ -741,7 +774,7 @@ export class ExtrovertListSyncService {
 		);
 		const capacity = await this.client.getProspectCapacity(
 			key,
-			EXTROVERT.icpList.campaignId,
+			EXTROVERT.icpList.targets[0].campaignId,
 		);
 		const slots = Math.max(0, capacity - EXTROVERT.icpList.capacityBuffer);
 		const wouldAdd = allCrashed ? 0 : Math.min(slots, queuePlan.queue.length);
@@ -782,10 +815,20 @@ export class ExtrovertListSyncService {
 
 	private async connectedCampaignMembers(
 		key: string,
-	): Promise<Array<{ prospectProfileUrl: string; url: string }>> {
-		const members = await this.client.listProspectsInList(key, {
-			campaignId: EXTROVERT.icpList.campaignId,
-		});
+	): Promise<
+		Array<{ prospectProfileUrl: string; url: string; campaignId: string }>
+	> {
+		const members = (
+			await Promise.all(
+				EXTROVERT.icpList.targets.map(async (target) =>
+					(
+						await this.client.listProspectsInList(key, {
+							campaignId: target.campaignId,
+						})
+					).map((member) => ({ ...member, campaignId: target.campaignId })),
+				),
+			)
+		).flat();
 		const contacts = await this.loadContacts(
 			members.map(({ prospectProfileUrl }) => prospectProfileUrl),
 		);
@@ -802,6 +845,7 @@ export class ExtrovertListSyncService {
 		const connectedMembers: Array<{
 			prospectProfileUrl: string;
 			url: string;
+			campaignId: string;
 		}> = [];
 		for (const member of members) {
 			const url = canonicalLinkedinUrl(member.prospectProfileUrl);
@@ -816,17 +860,25 @@ export class ExtrovertListSyncService {
 			connectedMembers.push({
 				prospectProfileUrl: member.prospectProfileUrl,
 				url,
+				campaignId: member.campaignId,
 			});
 		}
 		return connectedMembers;
 	}
 
 	private async listMembership(key: string) {
-		const rows = await this.client.listProspectsInList(key, {
-			campaignId: EXTROVERT.icpList.campaignId,
-			listId: EXTROVERT.icpList.listId,
-		});
-		return rows.filter((row) => row.listId === EXTROVERT.icpList.listId);
+		return (
+			await Promise.all(
+				EXTROVERT.icpList.targets.map(async (target) =>
+					(
+						await this.client.listProspectsInList(key, {
+							campaignId: target.campaignId,
+							listId: target.listId,
+						})
+					).filter((row) => row.listId === target.listId),
+				),
+			)
+		).flat();
 	}
 
 	private async processBatch(
@@ -1158,9 +1210,6 @@ export class ExtrovertListSyncService {
 
 	private async finishCycle(
 		key: string,
-		state: {
-			listId: string;
-		},
 		cycle: ExtrovertListSyncCycle,
 		previousUrls: string[],
 		priorSkippedUrls: string[],
@@ -1179,7 +1228,7 @@ export class ExtrovertListSyncService {
 			const alert = crashedSessionAlert(cycle);
 			this.logger.error({ message: alert });
 			await this.db.extrovertListSync.update({
-				where: { listId: state.listId },
+				where: { listId: EXTROVERT.icpList.stateListId },
 				data: {
 					cycle: Prisma.JsonNull,
 					lastCycleFinishedAt: now,
@@ -1202,14 +1251,14 @@ export class ExtrovertListSyncService {
 				if (alreadyRemoved.has(member.url)) continue;
 				if (Date.now() - startedAt >= budgetMs) {
 					await this.db.extrovertListSync.update({
-						where: { listId: state.listId },
+						where: { listId: EXTROVERT.icpList.stateListId },
 						data: { cycle, lastError: null, lastSummary: null },
 					});
 					return false;
 				}
 				await this.client.removeProspectFromCampaign(key, {
 					prospectProfileUrl: member.prospectProfileUrl,
-					campaignId: EXTROVERT.icpList.campaignId,
+					campaignId: member.campaignId,
 				});
 				cycle.connectedRemovedUrls.push(member.url);
 				alreadyRemoved.add(member.url);
@@ -1225,7 +1274,7 @@ export class ExtrovertListSyncService {
 			for (const removal of removals) {
 				if (Date.now() - startedAt >= budgetMs) {
 					await this.db.extrovertListSync.update({
-						where: { listId: state.listId },
+						where: { listId: EXTROVERT.icpList.stateListId },
 						data: { cycle, lastError: null, lastSummary: null },
 					});
 					return false;
@@ -1244,7 +1293,7 @@ export class ExtrovertListSyncService {
 			cycle.removalsApplied = true;
 			if (Date.now() - startedAt >= fillStartMs) {
 				await this.db.extrovertListSync.update({
-					where: { listId: state.listId },
+					where: { listId: EXTROVERT.icpList.stateListId },
 					data: { cycle, lastError: null, lastSummary: null },
 				});
 				return false;
@@ -1262,10 +1311,39 @@ export class ExtrovertListSyncService {
 		});
 		const capacity = await this.client.getProspectCapacity(
 			key,
-			EXTROVERT.icpList.campaignId,
+			EXTROVERT.icpList.targets[0].campaignId,
 		);
 		const slots = Math.max(0, capacity - EXTROVERT.icpList.capacityBuffer);
 		const selected = queuePlan.queue.slice(0, slots);
+		const targetCounts = new Map(
+			EXTROVERT.icpList.targets.map((target) => [
+				target.listId,
+				cycle.targetMemberCounts?.[target.listId] ?? 0,
+			]),
+		);
+		const selectedByList = new Map(
+			EXTROVERT.icpList.targets.map((target) => [
+				target.listId,
+				[] as typeof selected,
+			]),
+		);
+		for (const item of selected) {
+			let target: (typeof EXTROVERT.icpList.targets)[number] =
+				EXTROVERT.icpList.targets[0];
+			for (const candidate of EXTROVERT.icpList.targets.slice(1)) {
+				if (
+					(targetCounts.get(candidate.listId) ?? 0) <
+					(targetCounts.get(target.listId) ?? 0)
+				) {
+					target = candidate;
+				}
+			}
+			selectedByList.get(target.listId)?.push(item);
+			targetCounts.set(
+				target.listId,
+				(targetCounts.get(target.listId) ?? 0) + 1,
+			);
+		}
 		let added = 0;
 		let existed = 0;
 		let outOfLimit = 0;
@@ -1276,43 +1354,47 @@ export class ExtrovertListSyncService {
 				.map(canonicalLinkedinUrl)
 				.filter((url): url is string => Boolean(url)),
 		);
-		for (
-			let offset = 0;
-			offset < selected.length;
-			offset += EXTROVERT.icpList.addBatchSize
-		) {
-			const batch = selected.slice(
-				offset,
-				offset + EXTROVERT.icpList.addBatchSize,
-			);
-			attempted += batch.length;
-			const result = await this.client.addUsersToList(key, {
-				campaignId: EXTROVERT.icpList.campaignId,
-				listId: EXTROVERT.icpList.listId,
-				userUrls: batch.map(({ url }) => url),
-				moveOwnDuplicated: false,
-				shouldBeDeletedIfInactive: true,
-			});
-			added += result.submittedUrls.length;
-			submittedUrls.push(...result.submittedUrls);
-			const existedMapUrls = Object.values(result.existedUrlsMap).flatMap(
-				(value) => value.urls,
-			);
-			existed += existedMapUrls.length;
-			for (const url of existedMapUrls) {
-				const canonical = canonicalLinkedinUrl(url);
-				if (canonical) skipped.add(canonical);
+		for (const target of EXTROVERT.icpList.targets) {
+			const targetSelected = selectedByList.get(target.listId) ?? [];
+			for (
+				let offset = 0;
+				offset < targetSelected.length;
+				offset += EXTROVERT.icpList.addBatchSize
+			) {
+				const batch = targetSelected.slice(
+					offset,
+					offset + EXTROVERT.icpList.addBatchSize,
+				);
+				attempted += batch.length;
+				const result = await this.client.addUsersToList(key, {
+					campaignId: target.campaignId,
+					listId: target.listId,
+					userUrls: batch.map(({ url }) => url),
+					moveOwnDuplicated: false,
+					shouldBeDeletedIfInactive: true,
+				});
+				added += result.submittedUrls.length;
+				submittedUrls.push(...result.submittedUrls);
+				const existedMapUrls = Object.values(result.existedUrlsMap).flatMap(
+					(value) => value.urls,
+				);
+				existed += existedMapUrls.length;
+				for (const url of existedMapUrls) {
+					const canonical = canonicalLinkedinUrl(url);
+					if (canonical) skipped.add(canonical);
+				}
+				outOfLimit += result.outOfLimitUrls.length;
+				this.logger.log({
+					message: "Extrovert ICP list add batch finished",
+					submitted: result.submittedUrls.length,
+					existed: existedMapUrls.length,
+					outOfLimit: result.outOfLimitUrls.length,
+					existedUrlsMap: result.existedUrlsMap,
+					outOfLimitUrls: result.outOfLimitUrls,
+				});
+				if (result.outOfLimitUrls.length > 0) break;
 			}
-			outOfLimit += result.outOfLimitUrls.length;
-			this.logger.log({
-				message: "Extrovert ICP list add batch finished",
-				submitted: result.submittedUrls.length,
-				existed: existedMapUrls.length,
-				outOfLimit: result.outOfLimitUrls.length,
-				existedUrlsMap: result.existedUrlsMap,
-				outOfLimitUrls: result.outOfLimitUrls,
-			});
-			if (result.outOfLimitUrls.length > 0) break;
+			if (outOfLimit > 0) break;
 		}
 
 		const addedUrls = submittedUrls
@@ -1331,7 +1413,7 @@ export class ExtrovertListSyncService {
 		const summary = `Extrovert ICP list cycle ${cycle.startedAt}: added ${added} (${existed} already in other campaigns, ${outOfLimit} out of limit), removed ${cycle.connectedRemovedUrls.length} connected, newly Active ${cycle.counts.newlyActive}, newly Inactive ${cycle.counts.newlyInactive} (${cycle.counts.pruned} pruned by Extrovert), job changes flagged ${cycle.counts.jobChanges}, checked ${cycle.counts.checked} of ${cycle.prospects.length} (${cycle.counts.notChecked} not checked yet, ${cycle.counts.crashed} crashed), queue remaining ${queueRemaining}, capacity left ${capacityLeft}.${cycle.judgeUnavailable ? " job-change judge unavailable." : ""}`;
 
 		await this.db.extrovertListSync.update({
-			where: { listId: state.listId },
+			where: { listId: EXTROVERT.icpList.stateListId },
 			data: {
 				previousUrls: [...previous],
 				skippedUrls: [...skipped],
