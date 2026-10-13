@@ -40,8 +40,17 @@ export const EXTROVERT = {
 		postExcerptChars: 280,
 	},
 	icpList: {
-		campaignId: "20be03ab-ad2e-4e18-a1f0-0fdb13fda739",
-		listId: "2f6e84ed-e33e-4d54-bb83-91c0fd3d579f",
+		stateListId: "2f6e84ed-e33e-4d54-bb83-91c0fd3d579f",
+		targets: [
+			{
+				campaignId: "20be03ab-ad2e-4e18-a1f0-0fdb13fda739",
+				listId: "2f6e84ed-e33e-4d54-bb83-91c0fd3d579f",
+			},
+			{
+				campaignId: "cf6475bc-0dcc-4e03-a951-5a65a9c0260c",
+				listId: "62609b6b-879a-487b-9124-37c71e7c5bf7",
+			},
+		],
 		roleOptionIds: [
 			"cmts6k24a000104jr8p7z26tp",
 			"cmts6k24a000204jrfztib3ns",
