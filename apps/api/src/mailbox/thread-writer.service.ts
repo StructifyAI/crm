@@ -12,8 +12,8 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
 	ActivityStampService,
-	activityTime,
 	type ActivityTarget,
+	activityTime,
 } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { addressedIn, correspondenceSpan } from "./correspondence";
