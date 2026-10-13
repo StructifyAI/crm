@@ -45,6 +45,8 @@ function harness(options: {
 	history?: MailboxResult<HistoryList>;
 	list?: MailboxResult<MessageList>;
 	messages?: Record<string, GmailMessage>;
+	fetchResults?: Record<string, MailboxResult<GmailMessage>>;
+	storePredicate?: (parsed: IncomingMessage) => boolean;
 }): Harness {
 	const stored: IncomingMessage[] = [];
 	const settled: Settled[] = [];
@@ -77,7 +79,9 @@ function harness(options: {
 		},
 		async getMessage(_token: string, id: string) {
 			fetched.push(id);
-			return ok(options.messages?.[id] ?? message(id));
+			return (
+				options.fetchResults?.[id] ?? ok(options.messages?.[id] ?? message(id))
+			);
 		},
 	} as unknown as GmailClient;
 
@@ -111,6 +115,8 @@ function harness(options: {
 			_options: { mailbox: string },
 			parsed: IncomingMessage,
 		) {
+			if (options.storePredicate && !options.storePredicate(parsed))
+				return false;
 			stored.push(parsed);
 			return true;
 		},
@@ -303,6 +309,138 @@ describe("GmailSyncService first sync", () => {
 		expect(outcome.status).toBe("synced");
 		expect(kit.cleared).toHaveLength(1);
 		expect(kit.listCalls).toEqual([]);
+	});
+});
+
+describe("GmailSyncService incremental", () => {
+	it("advances past messages that are not stored across ticks", async () => {
+		const firstEntries = Array.from({ length: 130 }, (_, index) => ({
+			id: `h-${index + 1}`,
+			messagesAdded: [{ message: { id: `h-${index + 1}` } }],
+		}));
+		const first = harness({
+			history: ok({ history: firstEntries, historyId: "h-130" }),
+			storePredicate: () => false,
+		});
+
+		await first.service.sync(row("h-start"), deadline());
+
+		expect(first.settled.at(-1)?.cursor).toBe("h-120");
+		expect(first.fetched).toHaveLength(120);
+		expect(first.stored).toHaveLength(0);
+
+		const second = harness({
+			history: ok({
+				history: Array.from({ length: 10 }, (_, index) => ({
+					id: `h-${index + 121}`,
+					messagesAdded: [{ message: { id: `h-${index + 121}` } }],
+				})),
+				historyId: "h-131",
+			}),
+			storePredicate: () => false,
+		});
+
+		await second.service.sync(
+			row(first.settled.at(-1)?.cursor ?? null),
+			deadline(),
+		);
+
+		expect(second.historyCalls).toEqual(["h-120"]);
+		expect(second.fetched).toHaveLength(10);
+		expect(second.settled.at(-1)?.cursor).toBe("h-131");
+	});
+
+	it("counts a deleted message as finished", async () => {
+		const kit = harness({
+			history: ok({
+				history: ["one", "deleted", "three"].map((id, index) => ({
+					id: `entry-${index + 1}`,
+					messagesAdded: [{ message: { id } }],
+				})),
+				historyId: "h-final",
+			}),
+			fetchResults: {
+				deleted: { outcome: "cursor-invalid", reason: "Message deleted." },
+			},
+		});
+
+		await kit.service.sync(row("h-start"), deadline());
+
+		expect(kit.fetched).toEqual(["one", "deleted", "three"]);
+		expect(kit.stored.map((parsed) => parsed.gmailMessageId)).toEqual([
+			"one",
+			"three",
+		]);
+		expect(kit.settled.at(-1)?.cursor).toBe("h-final");
+	});
+
+	it("stops at a rate-limited message and keeps later entries pending", async () => {
+		const kit = harness({
+			history: ok({
+				history: ["one", "two", "three"].map((id, index) => ({
+					id: `entry-${index + 1}`,
+					messagesAdded: [{ message: { id } }],
+				})),
+				historyId: "h-final",
+			}),
+			fetchResults: {
+				two: {
+					outcome: "rate-limited",
+					reason: "Quota exceeded.",
+					retryAfterMs: 30_000,
+				},
+			},
+		});
+
+		await kit.service.sync(row("h-start"), deadline());
+
+		expect(kit.fetched).toEqual(["one", "two"]);
+		expect(kit.settled.at(-1)?.cursor).toBe("entry-1");
+	});
+
+	it("keeps the last entry cursor when history has another page", async () => {
+		const kit = harness({
+			history: ok({
+				history: ["one", "two"].map((id, index) => ({
+					id: `entry-${index + 1}`,
+					messagesAdded: [{ message: { id } }],
+				})),
+				nextPageToken: "page-2",
+				historyId: "h-final",
+			}),
+		});
+
+		await kit.service.sync(row("h-start"), deadline());
+
+		expect(kit.settled.at(-1)?.cursor).toBe("entry-2");
+		expect(kit.settled.at(-1)?.cursor).not.toBe("h-final");
+	});
+
+	it("keeps a backfill page token after a retryable fetch failure", async () => {
+		const kit = harness({
+			pages: [[], ["retry"]],
+			fetchResults: {
+				retry: {
+					outcome: "failed",
+					reason: "Temporary failure.",
+					retryable: true,
+				},
+			},
+		});
+		const cursor = encodeBackfillCursor({
+			historyId: "h-100",
+			before: new Date("2025-08-01T00:00:00.000Z"),
+			pageToken: "page-1",
+		});
+
+		await kit.service.sync(row(cursor), deadline());
+
+		expect(
+			decodeBackfillCursor(kit.settled.at(-1)?.cursor ?? null),
+		).toMatchObject({
+			historyId: "h-100",
+			pageToken: "page-1",
+		});
 	});
 
 	it("still runs incremental history for an established cursor", async () => {

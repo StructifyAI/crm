@@ -19,7 +19,11 @@ import {
 	ThreadWriterService,
 } from "../mailbox/thread-writer.service";
 import { TokenSession } from "../mailbox/token-session";
-import { GmailClient, type GmailMessage } from "./gmail.client";
+import {
+	GmailClient,
+	type GmailMessage,
+	type HistoryList,
+} from "./gmail.client";
 import {
 	type GmailHeader,
 	header,
@@ -30,6 +34,31 @@ import {
 const MAX_MESSAGES_PER_TICK = 120;
 
 const BACKFILL_CURSOR_PREFIX = "backfill:";
+
+function historyCursor(
+	history: HistoryList,
+	finished: ReadonlySet<string>,
+	startHistoryId: string,
+): string {
+	let last: string | undefined;
+	let stopped = false;
+
+	for (const entry of history.history ?? []) {
+		const ids = (entry.messagesAdded ?? [])
+			.map((added) => added.message?.id)
+			.filter((id): id is string => Boolean(id));
+
+		if (!ids.every((id) => finished.has(id))) {
+			stopped = true;
+			break;
+		}
+
+		if (entry.id) last = entry.id;
+	}
+
+	if (stopped || history.nextPageToken) return last ?? startHistoryId;
+	return history.historyId ?? startHistoryId;
+}
 
 type BackfillCursor = {
 	historyId: string;
@@ -290,18 +319,23 @@ export class GmailSyncService {
 			return this.handleFailure(row, history);
 		}
 
-		const ids = new Set<string>();
+		const ids: string[] = [];
+		const seen = new Set<string>();
 		for (const entry of history.data.history ?? []) {
 			for (const added of entry.messagesAdded ?? []) {
-				if (added.message?.id) ids.add(added.message.id);
+				const id = added.message?.id;
+				if (id && !seen.has(id)) {
+					seen.add(id);
+					ids.push(id);
+				}
 			}
 		}
 
-		const { written, remaining, unauthorized } = await this.ingest(
+		const { written, finished, unauthorized } = await this.ingest(
 			row,
 			session,
 			mailbox,
-			[...ids],
+			ids,
 			deadline,
 		);
 
@@ -312,11 +346,10 @@ export class GmailSyncService {
 			});
 		}
 
+		const remaining = ids.filter((id) => !finished.has(id)).length;
+
 		await this.state.settle(row.id, {
-			cursor:
-				remaining > 0
-					? startHistoryId
-					: (history.data.historyId ?? startHistoryId),
+			cursor: historyCursor(history.data, finished, startHistoryId),
 			status: GoogleSyncStatus.RUNNING,
 		});
 
@@ -343,22 +376,31 @@ export class GmailSyncService {
 		mailbox: string,
 		ids: readonly string[],
 		deadline: Deadline,
-	): Promise<{ written: number; remaining: number; unauthorized?: string }> {
-		if (ids.length === 0) return { written: 0, remaining: 0 };
+	): Promise<{
+		written: number;
+		remaining: number;
+		finished: Set<string>;
+		unauthorized?: string;
+	}> {
+		if (ids.length === 0)
+			return { written: 0, remaining: 0, finished: new Set() };
 
 		const alreadyHave = await this.db.emailMessage.findMany({
 			where: { gmailMessageId: { in: [...ids] } },
 			select: { gmailMessageId: true },
 		});
 		const seen = new Set(
-			alreadyHave.map((existing) => existing.gmailMessageId),
+			alreadyHave
+				.map((existing) => existing.gmailMessageId)
+				.filter((id): id is string => id !== null),
 		);
+		const finished = new Set(seen);
 
 		const pending = ids.filter((id) => !seen.has(id));
 		const batch = pending.slice(0, MAX_MESSAGES_PER_TICK);
 		let remaining = pending.length - batch.length;
 
-		if (batch.length === 0) return { written: 0, remaining };
+		if (batch.length === 0) return { written: 0, remaining, finished };
 
 		const context = await this.threads.context(deadline);
 
@@ -374,10 +416,26 @@ export class GmailSyncService {
 				this.gmail.getMessage(accessToken, id),
 			);
 			if (message.outcome === "unauthorized") {
-				return { written, remaining, unauthorized: message.reason };
+				return { written, remaining, finished, unauthorized: message.reason };
 			}
-			if (message.outcome !== "ok") continue;
+			if (message.outcome === "rate-limited") {
+				remaining += batch.length - index;
+				break;
+			}
+			if (message.outcome === "cursor-invalid") {
+				finished.add(id);
+				continue;
+			}
+			if (message.outcome === "failed") {
+				if (message.retryable) {
+					remaining += batch.length - index;
+					break;
+				}
+				finished.add(id);
+				continue;
+			}
 
+			finished.add(id);
 			const parsed = this.parse(message.data);
 			if (!parsed) continue;
 
@@ -390,7 +448,7 @@ export class GmailSyncService {
 			if (stored) written += 1;
 		}
 
-		return { written, remaining };
+		return { written, remaining, finished };
 	}
 
 	private parse(message: GmailMessage): IncomingMessage | null {
