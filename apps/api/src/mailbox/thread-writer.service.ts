@@ -10,7 +10,11 @@ import {
 } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import { ContactEventsService } from "../contact-events/contact-events.service";
-import { ActivityStampService } from "../crm/activity-stamp.service";
+import {
+	ActivityStampService,
+	type ActivityTarget,
+	activityTime,
+} from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { addressedIn, correspondenceSpan } from "./correspondence";
 import type { Deadline } from "./deadline";
@@ -345,7 +349,7 @@ export class ThreadWriterService {
 		}
 
 		await this.touch(
-			{ companyId, contactId },
+			{ companyId, contactId, dealId },
 			stored.occurredAt,
 			parsed.rfcMessageId,
 		);
@@ -391,7 +395,7 @@ export class ThreadWriterService {
 	}
 
 	private async touch(
-		target: { companyId: string | null; contactId: string | null },
+		target: ActivityTarget,
 		at: Date,
 		rfcMessageId: string,
 	): Promise<void> {
@@ -509,9 +513,9 @@ export class ThreadWriterService {
 				body: summary.snippet,
 				occurredAt: summary.lastMessageAt,
 			},
-			select: { createdAt: true },
+			select: { occurredAt: true, createdAt: true },
 		});
 
-		return activity.createdAt;
+		return activityTime(activity);
 	}
 }

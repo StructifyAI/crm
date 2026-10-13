@@ -447,6 +447,47 @@ describe("storing a synced email", () => {
 		expect(thread.activity?.occurredAt).toEqual(sentAt);
 	});
 
+	it("moves the linked deal clock for a reply from a known contact", async () => {
+		const sentAt = new Date("2026-01-22T09:00:00Z");
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: { id: true, companyId: true },
+		});
+		if (!thread.companyId) throw new Error("the thread has no company");
+
+		const deal = await db.deal.create({
+			data: {
+				name: "Buyer Co — reply",
+				companyId: thread.companyId,
+				ownerId: userId,
+				lastActivityAt: new Date("2026-01-21T09:00:00Z"),
+			},
+			select: { id: true },
+		});
+		await db.activity.update({
+			where: { emailThreadId: thread.id },
+			data: { dealId: deal.id },
+		});
+
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(`<reply-deal-${suffix}@mail.test>`, sentAt, rootId, {
+				email: person,
+				name: "A Buyer",
+			}),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		expect(stored).toBe(true);
+
+		const updated = await db.deal.findUniqueOrThrow({
+			where: { id: deal.id },
+			select: { lastActivityAt: true },
+		});
+		expect(updated.lastActivityAt).toEqual(sentAt);
+	});
+
 	it("keeps internal Instantly mail out of correspondence clocks", async () => {
 		await db.instantlyMailbox.create({
 			data: { emailAccount: instantlyMailbox },
