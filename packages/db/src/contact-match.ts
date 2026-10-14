@@ -27,6 +27,16 @@ export type ContactMatch =
 			reason: string;
 	  };
 
+export type ContactNameComparison =
+	| { kind: "match" }
+	| {
+			kind: "review";
+			reason:
+				| "Name generations differ"
+				| "Only one contact has a LinkedIn profile"
+				| "LinkedIn profiles differ";
+	  };
+
 export type ParsedContactName = {
 	first: string;
 	surname: string;
@@ -141,6 +151,41 @@ export function firstNamesCompatible(
 	);
 }
 
+export function compareContactNames(
+	left: Pick<ContactMatchInput, "firstName" | "lastName" | "linkedinUrl">,
+	right: Pick<ContactMatchInput, "firstName" | "lastName" | "linkedinUrl">,
+): ContactNameComparison | null {
+	const wanted = parseName(left.firstName, left.lastName);
+	const existing = parseName(right.firstName, right.lastName);
+	if (
+		!wanted.first ||
+		!wanted.surname ||
+		existing.surname !== wanted.surname ||
+		!firstNamesCompatible(existing.first, wanted.first)
+	) {
+		return null;
+	}
+	if (existing.generation !== wanted.generation) {
+		return { kind: "review", reason: "Name generations differ" };
+	}
+	const existingLinkedIn = profileKey(right.linkedinUrl);
+	const wantedLinkedIn = profileKey(left.linkedinUrl);
+	if (Boolean(existingLinkedIn) !== Boolean(wantedLinkedIn)) {
+		return {
+			kind: "review",
+			reason: "Only one contact has a LinkedIn profile",
+		};
+	}
+	if (
+		existingLinkedIn &&
+		wantedLinkedIn &&
+		!sameLinkedinProfile(left.linkedinUrl, right.linkedinUrl)
+	) {
+		return { kind: "review", reason: "LinkedIn profiles differ" };
+	}
+	return { kind: "match" };
+}
+
 export async function linkedinCandidates(
 	db: ContactMatchDatabase,
 	urls: readonly string[],
@@ -216,40 +261,13 @@ export async function findContactMatch(
 	});
 	let review: ContactMatch | null = null;
 	for (const candidate of candidates) {
-		const existing = parseName(candidate.firstName, candidate.lastName);
-		if (
-			existing.surname !== wanted.surname ||
-			!firstNamesCompatible(existing.first, wanted.first)
-		) {
-			continue;
-		}
-		if (existing.generation !== wanted.generation) {
+		const comparison = compareContactNames(input, candidate);
+		if (!comparison) continue;
+		if (comparison.kind === "review") {
 			review ??= {
 				kind: "review",
 				contactId: candidate.id,
-				reason: "Name generations differ",
-			};
-			continue;
-		}
-		const existingLinkedIn = profileKey(candidate.linkedinUrl);
-		const wantedLinkedIn = profileKey(input.linkedinUrl);
-		if (Boolean(existingLinkedIn) !== Boolean(wantedLinkedIn)) {
-			review ??= {
-				kind: "review",
-				contactId: candidate.id,
-				reason: "Only one contact has a LinkedIn profile",
-			};
-			continue;
-		}
-		if (
-			existingLinkedIn &&
-			wantedLinkedIn &&
-			!sameLinkedinProfile(input.linkedinUrl, candidate.linkedinUrl)
-		) {
-			review ??= {
-				kind: "review",
-				contactId: candidate.id,
-				reason: "LinkedIn profiles differ",
+				reason: comparison.reason,
 			};
 			continue;
 		}

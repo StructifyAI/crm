@@ -16,6 +16,7 @@ import {
 	companyBulkInput,
 	companyBulkOwnerInput,
 	companyBulkResultOutput,
+	companyByIdInput,
 	companyCreateInput,
 	companyDetailOutput,
 	companyEnrichOutput,
@@ -51,12 +52,12 @@ export class CompaniesRouter {
 	}
 
 	@Query({
-		input: companyIdInput,
+		input: companyByIdInput,
 		output: companyDetailOutput,
 		meta: restMeta("GET", "/companies/{id}", ["Companies"]),
 	})
-	async byId(@Input("id") id: string) {
-		return this.companies.byId(id);
+	async byId(@Input() input: z.infer<typeof companyByIdInput>) {
+		return this.companies.byId(input.id, input.includeArchived ?? false);
 	}
 
 	@Query({

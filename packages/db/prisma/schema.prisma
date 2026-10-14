@@ -44,6 +44,7 @@ model User {
   slackMemberMatch        SlackMemberMatch?
   instantlyMailboxes      InstantlyMailbox[]            @relation("InstantlyMailboxOwner")
   extrovertMembers        ExtrovertMember[]             @relation("ExtrovertMemberOwner")
+  duplicateDecisions      DuplicateCandidate[]          @relation("DuplicateCandidateDecider")
 
   members     Member[]
   invitations Invitation[]
@@ -258,6 +259,17 @@ enum ContactEventOrigin {
 enum ContactEmailStatus {
   OK
   BOUNCED
+}
+
+enum DuplicateKind {
+  CONTACT
+  COMPANY
+}
+
+enum DuplicateStatus {
+  OPEN
+  MERGED
+  DISMISSED
 }
 
 enum ContactExtractionStatus {
@@ -544,6 +556,23 @@ model ContactEmail {
   @@unique([contactId, email])
   @@index([email])
   @@map("contactEmail")
+}
+
+model DuplicateCandidate {
+  id          String          @id @default(cuid())
+  kind        DuplicateKind
+  aId         String
+  bId         String
+  reason      String
+  status      DuplicateStatus @default(OPEN)
+  createdAt   DateTime        @default(now())
+  decidedAt   DateTime?
+  decidedById String?
+  decidedBy   User?           @relation("DuplicateCandidateDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@unique([kind, aId, bId])
+  @@index([status, kind])
+  @@map("duplicateCandidate")
 }
 
 enum FactBand {
@@ -1564,6 +1593,10 @@ model AppSetting {
   instantlyEmailCursor     DateTime?
   instantlyEmailLeaseUntil DateTime?
   instantlyReplyCursor     DateTime?
+  duplicateContactCursor   String?
+  duplicateCompanyCursor   String?
+  duplicateContactsComplete Boolean @default(false)
+  duplicateCompaniesComplete Boolean @default(false)
   extrovertApiKey          String?
   extrovertWebhookSecret   String?
   extrovertLastEventAt     DateTime?

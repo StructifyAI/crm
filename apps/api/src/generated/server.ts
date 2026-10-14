@@ -16,13 +16,14 @@ const publicProcedure = t.procedure;
 import { timelineInput, timelineOutput, timelineCountsInput, timelineCountsOutput, myTasksInput, myTasksOutput, activityCreateInput, activityCreateOutput, activityUpdateInput, activityEntryOutput, completeInput, completeOutput, activityDeleteInput, activityDeleteOutput } from "../activities/activities.contracts";
 import { agentListOutput, agentReviseInput, agentReviseOutput, agentIdInput, agentFilesOutput, agentSaveFileInput, agentSaveFileOutput, agentByIdOutput, agentHistoryInput, agentHistoryOutput, agentActivityOutput, agentUpdateInput, agentUpdateOutput, agentDeployInput, agentDeployOutput, agentPauseOutput, agentResumeOutput, agentArchiveOutput, agentRestoreOutput, agentRemoveOutput, agentRunNowInput, agentRunNowOutput, agentRetryRunInput, agentRetryRunOutput, agentCancelRunInput, agentCancelRunOutput } from "../agent/agents.contracts";
 import { apiKeyListInput, apiKeyListOutput, createApiKeyInput, createApiKeyOutput, revokeApiKeyInput, revokeApiKeyOutput } from "../api-keys/api-keys.contracts";
-import { companyListInput, companyListOutput, companyIdInput, companyDetailOutput, companyOptionsInput, companyOptionOutput, companyCreateInput, companySummaryOutput, companyUpdateArgs, companyMergeInput, companyMergeOutput, companyArchiveResultOutput, companyBulkOwnerInput, companyBulkResultOutput, companyBulkInput, companyEnrichOutput, companyResearchOutput, setPrimaryContactInput, companySetPrimaryContactOutput } from "../companies/companies.contracts";
+import { companyListInput, companyListOutput, companyByIdInput, companyDetailOutput, companyOptionsInput, companyOptionOutput, companyCreateInput, companySummaryOutput, companyUpdateArgs, companyMergeInput, companyMergeOutput, companyIdInput, companyArchiveResultOutput, companyBulkOwnerInput, companyBulkResultOutput, companyBulkInput, companyEnrichOutput, companyResearchOutput, setPrimaryContactInput, companySetPrimaryContactOutput } from "../companies/companies.contracts";
 import { contactEventScopeQueryInput, contactEventsListOutput, unclassifiedInboundOutput, unclassifiedInboundQueueOutput, contactEventReviewOutput } from "../contact-events/contact-events.contracts";
 import { contactListInput, contactListOutput, contactIdInput, contactByIdOutput, contactCreateInput, contactCreateOutput, contactUpdateArgs, contactBasicOutput, contactMergeInput, contactMergeOutput, contactEmailAddInput, contactEmailStatusOutput, contactEmailInput, contactEmailStatusInput, contactNameOutput, contactEnrichOutput, contactBulkOwnerInput, bulkResultOutput, contactBulkCompanyInput, contactBulkInput, factDecisionInput, decideFactOutput } from "../contacts/contacts.contracts";
 import { conversationListInput, conversationListOutput, builderListOutput, builderResourceSearchInput, builderResourcesOutput, conversationIdInput, builderConversationDetailOutput, conversationEventsInput, conversationEventsOutput, conversationSaveInput, conversationIdOutput, builderConversationCreateInput, builderConversationSubmitInput, builderQuestionResponseInput, builderResponseRatingInput, builderResponseRatingOutput, conversationShareStatusOutput, conversationShareTokenOutput, sharedConversationInput, sharedConversationOutput } from "../conversations/conversations.contracts";
 import { currencySettingsOutput, setReportingCurrencyInput, setManualRateInput, removeManualRateInput } from "../currency/currency.contracts";
 import { dashboardSummaryInput, dashboardSummaryOutput } from "../dashboard/dashboard.contracts";
 import { dealListInput, dealListOutput, dealIdInput, dealDetailOutput, dealCreateInput, dealCreateOutput, dealUpdateArgs, dealMutateOutput, setStageInput, dealSetStageOutput, dealContactsInput, dealContactOptionsOutput, dealAttachContactInput, dealContactLinkOutput, dealDetachContactInput, dealContactRoleInput, dealContactRoleOutput, dealBulkOwnerInput, dealBulkResultOutput, dealBulkStageInput, dealBulkInput } from "../deals/deals.contracts";
+import { duplicatesListInput, duplicatesListOutput, duplicateMergeInput, duplicateDecisionOutput, duplicateDecisionInput } from "../duplicates/duplicates.contracts";
 import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { extrovertStatusOutput, extrovertApiKeyInput, extrovertSyncOutput, extrovertSetConnectionFieldInput, extrovertMembersOutput, extrovertSetMemberOwnerInput, extrovertMemberOutput, extrovertRemoveMemberInput } from "../extrovert/extrovert.contracts";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
@@ -157,7 +158,7 @@ const appRouter = t.router({
       .output(companyListOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     byId: publicProcedure
-      .input(companyIdInput)
+      .input(companyByIdInput)
       .output(companyDetailOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     options: publicProcedure
@@ -476,6 +477,20 @@ const appRouter = t.router({
     bulkPurge: publicProcedure
       .input(dealBulkInput)
       .output(dealBulkResultOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  duplicates: t.router({
+    list: publicProcedure
+      .input(duplicatesListInput)
+      .output(duplicatesListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    merge: publicProcedure
+      .input(duplicateMergeInput)
+      .output(duplicateDecisionOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    dismiss: publicProcedure
+      .input(duplicateDecisionInput)
+      .output(duplicateDecisionOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   enrichment: t.router({

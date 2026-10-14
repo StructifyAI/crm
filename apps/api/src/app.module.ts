@@ -18,6 +18,7 @@ import { CurrencyModule } from "./currency/currency.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { DatabaseModule } from "./database/database.module";
 import { DealsModule } from "./deals/deals.module";
+import { DuplicatesModule } from "./duplicates/duplicates.module";
 import { EnrichmentModule } from "./enrichment/enrichment.module";
 import { ExtrovertModule } from "./extrovert/extrovert.module";
 import { FieldsModule } from "./fields/fields.module";
@@ -63,6 +64,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		ConversationsModule,
 		CurrencyModule,
 		DealsModule,
+		DuplicatesModule,
 		FieldsModule,
 		ActivitiesModule,
 		GranolaModule,
