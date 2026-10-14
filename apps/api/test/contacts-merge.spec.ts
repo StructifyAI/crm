@@ -30,6 +30,7 @@ const agent = {
 	contactCreated: async () => true,
 	companyCreated: async () => undefined,
 	companyRequested: async () => true,
+	fieldBackfillRecords: async () => ({ queued: 0, merged: 0 }),
 	withCrmEvents: withDiscardedCrmEvents,
 } as unknown as AgentTriggerService;
 const stamp = new ActivityStampService(db);
@@ -389,6 +390,62 @@ describe("contact and company merges", () => {
 		expect(
 			(await db.contact.findUnique({ where: { id: contactId } }))?.emailStatus,
 		).toBe(ContactEmailStatus.BOUNCED);
+	});
+
+	it("does not keep a corrected primary email and promotes alternates with their status", async () => {
+		const domain = `${suffix()}.test`;
+		const oldEmail = `typo@${domain}`;
+		const contactId = await contact(oldEmail);
+		await contacts.setEmailStatus({
+			contactId,
+			email: oldEmail,
+			status: ContactEmailStatus.BOUNCED,
+		});
+		await contacts.update(contactId, { email: `correct@${domain}` });
+		expect(
+			await db.contact.findUnique({ where: { id: contactId } }),
+		).toMatchObject({
+			email: `correct@${domain}`,
+			emailStatus: ContactEmailStatus.OK,
+		});
+		expect(
+			await db.contactEmail.findMany({ where: { contactId } }),
+		).toHaveLength(0);
+
+		const alternateEmail = `alternate@${domain}`;
+		await contacts.addEmail({ contactId, email: alternateEmail });
+		await contacts.setEmailStatus({
+			contactId,
+			email: alternateEmail,
+			status: ContactEmailStatus.BOUNCED,
+		});
+		await contacts.update(contactId, { email: alternateEmail });
+		expect(
+			await db.contact.findUnique({ where: { id: contactId } }),
+		).toMatchObject({
+			email: alternateEmail,
+			emailStatus: ContactEmailStatus.BOUNCED,
+		});
+		expect(
+			await db.contactEmail.findMany({ where: { contactId } }),
+		).toHaveLength(0);
+
+		await contacts.update(contactId, { email: "" });
+		expect(
+			await db.contact.findUnique({ where: { id: contactId } }),
+		).toMatchObject({
+			email: null,
+			emailStatus: ContactEmailStatus.OK,
+		});
+
+		const other = await contacts.create({
+			firstName: "Another",
+			email: oldEmail,
+		});
+		contactIds.push(other.id);
+		expect(
+			await db.contact.findUnique({ where: { id: other.id } }),
+		).toMatchObject({ email: oldEmail });
 	});
 
 	it("matches mailbox participants by alternate email without creating a contact", async () => {

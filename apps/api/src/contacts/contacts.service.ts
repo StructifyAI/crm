@@ -648,20 +648,6 @@ export class ContactsService {
 						await lockIdempotencyKey(tx, `contact-email:${address}`);
 					}
 					if (nextEmail) await this.assertEmailAvailable(tx, nextEmail, id);
-					if (oldEmail) {
-						const oldAlternate = current.alternateEmails.find(
-							(alternate) => alternate.email.toLowerCase() === oldEmail,
-						);
-						if (!oldAlternate) {
-							await tx.contactEmail.create({
-								data: {
-									contactId: id,
-									email: oldEmail,
-									status: current.emailStatus,
-								},
-							});
-						}
-					}
 					const newAlternate = nextEmail
 						? current.alternateEmails.find(
 								(alternate) => alternate.email.toLowerCase() === nextEmail,
@@ -670,7 +656,7 @@ export class ContactsService {
 					if (newAlternate) {
 						data.emailStatus = newAlternate.status;
 						await tx.contactEmail.delete({ where: { id: newAlternate.id } });
-					} else if (nextEmail) {
+					} else {
 						data.emailStatus = ContactEmailStatus.OK;
 					}
 				}
@@ -1038,6 +1024,12 @@ export class ContactsService {
 				},
 				contactEventTargets,
 			};
+		});
+		this.logger.log({
+			message: "Contacts merged",
+			keepId: result.keepId,
+			mergedIds: result.mergedIds,
+			moved: result.moved,
 		});
 		try {
 			await this.stamp.recomputeMany(result.stampTargets);

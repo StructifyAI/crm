@@ -554,6 +554,13 @@ export class CompaniesService {
 				contactEventTargets,
 			};
 		});
+		this.logger.log({
+			message: "Companies merged",
+			keepId: result.keepId,
+			mergedIds: result.mergedIds,
+			moved: result.moved,
+			alternateDomains: result.alternateDomains,
+		});
 		try {
 			await this.stamp.recomputeMany(result.stampTargets);
 			await this.contactEvents.refreshAffected(result.contactEventTargets);
