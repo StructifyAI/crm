@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	domainFromEmail,
 	isMachineDomain,
+	isNearDomain,
 	normalizeDomain,
 } from "../src/companies/domain";
 
@@ -62,6 +63,20 @@ describe("domainFromEmail", () => {
 		]) {
 			expect(domainFromEmail(email)).toBeNull();
 		}
+	});
+});
+
+describe("near company domains", () => {
+	it("matches a sufficiently long label across TLDs", () => {
+		expect(isNearDomain("gorillamill.co", "gorillamill.com")).toBe(true);
+	});
+
+	it("matches a one-character label edit for long labels with equal TLDs", () => {
+		expect(isNearDomain("portlandbolt.com", "portlandbolts.com")).toBe(true);
+	});
+
+	it("does not match a one-character edit for short labels", () => {
+		expect(isNearDomain("acme.com", "acne.com")).toBe(false);
 	});
 });
 

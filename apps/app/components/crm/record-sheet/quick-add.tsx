@@ -85,7 +85,11 @@ export function QuickAddContact({
 		trpc.contacts.create.mutationOptions({
 			onSuccess: async (contact) => {
 				await cache.contact(contact.id);
-				toast.success(`${contact.firstName} added.`);
+				toast.success(
+					contact.matched
+						? `Updated ${contactName(contact)}, who was already in the CRM`
+						: `${contact.firstName} added.`,
+				);
 				onDone();
 			},
 			onError: (error) => toast.error(error.message),

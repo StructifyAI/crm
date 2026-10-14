@@ -14,15 +14,15 @@ import { CompanyDirectoryService } from "../companies/company-directory.service"
 import { isMachineDomain } from "../companies/domain";
 import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
-import { racedContact, suppressionReason } from "../crm/contact-intake";
+import {
+	intakeContact,
+	racedContact,
+	suppressionReason,
+} from "../crm/contact-intake";
 import { normalizeEmail } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
 import { stripQuotedHistory } from "../mailbox/message-text";
-import {
-	isAutomatedAddress,
-	isMachineAddress,
-	splitName,
-} from "../mailbox/participants";
+import { isAutomatedAddress, isMachineAddress } from "../mailbox/participants";
 import { INSTANTLY } from "./instantly-config";
 
 type ResolveContactInput = {
@@ -31,6 +31,7 @@ type ResolveContactInput = {
 	lastName?: string | null;
 	mailbox?: string | null;
 	reason: string;
+	status?: number;
 };
 
 type SendEventType = (typeof INSTANTLY.filing.sendEvents)[number];
@@ -112,46 +113,39 @@ export class InstantlyFilingService {
 			return null;
 		const domain = email.split("@")[1] ?? "";
 		if (!domain || isMachineDomain(domain)) return null;
-		const [suppressed, existing] = await Promise.all([
-			suppressionReason(this.db, email, domain),
-			liveContactsByEmail(this.db, [email]),
-		]);
+		const suppressed = await suppressionReason(this.db, email, domain);
 		if (suppressed) return null;
-		if (existing[0]) {
-			return {
-				id: existing[0].id,
-				created: false,
-				ownerId: existing[0].ownerId,
-			};
-		}
 		const mailbox = input.mailbox
 			? await this.db.instantlyMailbox.findUnique({
 					where: { emailAccount: input.mailbox.trim().toLowerCase() },
 					select: { ownerId: true },
 				})
 			: null;
-		const companyId = await this.companies.companyForEmail(email);
-		const derived = splitName(
-			[input.firstName, input.lastName].filter(Boolean).join(" ") || null,
-			email,
-		);
+		const bounced = input.status === -1;
+		const companyId = await this.companies.companyForEmail(email, {
+			ownerId: mailbox?.ownerId,
+			create: !bounced,
+		});
+		const firstName = input.firstName?.trim() ?? "";
 		try {
-			const contact = await this.db.contact.create({
-				data: {
-					firstName: derived.firstName,
-					lastName: derived.lastName,
-					email,
-					companyId,
-					ownerId: mailbox?.ownerId ?? null,
-					source: RecordSource.INSTANTLY,
-					lastActivityAt: new Date(),
-				},
-				select: { id: true, ownerId: true },
+			const contact = await intakeContact(this.agent, {
+				email,
+				firstName,
+				lastName: input.lastName?.trim() || null,
+				companyId,
+				ownerId: mailbox?.ownerId ?? null,
+				source: RecordSource.INSTANTLY,
+				needsName: !firstName,
+				bouncedEmail: bounced,
+				createIfUnmatched: !bounced,
+				lastActivityAt: new Date(),
 			});
-			await this.agent.contactCreated(contact.id, input.reason);
+			if (!contact) return null;
+			if (contact.created)
+				await this.agent.contactCreated(contact.id, input.reason);
 			return {
 				id: contact.id,
-				created: true,
+				created: contact.created,
 				ownerId: contact.ownerId,
 			};
 		} catch (error) {

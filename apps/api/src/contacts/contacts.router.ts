@@ -19,6 +19,7 @@ import {
 	contactBulkOwnerInput,
 	contactByIdOutput,
 	contactCreateInput,
+	contactCreateOutput,
 	contactEmailAddInput,
 	contactEmailInput,
 	contactEmailStatusInput,
@@ -63,7 +64,7 @@ export class ContactsRouter {
 
 	@Mutation({
 		input: contactCreateInput,
-		output: contactBasicOutput,
+		output: contactCreateOutput,
 		meta: restMeta("POST", "/contacts", ["Contacts"]),
 	})
 	async create(@Input() input: z.infer<typeof contactCreateInput>) {

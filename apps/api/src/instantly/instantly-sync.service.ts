@@ -82,6 +82,7 @@ export class InstantlySyncService {
 							lastName: lead.last_name,
 							mailbox: lastStep?.from ?? null,
 							reason: "Enrolled in an Instantly campaign",
+							status: lead.status,
 						});
 						if (!resolved) continue;
 

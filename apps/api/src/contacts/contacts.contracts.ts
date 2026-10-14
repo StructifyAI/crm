@@ -38,6 +38,7 @@ export const contactCreateInput = z.object({
 	email: z.email("That is not an email address.").optional().or(z.literal("")),
 	phone: z.string().trim().optional(),
 	title: z.string().trim().optional(),
+	linkedinUrl: z.string().trim().optional(),
 	companyId: z.string().nullable().optional(),
 	ownerId: z.string().nullable().optional(),
 });
@@ -380,6 +381,10 @@ export const contactBasicOutput = z.object({
 	id: z.string(),
 	firstName: z.string(),
 	lastName: z.string().nullable(),
+});
+
+export const contactCreateOutput = contactBasicOutput.extend({
+	matched: z.boolean(),
 });
 
 export const contactNameOutput = z.object({

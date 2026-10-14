@@ -1,10 +1,10 @@
 import { workspaceDomains } from "@crm/auth/workspace";
 import { type Db, RecordSource } from "@crm/db";
 import { liveContactsByEmail } from "@crm/db/contact-email";
-import { lockIdempotencyKey } from "@crm/db/idempotency";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
+import { intakeContact } from "../crm/contact-intake";
 import { EnrichmentLogService } from "../crm/enrichment-log.service";
 import { InjectDatabase } from "../database/database.constants";
 import {
@@ -285,61 +285,24 @@ export class MailboxMatchService {
 		);
 		if (!person) return null;
 
-		const { firstName, lastName } = splitName(person.name, person.email);
-
-		const outcome = await this.agent.withCrmEvents(async (tx, emit) => {
-			await lockIdempotencyKey(tx, `contact-email:${person.email}`);
-			const match = (await liveContactsByEmail(tx, [person.email]))[0];
-			const existing = match
-				? await tx.contact.findUnique({
-						where: { id: match.id },
-						select: {
-							id: true,
-							firstName: true,
-							lastName: true,
-							email: true,
-							companyId: true,
-							createdAt: true,
-						},
-					})
-				: null;
-			if (existing) return { contact: existing, created: false as const };
-
-			const contact = await tx.contact.create({
-				data: {
-					firstName,
-					lastName,
-					email: person.email,
-					companyId,
-					source: request.source,
-					ownerId: request.ownerId,
-				},
-				select: {
-					id: true,
-					firstName: true,
-					lastName: true,
-					email: true,
-					companyId: true,
-					createdAt: true,
-				},
-			});
-			await emit({
-				type: "contact.created",
-				record: { kind: "contact", id: contact.id },
-				occurredAt: contact.createdAt,
-				data: {
-					firstName: contact.firstName,
-					lastName: contact.lastName,
-					email: contact.email,
-					companyId: contact.companyId,
-					source: request.source,
-				},
-			});
-			return { contact, created: true as const };
+		const hasRealName = Boolean(person.name?.trim());
+		const { firstName, lastName } = splitName(person.name, "");
+		const patternMatchContactId = hasRealName
+			? null
+			: await this.patternMatchContact(person.email, companyId);
+		const contact = await intakeContact(this.agent, {
+			email: person.email,
+			firstName,
+			lastName,
+			companyId,
+			ownerId: request.ownerId,
+			source: request.source,
+			needsName: !hasRealName && !patternMatchContactId,
+			patternMatchContactId: patternMatchContactId ?? undefined,
 		});
-		const { contact } = outcome;
+		if (!contact) return null;
 
-		if (outcome.created) {
+		if (contact.created) {
 			await this.log.record({
 				contactId: contact.id,
 				companyId,
@@ -349,17 +312,19 @@ export class MailboxMatchService {
 			});
 		}
 
-		const hasRealName = Boolean(person.name?.trim());
-		const isPlaceholder = isDerivedName(
-			person.email,
-			contact.firstName,
-			contact.lastName,
-		);
+		const current = await this.db.contact.findUnique({
+			where: { id: contact.id },
+			select: { firstName: true, lastName: true, needsName: true },
+		});
+		if (!current) return contact.id;
+		const isPlaceholder =
+			current.needsName ||
+			isDerivedName(person.email, current.firstName, current.lastName);
 
 		if (hasRealName && isPlaceholder) {
 			await this.db.contact.update({
 				where: { id: contact.id },
-				data: { firstName, lastName },
+				data: { firstName, lastName, needsName: false },
 			});
 			return contact.id;
 		}
@@ -372,5 +337,35 @@ export class MailboxMatchService {
 		}
 
 		return contact.id;
+	}
+
+	private async patternMatchContact(
+		email: string,
+		companyId: string,
+	): Promise<string | null> {
+		const local = email.split("@")[0]?.toLowerCase() ?? "";
+		if (!local) return null;
+		const candidates = await this.db.contact.findMany({
+			where: { companyId, archivedAt: null },
+			select: { id: true, firstName: true, lastName: true },
+		});
+		const matched = candidates.filter((contact) => {
+			const first = contact.firstName.toLowerCase().replace(/[^a-z0-9]/g, "");
+			const last = contact.lastName?.toLowerCase().replace(/[^a-z0-9]/g, "");
+			if (!first || !last) return false;
+			const firstInitial = first[0];
+			const lastInitial = last[0];
+			return new Set([
+				`${firstInitial}${last}`,
+				`${first}.${last}`,
+				`${first}${lastInitial}`,
+				first,
+				`${firstInitial}.${last}`,
+				`${first}_${last}`,
+				`${last}${firstInitial}`,
+				`${first}${last}`,
+			]).has(local);
+		});
+		return matched.length === 1 ? (matched[0]?.id ?? null) : null;
 	}
 }

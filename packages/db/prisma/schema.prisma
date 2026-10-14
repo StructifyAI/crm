@@ -467,6 +467,7 @@ model Contact {
   id          String  @id @default(cuid())
   firstName   String
   lastName    String?
+  needsName   Boolean @default(false)
   email       String?
   phone       String?
   title       String?

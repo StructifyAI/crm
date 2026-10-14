@@ -187,6 +187,7 @@ describe("filing a form submission", () => {
 
 	it("writes one note when the same submission is filed twice at once", async () => {
 		const email = `raced@${domain}`;
+		const name = `Racer ${suffix}`;
 		const row = await db.formSubmission.create({
 			data: {
 				host,
@@ -204,7 +205,7 @@ describe("filing a form submission", () => {
 				email,
 				host,
 				visitorId: `visitor-raced-${suffix}`.slice(0, 64),
-				name: "Dana Reed",
+				name,
 			});
 
 		const [first, second] = await Promise.all([file(), file()]);
@@ -222,6 +223,7 @@ describe("filing a form submission", () => {
 
 	it("gives the cap slot back to the delivery that lost the create", async () => {
 		const email = `refunded@${domain}`;
+		const name = `Refunded ${suffix}`;
 		const rows = await Promise.all(
 			[1, 2].map((n) =>
 				db.formSubmission.create({
@@ -244,7 +246,7 @@ describe("filing a form submission", () => {
 					email,
 					host,
 					visitorId: null,
-					name: "Dana Reed",
+					name,
 				}),
 			),
 		);
@@ -261,10 +263,12 @@ describe("filing a form submission", () => {
 
 	it("attaches a second submission to the contact already there", async () => {
 		const email = `repeat@${domain}`;
+		const alternate = `repeat-new@${domain}`;
+		const name = `Repeat Person ${suffix}`;
 
-		const first = await submit(email);
+		const first = await submit(email, name);
 		queued.length = 0;
-		const second = await submit(email);
+		const second = await submit(alternate, name);
 
 		expect(first.outcome.filed).toBe(true);
 		expect(second.outcome.filed).toBe(true);
@@ -273,6 +277,14 @@ describe("filing a form submission", () => {
 
 		const count = await db.contact.count({ where: { email } });
 		expect(count).toBe(1);
+		expect(
+			await db.contactEmail.findFirst({
+				where: {
+					contactId: first.stored?.contactId ?? "",
+					email: alternate,
+				},
+			}),
+		).toMatchObject({ status: "OK" });
 	});
 
 	it("stores but does not file once the hourly cap is reached", async () => {

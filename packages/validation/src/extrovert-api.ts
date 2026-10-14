@@ -44,6 +44,8 @@ const extrovertLinkedInProfile = z
 		headline: z.string().optional(),
 		avatarUrl: z.string().nullable().optional(),
 		linkedInUrl: z.string().optional(),
+		companyName: z.string().nullable().optional(),
+		companyDomain: z.string().nullable().optional(),
 	})
 	.passthrough();
 
@@ -165,6 +167,8 @@ export const extrovertProspectV2 = z
 		id: z.string(),
 		isDeleted: z.boolean().optional().default(false),
 		type: z.string().optional(),
+		companyName: z.string().nullable().optional(),
+		companyDomain: z.string().nullable().optional(),
 		linkedInProfile: extrovertLinkedInProfile.nullable().optional(),
 		list: extrovertMemberReference.nullable().optional(),
 		campaign: extrovertMemberReference.nullable().optional(),

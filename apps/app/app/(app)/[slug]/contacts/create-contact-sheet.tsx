@@ -79,8 +79,13 @@ function CreateContactForm({ companyId }: { companyId?: string }) {
 		trpc.contacts.create.mutationOptions({
 			onSuccess: async (contact) => {
 				await cache.contact(contact.id);
+				const name = [contact.firstName, contact.lastName]
+					.filter(Boolean)
+					.join(" ");
 				toast.success(
-					`${[contact.firstName, contact.lastName].filter(Boolean).join(" ")} added.`,
+					contact.matched
+						? `Updated ${name}, who was already in the CRM`
+						: `${name} added.`,
 				);
 				await setOpen(null);
 				setFirstName("");

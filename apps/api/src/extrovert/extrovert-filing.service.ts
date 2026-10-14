@@ -1,15 +1,22 @@
 import { ActivityType, type Db, RecordSource } from "@crm/db";
+import {
+	linkedinCandidates,
+	profileKey,
+	sameLinkedinProfile,
+} from "@crm/db/contact-match";
 import type { ExtrovertWebhookEvent } from "@crm/validation/extrovert-webhook";
 import {
 	linkedinSlug,
 	normalizeLinkedinUrl,
 } from "@crm/validation/linkedin-url";
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
+import { CompanyDirectoryService } from "../companies/company-directory.service";
 import {
 	ActivityStampService,
 	activityTime,
 } from "../crm/activity-stamp.service";
+import { intakeContact } from "../crm/contact-intake";
 import { singleOpenDealId } from "../crm/single-open-deal";
 import { InjectDatabase } from "../database/database.constants";
 
@@ -18,6 +25,8 @@ type ResolveContactInput = {
 	firstName?: string | null;
 	lastName?: string | null;
 	campaignOwnerId?: string | null;
+	companyName?: string | null;
+	companyDomain?: string | null;
 	queueEnrichment: boolean;
 };
 
@@ -40,6 +49,7 @@ export class ExtrovertFilingService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly agent: AgentTriggerService,
 		private readonly stamp: ActivityStampService,
+		@Optional() private readonly companies?: CompanyDirectoryService,
 	) {}
 
 	async linkDeal(input: {
@@ -96,40 +106,31 @@ export class ExtrovertFilingService {
 		if (unique.size === 0) return new Map();
 
 		const matches = await this.findContactsByLinkedin([...unique.keys()]);
-		const byNormalized = new Map<string, ResolvedContact>(
-			[...matches].map(([normalized, match]) => [
-				normalized,
-				{ ...match, created: false },
-			]),
-		);
+		const byNormalized = new Map<string, ResolvedContact>();
 
 		for (const [normalized, input] of unique) {
-			const current = byNormalized.get(normalized);
-			if (current) {
-				if (current.ownerId === null && input.campaignOwnerId) {
-					const updated = await this.db.contact.update({
-						where: { id: current.id },
-						data: { ownerId: input.campaignOwnerId },
-						select: { ownerId: true },
-					});
-					byNormalized.set(normalized, {
-						...current,
-						ownerId: updated.ownerId,
-					});
-				}
-				continue;
-			}
-			const contact = await this.db.contact.create({
-				data: {
-					firstName: input.firstName?.trim() || "Unknown",
-					lastName: input.lastName?.trim() || null,
-					linkedinUrl: normalized,
-					source: RecordSource.EXTROVERT,
-					ownerId: input.campaignOwnerId ?? null,
-				},
-				select: { id: true, ownerId: true },
+			const firstName =
+				input.firstName?.trim().toLowerCase() === "unknown"
+					? ""
+					: (input.firstName?.trim() ?? "");
+			const companyId = this.companies
+				? await this.companies.existingCompanyForIdentity({
+						domain: input.companyDomain,
+						name: input.companyName,
+					})
+				: null;
+			const contact = await intakeContact(this.agent, {
+				firstName,
+				lastName: input.lastName?.trim() || null,
+				linkedinUrl: normalized,
+				companyId,
+				ownerId: input.campaignOwnerId,
+				source: RecordSource.EXTROVERT,
+				needsName: !firstName,
+				matchedContactId: matches.get(normalized)?.id,
 			});
-			if (input.queueEnrichment) {
+			if (!contact) continue;
+			if (contact.created && input.queueEnrichment) {
 				await this.agent.contactCreated(
 					contact.id,
 					"Added from an Extrovert campaign",
@@ -137,7 +138,7 @@ export class ExtrovertFilingService {
 			}
 			byNormalized.set(normalized, {
 				id: contact.id,
-				created: true,
+				created: contact.created,
 				ownerId: contact.ownerId,
 			});
 		}
@@ -154,49 +155,21 @@ export class ExtrovertFilingService {
 				.filter((url): url is string => url !== null),
 		);
 		if (normalizedUrls.size === 0) return new Map();
-		const slugs = [...normalizedUrls]
-			.map(linkedinSlug)
-			.filter((slug): slug is string => slug !== null);
-		const existing = await this.db.contact.findMany({
-			where: {
-				archivedAt: null,
-				OR: [
-					{ linkedinUrl: { in: [...normalizedUrls] } },
-					...slugs.flatMap((slug) => [
-						{
-							linkedinUrl: {
-								endsWith: `/in/${slug}`,
-								mode: "insensitive" as const,
-							},
-						},
-						{
-							linkedinUrl: {
-								endsWith: `/in/${slug}/`,
-								mode: "insensitive" as const,
-							},
-						},
-					]),
-				],
-			},
-			select: { id: true, ownerId: true, linkedinUrl: true },
-		});
+		const existing = await linkedinCandidates(this.db, [...normalizedUrls]);
 		const byNormalized = new Map<string, ContactMatch>();
-		for (const row of existing) {
-			const normalized = row.linkedinUrl
-				? normalizeLinkedinUrl(row.linkedinUrl)
-				: null;
-			if (normalized && normalizedUrls.has(normalized)) {
-				byNormalized.set(normalized, {
-					id: row.id,
-					ownerId: row.ownerId,
-				});
-				continue;
-			}
-			const slug = row.linkedinUrl ? linkedinSlug(row.linkedinUrl) : null;
-			if (!slug) continue;
-			for (const input of normalizedUrls) {
-				if (linkedinSlug(input) !== slug) continue;
-				byNormalized.set(input, { id: row.id, ownerId: row.ownerId });
+		for (const input of normalizedUrls) {
+			const matches = existing.filter(
+				(candidate) =>
+					candidate.linkedinUrl &&
+					sameLinkedinProfile(candidate.linkedinUrl, input),
+			);
+			const exactProfileKey = profileKey(input);
+			const match =
+				matches.find(
+					(candidate) => profileKey(candidate.linkedinUrl) === exactProfileKey,
+				) ?? (matches.length === 1 ? matches[0] : null);
+			if (match) {
+				byNormalized.set(input, { id: match.id, ownerId: match.ownerId });
 			}
 		}
 		return byNormalized;
