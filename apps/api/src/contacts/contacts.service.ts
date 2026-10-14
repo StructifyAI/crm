@@ -35,6 +35,7 @@ import {
 } from "../crm/activity-stamp.service";
 import { type BulkResult, requireOwner, runBulk } from "../crm/bulk";
 import { intakeContact } from "../crm/contact-intake";
+import { contactPhoneForStorage } from "../crm/contact-phone";
 import { blankToNull, normalizeEmail, toCents } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
 import { FieldsService } from "../fields/fields.service";
@@ -570,7 +571,6 @@ export class ContactsService {
 		const email =
 			input.email === undefined ? null : normalizeEmail(input.email);
 		if (input.email !== undefined) data.email = email;
-		if (input.phone !== undefined) data.phone = blankToNull(input.phone);
 		if (input.title !== undefined) data.title = blankToNull(input.title);
 		if (input.linkedinUrl !== undefined) {
 			data.linkedinUrl = blankToNull(input.linkedinUrl);
@@ -597,19 +597,29 @@ export class ContactsService {
 		try {
 			return await this.db.$transaction(async (tx) => {
 				const current =
-					input.email !== undefined
+					input.email !== undefined || input.phone !== undefined
 						? await tx.contact.findUnique({
 								where: { id },
 								select: {
 									email: true,
 									emailStatus: true,
 									archivedAt: true,
+									companyId: true,
 									alternateEmails: {
 										select: { id: true, email: true, status: true },
 									},
 								},
 							})
 						: null;
+				if (input.phone !== undefined) {
+					data.phone = await contactPhoneForStorage(
+						tx,
+						input.companyId === undefined
+							? (current?.companyId ?? null)
+							: input.companyId,
+						input.phone,
+					);
+				}
 				const nextEmail = email?.trim().toLowerCase() ?? null;
 				const oldEmail = current?.email?.trim().toLowerCase() ?? null;
 				if (current && nextEmail !== oldEmail && current.archivedAt === null) {

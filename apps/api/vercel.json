@@ -34,6 +34,10 @@
 			"schedule": "*/15 * * * *"
 		},
 		{
+			"path": "/internal/sync/duplicates",
+			"schedule": "0 2 * * *"
+		},
+		{
 			"path": "/internal/sync/rates",
 			"schedule": "0 6 * * *"
 		},

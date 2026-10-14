@@ -19,6 +19,7 @@ import type {
 	AgentTriggerService,
 	CrmEventInput,
 } from "../agent/agent-trigger.service";
+import { contactPhoneForStorage } from "./contact-phone";
 import { blankToNull, normalizeEmail } from "./values";
 
 const logger = new Logger("ContactIntake");
@@ -153,10 +154,17 @@ async function updateMatchedContact(
 	}
 	const lastName = blankToNull(input.lastName ?? "");
 	if (lastName && !current.lastName?.trim()) data.lastName = lastName;
-	const phone = blankToNull(input.phone ?? "");
-	if (phone && !current.phone?.trim()) data.phone = phone;
 	const title = blankToNull(input.title ?? "");
 	if (title && !current.title?.trim()) data.title = title;
+	const phone = blankToNull(input.phone ?? "");
+	if (phone && !current.phone?.trim()) {
+		const storedPhone = await contactPhoneForStorage(
+			tx,
+			input.companyId ?? current.companyId,
+			phone,
+		);
+		if (storedPhone) data.phone = storedPhone;
+	}
 	const linkedinUrl = blankToNull(input.linkedinUrl ?? "");
 	if (linkedinUrl && !current.linkedinUrl?.trim())
 		data.linkedinUrl = linkedinUrl;
@@ -202,12 +210,17 @@ async function createContact(
 	Omit<ContactIntakeResult, "created" | "matched"> & { createdAt: Date }
 > {
 	const firstName = input.firstName?.trim() ?? "";
+	const phone = await contactPhoneForStorage(
+		tx,
+		input.companyId ?? null,
+		input.phone,
+	);
 	const created = await tx.contact.create({
 		data: {
 			firstName,
 			lastName: blankToNull(input.lastName ?? ""),
 			email,
-			phone: blankToNull(input.phone ?? ""),
+			phone,
 			title: blankToNull(input.title ?? ""),
 			linkedinUrl: blankToNull(input.linkedinUrl ?? ""),
 			companyId: input.companyId ?? null,

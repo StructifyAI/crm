@@ -59,6 +59,9 @@ export const companyUpdateArgs = z.object({
 });
 
 export const companyIdInput = z.object({ id: z.string() });
+export const companyByIdInput = companyIdInput.extend({
+	includeArchived: z.boolean().optional(),
+});
 
 export const companyMergeInput = z
 	.object({
@@ -212,6 +215,7 @@ const companyDetailContactOutput = z.object({
 	email: z.string().nullable(),
 	title: z.string().nullable(),
 	imageUrl: z.string().nullable(),
+	archivedAt: z.string().nullable(),
 	owner: ownerSummaryOutput.nullable(),
 });
 

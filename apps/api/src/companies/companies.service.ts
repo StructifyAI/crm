@@ -185,7 +185,7 @@ export class CompaniesService {
 		};
 	}
 
-	async byId(id: string) {
+	async byId(id: string, includeArchived = false) {
 		const company = await this.db.company.findUnique({
 			where: { id },
 			select: {
@@ -238,6 +238,7 @@ export class CompaniesService {
 					},
 				},
 				contacts: {
+					where: includeArchived ? undefined : { archivedAt: null },
 					orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
 					select: {
 						id: true,
@@ -246,6 +247,7 @@ export class CompaniesService {
 						email: true,
 						title: true,
 						imageUrl: true,
+						archivedAt: true,
 						owner: { select: OWNER_SELECT },
 					},
 				},
@@ -273,6 +275,7 @@ export class CompaniesService {
 			await this.contactEvents.unclassifiedInboundCount({ companyId: id });
 		const {
 			deals,
+			contacts,
 			primaryContact,
 			icp,
 			enrichedAt,
@@ -287,6 +290,10 @@ export class CompaniesService {
 
 		return {
 			...rest,
+			contacts: contacts.map((contact) => ({
+				...contact,
+				archivedAt: contact.archivedAt?.toISOString() ?? null,
+			})),
 			icp: icp as IcpStatus,
 			lastContacted: serializeContactClock(lastContactedAt, lastContactedEvent),
 			lastReplied: serializeContactClock(lastRepliedAt, lastRepliedEvent),
