@@ -2,6 +2,7 @@
 
 import Add from "@carbon/icons-react/es/Add";
 import ChevronDown from "@carbon/icons-react/es/ChevronDown";
+import Reset from "@carbon/icons-react/es/Reset";
 import TrashCan from "@carbon/icons-react/es/TrashCan";
 import { Button } from "@crm/ui/components/button";
 import {
@@ -85,6 +86,11 @@ export function ConversationPicker({
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
+
+			<Button variant="ghost" size="sm" onClick={onNew} disabled={busy}>
+				<Icon icon={Reset} data-icon="inline-start" />
+				Clear conversation
+			</Button>
 
 			{current ? (
 				<Forget conversation={current} onDone={onNew} busy={busy} />

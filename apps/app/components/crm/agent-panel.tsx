@@ -108,6 +108,11 @@ function LoadedAgentPanel({
 	setThread: (thread: string) => void;
 }) {
 	const [landedOn] = useState(() => history[0]?.id ?? NEW_THREAD);
+	const [resets, setResets] = useState(0);
+	const clear = () => {
+		setResets((count) => count + 1);
+		setThread(NEW_THREAD);
+	};
 	const { openId, current } = resolveThread({
 		conversations: history,
 		fromUrl: thread,
@@ -120,15 +125,15 @@ function LoadedAgentPanel({
 				conversations={history}
 				current={current}
 				onSelect={(conversation) => setThread(conversation.id)}
-				onNew={() => setThread(NEW_THREAD)}
+				onNew={clear}
 				busy={false}
 			/>
 
 			<ThreadWithHistory
-				key={openId ?? NEW_THREAD}
+				key={`${openId ?? NEW_THREAD}:${resets}`}
 				record={record}
 				conversation={current}
-				onNewThread={() => setThread(NEW_THREAD)}
+				onNewThread={clear}
 			/>
 		</div>
 	);
