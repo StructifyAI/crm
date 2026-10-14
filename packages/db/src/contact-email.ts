@@ -1,7 +1,9 @@
 import type { Db } from "./client";
 import type { ContactEmailStatus, Prisma } from "./generated/prisma/client";
 
-type ContactEmailDatabase = Pick<Db, "contact"> | Prisma.TransactionClient;
+type ContactEmailDatabase =
+	| Pick<Db, "contact" | "$queryRaw">
+	| Prisma.TransactionClient;
 
 export type LiveContactEmailMatch = {
 	id: string;
@@ -24,18 +26,23 @@ export async function liveContactsByEmail(
 	if (normalizedEmails.length === 0) return [];
 
 	const requested = new Set(normalizedEmails);
+	const matchingContacts = await db.$queryRaw<Array<{ id: string }>>`
+		SELECT "id"
+		FROM "contact"
+		WHERE "archivedAt" IS NULL
+			AND lower("email") = ANY(${normalizedEmails}::text[])
+		UNION
+		SELECT c."id"
+		FROM "contactEmail" e
+		JOIN "contact" c ON c."id" = e."contactId"
+		WHERE c."archivedAt" IS NULL
+			AND lower(e."email") = ANY(${normalizedEmails}::text[])
+	`;
+	const ids = matchingContacts.map(({ id }) => id);
+	if (ids.length === 0) return [];
+
 	const contacts = await db.contact.findMany({
-		where: {
-			archivedAt: null,
-			OR: [
-				{ email: { in: normalizedEmails, mode: "insensitive" } },
-				{
-					alternateEmails: {
-						some: { email: { in: normalizedEmails, mode: "insensitive" } },
-					},
-				},
-			],
-		},
+		where: { id: { in: ids } },
 		select: {
 			id: true,
 			companyId: true,
