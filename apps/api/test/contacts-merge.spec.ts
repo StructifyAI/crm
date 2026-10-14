@@ -65,8 +65,29 @@ const companyIds: string[] = [];
 const contactIds: string[] = [];
 const userIds: string[] = [];
 const dealIds: string[] = [];
+const fieldDefinitionIds: string[] = [];
 const suffix = () => randomUUID().replaceAll("-", "");
 let mergeUserId = "";
+
+async function fieldDefinition(
+	entity: "CONTACT" | "COMPANY",
+	key: string,
+	type: "LONG_TEXT" | "TEXT",
+	position: number,
+) {
+	const where = { entity_key: { entity, key } };
+	const existing = await db.fieldDefinition.findUnique({
+		where,
+		select: { id: true },
+	});
+	if (existing) return existing.id;
+	const created = await db.fieldDefinition.create({
+		data: { entity, key, label: key, type, position },
+		select: { id: true },
+	});
+	fieldDefinitionIds.push(created.id);
+	return created.id;
+}
 
 async function company(domain: string) {
 	const row = await db.company.create({
@@ -99,6 +120,9 @@ afterAll(async () => {
 	await db.deal.deleteMany({ where: { id: { in: dealIds } } });
 	await db.contact.deleteMany({ where: { id: { in: contactIds } } });
 	await db.company.deleteMany({ where: { id: { in: companyIds } } });
+	await db.fieldDefinition.deleteMany({
+		where: { id: { in: fieldDefinitionIds } },
+	});
 	await db.user.deleteMany({ where: { id: { in: userIds } } });
 	await db.$disconnect();
 });
@@ -110,26 +134,20 @@ describe("contact and company merges", () => {
 		const keepId = await contact(`keep@${domain}`, companyId);
 		const mergeId = await contact(`old@${domain}`, companyId);
 		const date = new Date().toISOString().slice(0, 10);
-		const notesField = await db.fieldDefinition.upsert({
-			where: { entity_key: { entity: "CONTACT", key: "notes" } },
-			create: {
-				entity: "CONTACT",
-				key: "notes",
-				label: "Notes",
-				type: "LONG_TEXT",
-				position: 0,
-			},
-			update: {},
-			select: { id: true },
-		});
+		const notesField = await fieldDefinition(
+			"CONTACT",
+			"notes",
+			"LONG_TEXT",
+			0,
+		);
 		await db.contact.update({
 			where: { id: mergeId },
 			data: { title: "VP Finance" },
 		});
 		await db.fieldValue.createMany({
 			data: [
-				{ fieldId: notesField.id, contactId: keepId, text: "Kept note" },
-				{ fieldId: notesField.id, contactId: mergeId, text: "Old note" },
+				{ fieldId: notesField, contactId: keepId, text: "Kept note" },
+				{ fieldId: notesField, contactId: mergeId, text: "Old note" },
 			],
 		});
 		await db.contact.update({
@@ -319,7 +337,7 @@ describe("contact and company merges", () => {
 			(
 				await db.fieldValue.findUnique({
 					where: {
-						fieldId_contactId: { fieldId: notesField.id, contactId: keepId },
+						fieldId_contactId: { fieldId: notesField, contactId: keepId },
 					},
 				})
 			)?.text,
@@ -405,35 +423,23 @@ describe("contact and company merges", () => {
 		const keepId = await company(keptDomain);
 		const mergeId = await company(mergedDomain);
 		const contactId = await contact(`person@${mergedDomain}`, mergeId);
-		const companyNotes = await db.fieldDefinition.upsert({
-			where: { entity_key: { entity: "COMPANY", key: "notes" } },
-			create: {
-				entity: "COMPANY",
-				key: "notes",
-				label: "Notes",
-				type: "LONG_TEXT",
-				position: 0,
-			},
-			update: {},
-			select: { id: true },
-		});
-		const companyIndustry = await db.fieldDefinition.upsert({
-			where: { entity_key: { entity: "COMPANY", key: "merge_test_industry" } },
-			create: {
-				entity: "COMPANY",
-				key: "merge_test_industry",
-				label: "Merge test industry",
-				type: "TEXT",
-				position: 1,
-			},
-			update: {},
-			select: { id: true },
-		});
+		const companyNotes = await fieldDefinition(
+			"COMPANY",
+			"notes",
+			"LONG_TEXT",
+			0,
+		);
+		const companyIndustry = await fieldDefinition(
+			"COMPANY",
+			"merge_test_industry",
+			"TEXT",
+			1,
+		);
 		await db.fieldValue.createMany({
 			data: [
-				{ fieldId: companyNotes.id, companyId: keepId, text: "Kept note" },
-				{ fieldId: companyNotes.id, companyId: mergeId, text: "Old note" },
-				{ fieldId: companyIndustry.id, companyId: mergeId, text: "Fintech" },
+				{ fieldId: companyNotes, companyId: keepId, text: "Kept note" },
+				{ fieldId: companyNotes, companyId: mergeId, text: "Old note" },
+				{ fieldId: companyIndustry, companyId: mergeId, text: "Fintech" },
 			],
 		});
 		const deal = await db.deal.create({
@@ -493,7 +499,7 @@ describe("contact and company merges", () => {
 			(
 				await db.fieldValue.findUnique({
 					where: {
-						fieldId_companyId: { fieldId: companyNotes.id, companyId: keepId },
+						fieldId_companyId: { fieldId: companyNotes, companyId: keepId },
 					},
 				})
 			)?.text,
@@ -503,7 +509,7 @@ describe("contact and company merges", () => {
 				await db.fieldValue.findUnique({
 					where: {
 						fieldId_companyId: {
-							fieldId: companyIndustry.id,
+							fieldId: companyIndustry,
 							companyId: keepId,
 						},
 					},
