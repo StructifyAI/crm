@@ -6,7 +6,6 @@ import {
 	Card,
 	CardContent,
 	CardDescription,
-	CardFooter,
 	CardHeader,
 	CardTitle,
 } from "@crm/ui/components/card";
@@ -62,14 +61,14 @@ function RecordCard({
 	onKeep: () => void;
 }) {
 	return (
-		<Card className="gap-0 overflow-hidden rounded-lg border bg-card">
-			<CardHeader className="px-4 pt-4">
+		<Card>
+			<CardHeader>
 				<CardTitle>{record.name || "Unnamed record"}</CardTitle>
 				<CardDescription>
 					{record.companyName ?? record.domain ?? "Company not set"}
 				</CardDescription>
 			</CardHeader>
-			<CardContent className="gap-2 rounded-none border-0 px-4 py-3">
+			<CardContent className="gap-2 text-sm">
 				{record.emails.length ? (
 					<p className="break-all">{record.emails.join(", ")}</p>
 				) : null}
@@ -80,15 +79,17 @@ function RecordCard({
 					</p>
 				) : null}
 				<p className="text-muted-foreground">
-					{record.dealCount} deals · {record.activityCount} activities
+					{record.dealCount} {record.dealCount === 1 ? "deal" : "deals"} ·{" "}
+					{record.activityCount}{" "}
+					{record.activityCount === 1 ? "activity" : "activities"}
 				</p>
+				<div className="flex justify-end">
+					<Button onClick={onKeep} disabled={pending}>
+						{pending ? <Spinner data-icon="inline-start" /> : null}
+						Keep this one
+					</Button>
+				</div>
 			</CardContent>
-			<CardFooter className="justify-end px-4 pb-4">
-				<Button onClick={onKeep} disabled={pending}>
-					{pending ? <Spinner data-icon="inline-start" /> : null}
-					Keep this one
-				</Button>
-			</CardFooter>
 		</Card>
 	);
 }

@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
-import { PageShell, PageShellContent } from "@/components/page-shell";
+import { Suspense } from "react";
+import {
+	PageShell,
+	PageShellContent,
+	PageShellLoading,
+} from "@/components/page-shell";
 import { requireSession } from "@/lib/session";
 import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
@@ -9,7 +14,19 @@ export const metadata: Metadata = {
 	title: "Duplicates",
 };
 
-export default async function DuplicatesPage() {
+export default function DuplicatesPage() {
+	return (
+		<PageShell>
+			<PageShellContent>
+				<Suspense fallback={<PageShellLoading />}>
+					<DuplicatesContent />
+				</Suspense>
+			</PageShellContent>
+		</PageShell>
+	);
+}
+
+async function DuplicatesContent() {
 	await requireSession();
 	const trpc = getServerTrpc();
 	await getServerQueryClient().prefetchInfiniteQuery(
@@ -20,12 +37,8 @@ export default async function DuplicatesPage() {
 	);
 
 	return (
-		<PageShell>
-			<PageShellContent>
-				<HydrateClient>
-					<DuplicatesReview />
-				</HydrateClient>
-			</PageShellContent>
-		</PageShell>
+		<HydrateClient>
+			<DuplicatesReview />
+		</HydrateClient>
 	);
 }
