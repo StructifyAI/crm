@@ -28,8 +28,11 @@ Nest's half is to report *that something happened*: `AgentTriggerService` writes
 `AgentTask` row. A row, not an HTTP call — the agent already leases from that table,
 so the row survives the agent being down.
 
-About to add a vendor client to `apps/api`? You want `apps/agent/agent/lib`. One
-documented exception, for timing: the exchange-rate fetcher, below.
+About to add a vendor client to `apps/api`? You want `apps/agent/agent/lib`. Two
+documented exceptions. The exchange-rate fetcher, below, is one, for timing. The other is
+deterministic identity matching in `@crm/db/contact-match`: it must run before every
+contact create, and it is string normalization plus a DB lookup, with no model or vendor
+call. Uncertain pairs go to the duplicate review queue, never to an inline decision.
 
 ## One organization, and it is not a tenancy boundary
 
