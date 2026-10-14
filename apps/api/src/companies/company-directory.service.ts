@@ -21,7 +21,10 @@ export class CompanyDirectoryService {
 		const outcome = await this.agent.withCrmEvents(async (tx, emit) => {
 			await lockIdempotencyKey(tx, `company-directory:${domain}`);
 			const existing = await tx.company.findFirst({
-				where: { domain, archivedAt: null },
+				where: {
+					archivedAt: null,
+					OR: [{ domain }, { alternateDomains: { some: { domain } } }],
+				},
 				select: { id: true },
 			});
 			if (existing) return { id: existing.id, created: false as const };

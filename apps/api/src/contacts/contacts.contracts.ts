@@ -1,4 +1,5 @@
 import {
+	ContactEmailStatus,
 	DealStage,
 	EnrichmentStatus,
 	FactBand,
@@ -59,6 +60,74 @@ const contactUpdateInput = z.object({
 });
 
 export type ContactUpdateInput = z.infer<typeof contactUpdateInput>;
+
+const contactEmailStatus = z.enum(
+	Object.values(ContactEmailStatus) as [
+		ContactEmailStatus,
+		...ContactEmailStatus[],
+	],
+);
+
+export const contactEmailInput = z.object({
+	contactId: z.string(),
+	email: z.email(),
+});
+
+export const contactEmailAddInput = contactEmailInput.extend({
+	status: contactEmailStatus.optional(),
+});
+
+export const contactEmailStatusInput = contactEmailInput.extend({
+	status: contactEmailStatus,
+});
+
+export const contactEmailStatusOutput = z.object({
+	contactId: z.string(),
+	email: z.string(),
+	status: contactEmailStatus,
+});
+
+export const contactMergeInput = z
+	.object({
+		keepId: z.string(),
+		mergeIds: z.array(z.string()).min(1).max(25),
+	})
+	.superRefine(({ keepId, mergeIds }, context) => {
+		if (new Set(mergeIds).size !== mergeIds.length) {
+			context.addIssue({
+				code: "custom",
+				path: ["mergeIds"],
+				message: "Merge IDs must be distinct.",
+			});
+		}
+		if (mergeIds.includes(keepId)) {
+			context.addIssue({
+				code: "custom",
+				path: ["mergeIds"],
+				message: "The kept contact cannot also be merged.",
+			});
+		}
+	});
+
+export const contactMergeOutput = z.object({
+	keepId: z.string(),
+	mergedIds: z.array(z.string()),
+	moved: z.object({
+		activities: z.number(),
+		emailThreads: z.number(),
+		calendarEvents: z.number(),
+		calendarAttendees: z.number(),
+		contactEvents: z.number(),
+		facts: z.number(),
+		extrovertProspects: z.number(),
+		instantlyLeads: z.number(),
+		fieldValues: z.number(),
+		dealsAttached: z.number(),
+		dealsSkipped: z.number(),
+	}),
+	filled: z.array(z.string()),
+	alternateEmails: z.array(z.string()),
+});
 
 export const contactUpdateArgs = z.object({
 	id: z.string(),
@@ -243,6 +312,10 @@ export const contactByIdOutput = z.object({
 	firstName: z.string(),
 	lastName: z.string().nullable(),
 	email: z.string().nullable(),
+	emailStatus: contactEmailStatus,
+	alternateEmails: z.array(
+		z.object({ email: z.string(), status: contactEmailStatus }),
+	),
 	phone: z.string().nullable(),
 	title: z.string().nullable(),
 	linkedinUrl: z.string().nullable(),

@@ -5,6 +5,7 @@ import {
 	type Prisma,
 	RecordSource,
 } from "@crm/db";
+import { liveContactsByEmail } from "@crm/db/contact-email";
 import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import type { InstantlyWebhookEvent } from "@crm/validation/instantly-webhook";
 import { Injectable, Logger } from "@nestjs/common";
@@ -113,14 +114,15 @@ export class InstantlyFilingService {
 		if (!domain || isMachineDomain(domain)) return null;
 		const [suppressed, existing] = await Promise.all([
 			suppressionReason(this.db, email, domain),
-			this.db.contact.findFirst({
-				where: { email, archivedAt: null },
-				select: { id: true, ownerId: true },
-			}),
+			liveContactsByEmail(this.db, [email]),
 		]);
 		if (suppressed) return null;
-		if (existing) {
-			return { id: existing.id, created: false, ownerId: existing.ownerId };
+		if (existing[0]) {
+			return {
+				id: existing[0].id,
+				created: false,
+				ownerId: existing[0].ownerId,
+			};
 		}
 		const mailbox = input.mailbox
 			? await this.db.instantlyMailbox.findUnique({
@@ -301,10 +303,8 @@ export class InstantlyFilingService {
 	private async existingContact(email: string): Promise<{ id: string } | null> {
 		const normalized = normalizeEmail(email);
 		if (!normalized) return null;
-		return this.db.contact.findFirst({
-			where: { email: normalized, archivedAt: null },
-			select: { id: true },
-		});
+		const [contact] = await liveContactsByEmail(this.db, [normalized]);
+		return contact ? { id: contact.id } : null;
 	}
 
 	private async attach(

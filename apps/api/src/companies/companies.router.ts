@@ -22,6 +22,8 @@ import {
 	companyIdInput,
 	companyListInput,
 	companyListOutput,
+	companyMergeInput,
+	companyMergeOutput,
 	companyOptionOutput,
 	companyOptionsInput,
 	companyResearchOutput,
@@ -82,6 +84,15 @@ export class CompaniesRouter {
 	})
 	async update(@Input() input: z.infer<typeof companyUpdateArgs>) {
 		return this.companies.update(input.id, input.data);
+	}
+
+	@Mutation({
+		input: companyMergeInput,
+		output: companyMergeOutput,
+		meta: restMeta("POST", "/companies/merge", ["Companies"]),
+	})
+	async merge(@Input() input: z.infer<typeof companyMergeInput>) {
+		return this.companies.merge(input);
 	}
 
 	@Mutation({

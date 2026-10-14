@@ -1,5 +1,6 @@
 import {
 	type ContactBriefSections,
+	ContactEmailStatus,
 	type Db,
 	type FactEvidence,
 	FactStatus,
@@ -8,8 +9,11 @@ import {
 	type RecordSource,
 } from "@crm/db";
 import { ICP_STATUSES, type IcpStatus } from "@crm/db/company-icp";
+import { liveContactsByEmail } from "@crm/db/contact-email";
 import type { FieldDefinitionWithOptions } from "@crm/db/fields";
+import { lockIdempotencyKey } from "@crm/db/idempotency";
 import {
+	BadRequestException,
 	ConflictException,
 	Injectable,
 	Logger,
@@ -194,6 +198,11 @@ export class ContactsService {
 				firstName: true,
 				lastName: true,
 				email: true,
+				emailStatus: true,
+				alternateEmails: {
+					orderBy: { email: "asc" },
+					select: { email: true, status: true },
+				},
 				phone: true,
 				title: true,
 				linkedinUrl: true,
@@ -371,20 +380,7 @@ export class ContactsService {
 	async create(input: ContactCreateInput) {
 		const email = normalizeEmail(input.email ?? "");
 
-		if (email) {
-			const existing = await this.db.contact.findFirst({
-				where: {
-					email: { equals: email, mode: "insensitive" },
-					archivedAt: null,
-				},
-				select: { id: true, firstName: true, lastName: true },
-			});
-			if (existing) {
-				throw new ConflictException(
-					`${[existing.firstName, existing.lastName].filter(Boolean).join(" ")} already uses ${email}.`,
-				);
-			}
-		}
+		if (email) await this.assertEmailAvailable(this.db, email);
 
 		const companyId =
 			input.companyId ??
@@ -395,6 +391,10 @@ export class ContactsService {
 				: null);
 
 		const contact = await this.agent.withCrmEvents(async (tx, emit) => {
+			if (email) {
+				await lockIdempotencyKey(tx, `contact-email:${email}`);
+				await this.assertEmailAvailable(tx, email);
+			}
 			await this.allowAgain(tx, email);
 
 			const created = await tx.contact.create({
@@ -621,6 +621,59 @@ export class ContactsService {
 
 		try {
 			return await this.db.$transaction(async (tx) => {
+				const current =
+					input.email !== undefined
+						? await tx.contact.findUnique({
+								where: { id },
+								select: {
+									email: true,
+									emailStatus: true,
+									archivedAt: true,
+									alternateEmails: {
+										select: { id: true, email: true, status: true },
+									},
+								},
+							})
+						: null;
+				const nextEmail = email?.trim().toLowerCase() ?? null;
+				const oldEmail = current?.email?.trim().toLowerCase() ?? null;
+				if (current && nextEmail !== oldEmail && current.archivedAt === null) {
+					for (const address of [
+						...new Set(
+							[nextEmail, oldEmail].filter(
+								(value): value is string => value !== null,
+							),
+						),
+					].sort()) {
+						await lockIdempotencyKey(tx, `contact-email:${address}`);
+					}
+					if (nextEmail) await this.assertEmailAvailable(tx, nextEmail, id);
+					if (oldEmail) {
+						const oldAlternate = current.alternateEmails.find(
+							(alternate) => alternate.email.toLowerCase() === oldEmail,
+						);
+						if (!oldAlternate) {
+							await tx.contactEmail.create({
+								data: {
+									contactId: id,
+									email: oldEmail,
+									status: current.emailStatus,
+								},
+							});
+						}
+					}
+					const newAlternate = nextEmail
+						? current.alternateEmails.find(
+								(alternate) => alternate.email.toLowerCase() === nextEmail,
+							)
+						: null;
+					if (newAlternate) {
+						data.emailStatus = newAlternate.status;
+						await tx.contactEmail.delete({ where: { id: newAlternate.id } });
+					} else if (nextEmail) {
+						data.emailStatus = ContactEmailStatus.OK;
+					}
+				}
 				if (input.fields) {
 					await this.fields.applyValues(tx, "CONTACT", id, input.fields);
 				}
@@ -640,6 +693,521 @@ export class ContactsService {
 		} catch (error) {
 			throw this.translate(error, id);
 		}
+	}
+
+	async merge(input: { keepId: string; mergeIds: string[] }) {
+		const { keepId, mergeIds } = input;
+		if (
+			mergeIds.length < 1 ||
+			mergeIds.length > 25 ||
+			new Set(mergeIds).size !== mergeIds.length ||
+			mergeIds.includes(keepId)
+		) {
+			throw new BadRequestException("Choose 1–25 distinct contacts to merge.");
+		}
+		const result = await this.db.$transaction(async (tx) => {
+			const ids = [keepId, ...mergeIds];
+			await tx.$queryRaw`SELECT id FROM "contact" WHERE id IN (${PrismaNamespace.join(ids)}) ORDER BY id FOR UPDATE`;
+			const contacts = await tx.contact.findMany({
+				where: { id: { in: ids } },
+				select: {
+					id: true,
+					archivedAt: true,
+					email: true,
+					emailStatus: true,
+					phone: true,
+					linkedinUrl: true,
+					title: true,
+					ownerId: true,
+					lastName: true,
+					companyId: true,
+					twitterUrl: true,
+					githubUrl: true,
+					imageUrl: true,
+					alternateEmails: { select: { email: true, status: true } },
+				},
+			});
+			const kept = contacts.find(({ id }) => id === keepId);
+			const sources = mergeIds.map((id) =>
+				contacts.find((row) => row.id === id),
+			);
+			if (!kept || kept.archivedAt)
+				throw new NotFoundException(`No live contact with id ${keepId}.`);
+			if (sources.some((source) => !source))
+				throw new NotFoundException("A merged contact does not exist.");
+			const merged = sources.filter((row) => row !== undefined);
+			const now = new Date();
+			const date = now.toISOString().slice(0, 10);
+			await tx.contact.updateMany({
+				where: { id: { in: mergeIds }, archivedAt: null },
+				data: { archivedAt: now },
+			});
+
+			const filled: string[] = [];
+			const fields = [
+				"email",
+				"phone",
+				"linkedinUrl",
+				"title",
+				"ownerId",
+				"lastName",
+				"companyId",
+				"twitterUrl",
+				"githubUrl",
+				"imageUrl",
+			] as const;
+			const updates: Record<string, string | null> = {};
+			for (const field of fields) {
+				if (kept[field] !== null && kept[field] !== "") continue;
+				const source = merged.find(
+					(row) => row[field] !== null && row[field] !== "",
+				);
+				if (source) {
+					updates[field] = source[field];
+					filled.push(field);
+				}
+			}
+			if (updates.email) {
+				const source = merged.find((row) => row.email === updates.email);
+				updates.emailStatus = source?.emailStatus ?? ContactEmailStatus.OK;
+			}
+			if (Object.keys(updates).length)
+				await tx.contact.update({
+					where: { id: keepId },
+					data: updates as Prisma.ContactUpdateInput,
+				});
+			const keptEmail = (updates.email ?? kept.email)?.toLowerCase() ?? null;
+			const addresses = merged.flatMap((row) => [
+				...(row.email ? [{ email: row.email, status: row.emailStatus }] : []),
+				...row.alternateEmails,
+			]);
+			const alternateEmails = [
+				...new Set(addresses.map(({ email }) => email.toLowerCase())),
+			].filter((email) => email !== keptEmail);
+			for (const email of alternateEmails) {
+				const address = addresses.find(
+					(row) => row.email.toLowerCase() === email,
+				);
+				const existing = await tx.contactEmail.findFirst({
+					where: {
+						contactId: keepId,
+						email: { equals: email, mode: "insensitive" },
+					},
+					select: { id: true },
+				});
+				if (!existing)
+					await tx.contactEmail.create({
+						data: {
+							contactId: keepId,
+							email,
+							status: address?.status ?? ContactEmailStatus.OK,
+						},
+					});
+			}
+
+			const moved = {
+				activities: (
+					await tx.activity.updateMany({
+						where: { contactId: { in: mergeIds } },
+						data: { contactId: keepId },
+					})
+				).count,
+				emailThreads: (
+					await tx.emailThread.updateMany({
+						where: { contactId: { in: mergeIds } },
+						data: { contactId: keepId },
+					})
+				).count,
+				calendarEvents: (
+					await tx.calendarEvent.updateMany({
+						where: { contactId: { in: mergeIds } },
+						data: { contactId: keepId },
+					})
+				).count,
+				calendarAttendees: (
+					await tx.calendarAttendee.updateMany({
+						where: { contactId: { in: mergeIds } },
+						data: { contactId: keepId },
+					})
+				).count,
+				contactEvents: (
+					await tx.contactEvent.updateMany({
+						where: { contactId: { in: mergeIds } },
+						data: { contactId: keepId },
+					})
+				).count,
+				facts: (
+					await tx.contactFact.updateMany({
+						where: { contactId: { in: mergeIds } },
+						data: { contactId: keepId },
+					})
+				).count,
+				extrovertProspects: (
+					await tx.extrovertProspect.updateMany({
+						where: { contactId: { in: mergeIds } },
+						data: { contactId: keepId },
+					})
+				).count,
+				instantlyLeads: 0,
+				fieldValues: 0,
+				dealsAttached: 0,
+				dealsSkipped: 0,
+			};
+			await tx.trackedVisitor.updateMany({
+				where: { contactId: { in: mergeIds } },
+				data: { contactId: keepId },
+			});
+			await tx.formSubmission.updateMany({
+				where: { contactId: { in: mergeIds } },
+				data: { contactId: keepId },
+			});
+			await tx.agentConversation.updateMany({
+				where: { contactId: { in: mergeIds } },
+				data: { contactId: keepId },
+			});
+			await tx.agentTask.updateMany({
+				where: { contactId: { in: mergeIds } },
+				data: { contactId: keepId },
+			});
+			await tx.agentEvent.updateMany({
+				where: { contactId: { in: mergeIds } },
+				data: { contactId: keepId },
+			});
+			const primaryCompanies = await tx.company.findMany({
+				where: { primaryContactId: { in: mergeIds } },
+				select: { id: true },
+			});
+			const keptIsPrimary = await tx.company.count({
+				where: { primaryContactId: keepId },
+			});
+			await tx.company.updateMany({
+				where: { primaryContactId: { in: mergeIds } },
+				data: { primaryContactId: keptIsPrimary ? null : keepId },
+			});
+
+			for (const row of await tx.instantlyCampaignLead.findMany({
+				where: { contactId: { in: mergeIds } },
+			})) {
+				const duplicate = await tx.instantlyCampaignLead.findUnique({
+					where: {
+						contactId_campaignId: {
+							contactId: keepId,
+							campaignId: row.campaignId,
+						},
+					},
+					select: { id: true },
+				});
+				if (duplicate)
+					await tx.instantlyCampaignLead.delete({ where: { id: row.id } });
+				else {
+					await tx.instantlyCampaignLead.update({
+						where: { id: row.id },
+						data: { contactId: keepId },
+					});
+					moved.instantlyLeads += 1;
+				}
+			}
+			for (const row of await tx.dealContact.findMany({
+				where: { contactId: { in: mergeIds } },
+			})) {
+				const existing = await tx.dealContact.findUnique({
+					where: {
+						dealId_contactId: { dealId: row.dealId, contactId: keepId },
+					},
+					select: { role: true },
+				});
+				if (!existing) {
+					await tx.dealContact.create({
+						data: { dealId: row.dealId, contactId: keepId, role: row.role },
+					});
+					moved.dealsAttached += 1;
+				} else {
+					if (!existing.role && row.role)
+						await tx.dealContact.update({
+							where: {
+								dealId_contactId: { dealId: row.dealId, contactId: keepId },
+							},
+							data: { role: row.role },
+						});
+					moved.dealsSkipped += 1;
+				}
+				await tx.dealContact.delete({
+					where: {
+						dealId_contactId: { dealId: row.dealId, contactId: row.contactId },
+					},
+				});
+			}
+
+			const sourceValues = await tx.fieldValue.findMany({
+				where: { contactId: { in: mergeIds } },
+				include: {
+					field: { select: { key: true } },
+					options: { select: { optionId: true } },
+				},
+			});
+			for (const value of sourceValues) {
+				const target = await tx.fieldValue.findUnique({
+					where: {
+						fieldId_contactId: { fieldId: value.fieldId, contactId: keepId },
+					},
+					include: { options: { select: { optionId: true } } },
+				});
+				const note = value.field.key === "notes";
+				const prefix = `Merged from ${value.contactId} on ${date}`;
+				if (target && note) {
+					await tx.fieldValue.update({
+						where: { id: target.id },
+						data: {
+							text: [target.text, prefix, value.text]
+								.filter(Boolean)
+								.join("\n\n"),
+						},
+					});
+				} else if (target) {
+					if (value.options.length)
+						await tx.fieldValueOption.createMany({
+							data: value.options
+								.filter(
+									(option) =>
+										!target.options.some(
+											(item) => item.optionId === option.optionId,
+										),
+								)
+								.map((option) => ({
+									fieldValueId: target.id,
+									optionId: option.optionId,
+								})),
+						});
+				} else {
+					const data = note
+						? {
+								contactId: keepId,
+								text: [prefix, value.text].filter(Boolean).join("\n\n"),
+							}
+						: { contactId: keepId };
+					await tx.fieldValue.update({
+						where: { id: value.id },
+						data,
+					});
+					moved.fieldValues += 1;
+					continue;
+				}
+				await tx.fieldValue.delete({ where: { id: value.id } });
+				moved.fieldValues += 1;
+			}
+			const brief = await tx.contactBrief.findFirst({
+				where: { contactId: { in: mergeIds } },
+			});
+			const keptBrief = await tx.contactBrief.findUnique({
+				where: { contactId: keepId },
+				select: { contactId: true },
+			});
+			if (brief && !keptBrief)
+				await tx.contactBrief.update({
+					where: { contactId: brief.contactId },
+					data: { contactId: keepId },
+				});
+			else if (brief)
+				await tx.contactBrief.delete({ where: { contactId: brief.contactId } });
+			await tx.contactEmail.deleteMany({
+				where: { contactId: { in: mergeIds } },
+			});
+			const stampTargets = await this.stamp.targetsOf(
+				{ contactId: keepId },
+				tx,
+			);
+			const contactEventTargets = await this.contactEvents.targetsForEvents(
+				{ contactId: keepId },
+				tx,
+			);
+			return {
+				keepId,
+				mergedIds: mergeIds,
+				moved,
+				filled,
+				alternateEmails,
+				stampTargets: {
+					companyIds: [
+						...new Set([
+							...stampTargets.companyIds,
+							...primaryCompanies.map(({ id }) => id),
+						]),
+					],
+					contactIds: [keepId],
+					dealIds: stampTargets.dealIds,
+				},
+				contactEventTargets,
+			};
+		});
+		try {
+			await this.stamp.recomputeMany(result.stampTargets);
+			await this.contactEvents.refreshAffected(result.contactEventTargets);
+		} catch (error) {
+			this.logger.error(
+				{ message: "Contact merge stamps were not refreshed", keepId },
+				error instanceof Error ? error.stack : String(error),
+			);
+		}
+		return {
+			keepId: result.keepId,
+			mergedIds: result.mergedIds,
+			moved: result.moved,
+			filled: result.filled,
+			alternateEmails: result.alternateEmails,
+		};
+	}
+
+	async addEmail(input: {
+		contactId: string;
+		email: string;
+		status?: ContactEmailStatus;
+	}) {
+		const email = normalizeEmail(input.email);
+		if (!email) throw new BadRequestException("Enter a valid email address.");
+		return this.db.$transaction(async (tx) => {
+			await lockIdempotencyKey(tx, `contact-email:${email}`);
+			const contact = await tx.contact.findFirst({
+				where: { id: input.contactId, archivedAt: null },
+				select: { email: true },
+			});
+			if (!contact)
+				throw new NotFoundException(
+					`No live contact with id ${input.contactId}.`,
+				);
+			await this.assertEmailAvailable(tx, email, input.contactId);
+			if (contact.email?.toLowerCase() === email) {
+				throw new ConflictException(`${email} is already the primary email.`);
+			}
+			const existing = await tx.contactEmail.findFirst({
+				where: {
+					contactId: input.contactId,
+					email: { equals: email, mode: "insensitive" },
+				},
+				select: { id: true, status: true },
+			});
+			const alternate = existing
+				? await tx.contactEmail.update({
+						where: { id: existing.id },
+						data: { status: input.status ?? existing.status },
+					})
+				: await tx.contactEmail.create({
+						data: {
+							contactId: input.contactId,
+							email,
+							status: input.status ?? ContactEmailStatus.OK,
+						},
+					});
+			return {
+				contactId: input.contactId,
+				email: alternate.email,
+				status: alternate.status,
+			};
+		});
+	}
+
+	async removeEmail(input: { contactId: string; email: string }) {
+		const email = normalizeEmail(input.email);
+		if (!email) throw new BadRequestException("Enter a valid email address.");
+		return this.db.$transaction(async (tx) => {
+			await lockIdempotencyKey(tx, `contact-email:${email}`);
+			const contact = await tx.contact.findFirst({
+				where: { id: input.contactId, archivedAt: null },
+				select: { email: true },
+			});
+			if (!contact)
+				throw new NotFoundException(
+					`No live contact with id ${input.contactId}.`,
+				);
+			if (contact.email?.toLowerCase() === email) {
+				throw new BadRequestException(
+					"Remove the primary email by updating the contact.",
+				);
+			}
+			const alternate = await tx.contactEmail.findFirst({
+				where: {
+					contactId: input.contactId,
+					email: { equals: email, mode: "insensitive" },
+				},
+				select: { id: true, email: true, status: true },
+			});
+			if (!alternate)
+				throw new NotFoundException(
+					`No alternate email ${email} on this contact.`,
+				);
+			await tx.contactEmail.delete({ where: { id: alternate.id } });
+			return {
+				contactId: input.contactId,
+				email: alternate.email,
+				status: alternate.status,
+			};
+		});
+	}
+
+	async setEmailStatus(input: {
+		contactId: string;
+		email: string;
+		status: ContactEmailStatus;
+	}) {
+		const email = normalizeEmail(input.email);
+		if (!email) throw new BadRequestException("Enter a valid email address.");
+		return this.db.$transaction(async (tx) => {
+			await lockIdempotencyKey(tx, `contact-email:${email}`);
+			const contact = await tx.contact.findFirst({
+				where: { id: input.contactId, archivedAt: null },
+				select: { email: true },
+			});
+			if (!contact)
+				throw new NotFoundException(
+					`No live contact with id ${input.contactId}.`,
+				);
+			if (contact.email?.toLowerCase() === email) {
+				await tx.contact.update({
+					where: { id: input.contactId },
+					data: { emailStatus: input.status },
+				});
+				return {
+					contactId: input.contactId,
+					email: contact.email,
+					status: input.status,
+				};
+			}
+			const alternate = await tx.contactEmail.findFirst({
+				where: {
+					contactId: input.contactId,
+					email: { equals: email, mode: "insensitive" },
+				},
+				select: { id: true, email: true },
+			});
+			if (!alternate)
+				throw new NotFoundException(`No email ${email} on this contact.`);
+			await tx.contactEmail.update({
+				where: { id: alternate.id },
+				data: { status: input.status },
+			});
+			return {
+				contactId: input.contactId,
+				email: alternate.email,
+				status: input.status,
+			};
+		});
+	}
+
+	private async assertEmailAvailable(
+		client: Db | Prisma.TransactionClient,
+		email: string,
+		exceptContactId?: string,
+	): Promise<void> {
+		const match = (await liveContactsByEmail(client, [email])).find(
+			(contact) => contact.id !== exceptContactId,
+		);
+		if (!match) return;
+		const existing = await client.contact.findUnique({
+			where: { id: match.id },
+			select: { firstName: true, lastName: true },
+		});
+		throw new ConflictException(
+			`${[existing?.firstName, existing?.lastName].filter(Boolean).join(" ")} already uses ${email}.`,
+		);
 	}
 
 	async bulkAssignOwner(input: ContactBulkOwnerInput): Promise<BulkResult> {

@@ -255,6 +255,11 @@ enum ContactEventOrigin {
   EXTRACTED
 }
 
+enum ContactEmailStatus {
+  OK
+  BOUNCED
+}
+
 enum ContactExtractionStatus {
   DONE
   FAILED
@@ -394,6 +399,7 @@ model Company {
   owner            User?    @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   primaryContactId String?  @unique
   primaryContact   Contact? @relation("PrimaryContact", fields: [primaryContactId], references: [id], onDelete: SetNull)
+  alternateDomains CompanyDomain[]
 
   enrichmentStatus EnrichmentStatus   @default(PENDING)
   enrichedAt       DateTime?
@@ -432,6 +438,19 @@ model Company {
   @@index([archivedAt])
   @@index([icp])
   @@map("company")
+}
+
+model CompanyDomain {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  domain      String
+  needsReview Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@unique([companyId, domain])
+  @@index([domain])
+  @@map("companyDomain")
 }
 
 model CompanyEnrichment {
@@ -478,6 +497,7 @@ model Contact {
 
   lastActivityAt DateTime?
   archivedAt     DateTime?
+  emailStatus    ContactEmailStatus @default(OK)
 
   lastContactedAt      DateTime?
   lastContactedEventId String?
@@ -490,6 +510,7 @@ model Contact {
   contactEvents   ContactEvent[]
   activities      Activity[]
   emailThreads    EmailThread[]
+  alternateEmails ContactEmail[]
   calendarEvents  CalendarEvent[]
   eventAttendance CalendarAttendee[]
   fieldValues     FieldValue[]
@@ -508,6 +529,20 @@ model Contact {
   @@index([lastRepliedAt])
   @@index([archivedAt])
   @@map("contact")
+}
+
+model ContactEmail {
+  id        String             @id @default(cuid())
+  contactId String
+  contact   Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  email     String
+  status    ContactEmailStatus @default(OK)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@unique([contactId, email])
+  @@index([email])
+  @@map("contactEmail")
 }
 
 enum FactBand {

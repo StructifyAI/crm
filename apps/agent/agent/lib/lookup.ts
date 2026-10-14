@@ -1,4 +1,5 @@
 import { DealStage, db } from "@crm/db";
+import { liveContactsByEmail } from "@crm/db/contact-email";
 import { LOSING_DEAL_STAGES, OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import { domainOf, normalise } from "./names";
 
@@ -208,6 +209,7 @@ async function searchContacts(
 	email: string | null,
 	limit: number,
 ): Promise<ContactHit[]> {
+	const exactMatches = email ? await liveContactsByEmail(db, [email]) : [];
 	const contains = words.flatMap((word) => [
 		{ firstName: { contains: word, mode: "insensitive" as const } },
 		{ lastName: { contains: word, mode: "insensitive" as const } },
@@ -217,8 +219,8 @@ async function searchContacts(
 	const rows = await db.contact.findMany({
 		where: {
 			OR: [
-				...(email
-					? [{ email: { equals: email, mode: "insensitive" as const } }]
+				...(exactMatches.length > 0
+					? [{ id: { in: exactMatches.map(({ id }) => id) } }]
 					: []),
 				...contains,
 				{ company: { name: { contains: term, mode: "insensitive" as const } } },
