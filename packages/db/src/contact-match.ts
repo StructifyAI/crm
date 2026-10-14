@@ -3,6 +3,8 @@ import { liveContactsByEmail } from "./contact-email";
 import { CONTACT_MATCH } from "./contact-match-config";
 import type { Prisma } from "./generated/prisma/client";
 
+export { CONTACT_MATCH };
+
 type ContactMatchDatabase =
 	| Pick<Db, "contact" | "$queryRaw">
 	| Prisma.TransactionClient;

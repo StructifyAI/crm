@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
+	ActivityType,
 	ContactEmailStatus,
 	DuplicateKind,
 	DuplicateStatus,
@@ -29,6 +30,7 @@ const userId = `duplicate-user-${suffix}`;
 const companyIds: string[] = [];
 const contactIds: string[] = [];
 const dealIds: string[] = [];
+const activityIds: string[] = [];
 const candidateIds: string[] = [];
 
 const agent = {
@@ -151,6 +153,7 @@ afterAll(async () => {
 			],
 		},
 	});
+	await db.activity.deleteMany({ where: { id: { in: activityIds } } });
 	await db.dealContact.deleteMany({ where: { contactId: { in: contactIds } } });
 	await db.deal.deleteMany({ where: { id: { in: dealIds } } });
 	await db.contact.deleteMany({ where: { id: { in: contactIds } } });
@@ -357,6 +360,421 @@ describe("duplicate scanning", () => {
 				},
 			}),
 		).toMatchObject({ status: DuplicateStatus.OPEN });
+	});
+});
+
+describe("duplicate scan batching", () => {
+	it("preserves matches across contact and company page boundaries", async () => {
+		for (let index = 0; index < 50; index++) {
+			await createContact({
+				id: id(`equivalence-contact-${String(index).padStart(2, "0")}`),
+				firstName: `Filler${index}`,
+			});
+		}
+
+		const alternateCompany = await createCompany(
+			"Equivalence Alternate",
+			`${suffix}.equivalence-alternate.test`,
+		);
+		const alternateKeep = await createContact({
+			id: id("equivalence-contact-50-alternate-a"),
+			firstName: "Alex",
+			lastName: "Alternate",
+			email: `equivalence-primary-${suffix}@example.test`,
+			companyId: alternateCompany,
+		});
+		const alternateMerge = await createContact({
+			id: id("equivalence-contact-50-alternate-b"),
+			firstName: "Alex",
+			lastName: "Alternate",
+			email: `equivalence-other-${suffix}@example.test`,
+			companyId: alternateCompany,
+		});
+		await db.contactEmail.create({
+			data: {
+				contactId: alternateMerge,
+				email: `equivalence-primary-${suffix}@example.test`,
+				status: ContactEmailStatus.OK,
+			},
+		});
+		const deal = await db.deal.create({
+			data: {
+				name: `Equivalence deal ${suffix}`,
+				companyId: alternateCompany,
+				ownerId: userId,
+			},
+			select: { id: true },
+		});
+		dealIds.push(deal.id);
+		await db.dealContact.create({
+			data: { dealId: deal.id, contactId: alternateKeep },
+		});
+		for (let index = 0; index < 3; index++) {
+			const activity = await db.activity.create({
+				data: {
+					type: ActivityType.NOTE,
+					contactId: alternateKeep,
+					createdById: userId,
+				},
+				select: { id: true },
+			});
+			activityIds.push(activity.id);
+		}
+
+		const linkedInCompany = await createCompany(
+			"Equivalence LinkedIn",
+			`${suffix}.equivalence-linkedin.test`,
+		);
+		const linkedInKeep = await createContact({
+			id: id("equivalence-contact-51-linkedin-a"),
+			firstName: "Nate",
+			lastName: "Equivalence",
+			companyId: linkedInCompany,
+			linkedinUrl: `https://www.linkedin.com/in/nate-${suffix}-987654`,
+		});
+		const linkedInMerge = await createContact({
+			id: id("equivalence-contact-51-linkedin-b"),
+			firstName: "Nate",
+			lastName: "Equivalence",
+			companyId: linkedInCompany,
+			linkedinUrl: `https://www.linkedin.com/in/nate-equivalence-987654`,
+		});
+
+		const nameCompany = await createCompany(
+			"MW Components",
+			`${suffix}.equivalence-name.test`,
+		);
+		const bob = await createContact({
+			id: id("equivalence-contact-52-bob"),
+			firstName: "Bob",
+			lastName: "Kordenbrock",
+			companyId: nameCompany,
+			linkedinUrl: `https://www.linkedin.com/in/bob-${suffix}-123456`,
+		});
+		const robert = await createContact({
+			id: id("equivalence-contact-52-robert"),
+			firstName: "Robert",
+			lastName: "Kordenbrock",
+			companyId: nameCompany,
+			linkedinUrl: `https://www.linkedin.com/in/robert-${suffix}-654321`,
+		});
+		const generationCompany = await createCompany(
+			"Equivalence Generations",
+			`${suffix}.equivalence-generations.test`,
+		);
+		const al = await createContact({
+			id: id("equivalence-contact-53-al"),
+			firstName: "Al",
+			lastName: "Bello",
+			companyId: generationCompany,
+		});
+		const alJr = await createContact({
+			id: id("equivalence-contact-53-al-jr"),
+			firstName: "Al",
+			lastName: "Bello Jr.",
+			companyId: generationCompany,
+		});
+		const nearMissCompany = await createCompany(
+			"Equivalence Near Miss",
+			`${suffix}.equivalence-near-miss.test`,
+		);
+		const nearMissA = await createContact({
+			id: id("equivalence-contact-54-near-a"),
+			firstName: "Alice",
+			lastName: "Different",
+			companyId: nearMissCompany,
+			linkedinUrl: `https://www.linkedin.com/in/alice-${suffix}-777777`,
+		});
+		const nearMissB = await createContact({
+			id: id("equivalence-contact-54-near-b"),
+			firstName: "Beatrice",
+			lastName: "Unrelated",
+			companyId: nearMissCompany,
+			linkedinUrl: `https://www.linkedin.com/in/beatrice-${suffix}-888888`,
+		});
+		expect(nearMissA).not.toBe(nearMissB);
+
+		for (let index = 0; index < 22; index++) {
+			await createCompany(
+				`Equivalence filler ${index}`,
+				`${randomUUID().replaceAll("-", "")}.example`,
+				id(`equivalence-company-${String(index).padStart(2, "0")}`),
+			);
+		}
+		await createCompany(
+			"Same Name Candidate",
+			`${randomUUID().replaceAll("-", "")}.example`,
+			id("equivalence-company-22"),
+		);
+		await createCompany(
+			"Same Name Candidate",
+			`${randomUUID().replaceAll("-", "")}.example`,
+			id("equivalence-company-23"),
+		);
+		const acme = await createCompany(
+			"Acme",
+			"acme.com",
+			id("equivalence-company-24"),
+		);
+		const acne = await createCompany(
+			"Acne",
+			"acne.com",
+			id("equivalence-company-25"),
+		);
+		const gorilla = await createCompany(
+			"Gorilla Mill",
+			"gorillamill.com",
+			id("equivalence-company-26"),
+		);
+		const gorillaCo = await createCompany(
+			"Gorilla Mill Company",
+			"gorillamill.co",
+			id("equivalence-company-27"),
+		);
+		const portland = await createCompany(
+			"Portland Bolt",
+			"portlandbolt.com",
+			id("equivalence-company-28"),
+		);
+		const portlandPlural = await createCompany(
+			"Portland Bolt Co",
+			"portlandbolts.com",
+			id("equivalence-company-29"),
+		);
+
+		await resetScanCheckpoint();
+		const result = await duplicates.scan();
+		expect(result.autoMerges).toBe(2);
+		expect(
+			(await db.contact.findUnique({ where: { id: alternateKeep } }))
+				?.archivedAt,
+		).toBeNull();
+		expect(
+			(await db.contact.findUnique({ where: { id: alternateMerge } }))
+				?.archivedAt,
+		).not.toBeNull();
+		expect(
+			(await db.contact.findUnique({ where: { id: linkedInKeep } }))
+				?.archivedAt,
+		).toBeNull();
+		expect(
+			(await db.contact.findUnique({ where: { id: linkedInMerge } }))
+				?.archivedAt,
+		).not.toBeNull();
+		expect(
+			await db.contact.findUnique({
+				where: { id: alternateKeep },
+				select: { _count: { select: { deals: true, activities: true } } },
+			}),
+		).toMatchObject({ _count: { deals: 1, activities: 3 } });
+		for (const contactId of [bob, robert, al, alJr]) {
+			expect(
+				(await db.contact.findUnique({ where: { id: contactId } }))?.archivedAt,
+			).toBeNull();
+		}
+
+		const expectedCandidates = [
+			[DuplicateKind.CONTACT, bob, robert, "LinkedIn profiles differ"],
+			[DuplicateKind.CONTACT, al, alJr, "Name generations differ"],
+			[
+				DuplicateKind.COMPANY,
+				id("equivalence-company-22"),
+				id("equivalence-company-23"),
+				"Company names match",
+			],
+			[DuplicateKind.COMPANY, gorilla, gorillaCo, "Company domains are near"],
+			[
+				DuplicateKind.COMPANY,
+				portland,
+				portlandPlural,
+				"Company domains are near",
+			],
+		] as const;
+		const expectedCandidateRows: {
+			kind: DuplicateKind;
+			aId: string;
+			bId: string;
+			reason: string;
+		}[] = [];
+		for (const [kind, left, right, reason] of expectedCandidates) {
+			const [aId, bId] = orderedIds(left, right);
+			expectedCandidateRows.push({ kind, aId, bId, reason });
+			expect(
+				await db.duplicateCandidate.findUnique({
+					where: { kind_aId_bId: { kind, aId, bId } },
+				}),
+			).toMatchObject({ status: DuplicateStatus.OPEN, reason });
+		}
+		const actualCandidateRows = await db.duplicateCandidate.findMany({
+			where: {
+				OR: [
+					{ aId: { startsWith: id("equivalence-contact-") } },
+					{ bId: { startsWith: id("equivalence-contact-") } },
+					{ aId: { startsWith: id("equivalence-company-") } },
+					{ bId: { startsWith: id("equivalence-company-") } },
+				],
+			},
+			select: { kind: true, aId: true, bId: true, reason: true, status: true },
+			orderBy: [{ kind: "asc" }, { aId: "asc" }, { bId: "asc" }],
+		});
+		expect(actualCandidateRows).toEqual(
+			expectedCandidateRows
+				.map((row) => ({ ...row, status: DuplicateStatus.OPEN }))
+				.sort(
+					(left, right) =>
+						(left.kind === DuplicateKind.CONTACT ? 0 : 1) -
+							(right.kind === DuplicateKind.CONTACT ? 0 : 1) ||
+						left.aId.localeCompare(right.aId) ||
+						left.bId.localeCompare(right.bId),
+				),
+		);
+		expect(
+			await db.duplicateCandidate.findUnique({
+				where: {
+					kind_aId_bId: {
+						kind: DuplicateKind.CONTACT,
+						aId: nearMissA,
+						bId: nearMissB,
+					},
+				},
+			}),
+		).toBeNull();
+		expect(
+			await db.duplicateCandidate.findUnique({
+				where: {
+					kind_aId_bId: {
+						kind: DuplicateKind.COMPANY,
+						aId: orderedIds(acme, acne)[0],
+						bId: orderedIds(acme, acne)[1],
+					},
+				},
+			}),
+		).toBeNull();
+	});
+
+	it("resumes a contact source at the exact peer boundary", async () => {
+		const companyId = await createCompany(
+			"Resume Company",
+			`${suffix}.resume.test`,
+		);
+		const source = await createContact({
+			id: id("resume-contact-a-source"),
+			firstName: "Resume",
+			lastName: "Person",
+			companyId,
+		});
+		const firstPeer = await createContact({
+			id: id("resume-contact-b-peer"),
+			firstName: "Resume",
+			lastName: "Person",
+			companyId,
+		});
+		const secondPeer = await createContact({
+			id: id("resume-contact-c-peer"),
+			firstName: "Resume",
+			lastName: "Person",
+			companyId,
+		});
+		const thirdPeer = await createContact({
+			id: id("resume-contact-d-peer"),
+			firstName: "Resume",
+			lastName: "Person",
+			companyId,
+		});
+		await db.appSetting.update({
+			where: { id: SETTINGS_ID },
+			data: {
+				duplicateContactCursor: JSON.stringify({
+					sourceId: source,
+					peerId: firstPeer,
+				}),
+				duplicateCompanyCursor: marker,
+				duplicateContactsComplete: false,
+				duplicateCompaniesComplete: true,
+			},
+		});
+		await duplicates.scan();
+		expect(
+			await db.duplicateCandidate.findUnique({
+				where: {
+					kind_aId_bId: {
+						kind: DuplicateKind.CONTACT,
+						aId: orderedIds(source, firstPeer)[0],
+						bId: orderedIds(source, firstPeer)[1],
+					},
+				},
+			}),
+		).toBeNull();
+		for (const peer of [secondPeer, thirdPeer]) {
+			expect(
+				await db.duplicateCandidate.findUnique({
+					where: {
+						kind_aId_bId: {
+							kind: DuplicateKind.CONTACT,
+							aId: orderedIds(source, peer)[0],
+							bId: orderedIds(source, peer)[1],
+						},
+					},
+				}),
+			).toMatchObject({ status: DuplicateStatus.OPEN });
+		}
+	});
+
+	it("skips archived contact ids within the same tick", async () => {
+		const companyId = await createCompany(
+			"Archived Chain Company",
+			`${suffix}.archived-chain.test`,
+		);
+		const first = await createContact({
+			id: id("archived-chain-a"),
+			firstName: "Chain",
+			lastName: "Person",
+			email: `chain-${suffix}@example.test`,
+			companyId,
+			linkedinUrl: `https://www.linkedin.com/in/chain-a-${suffix}-444444`,
+		});
+		const middle = await createContact({
+			id: id("archived-chain-b"),
+			firstName: "Chain",
+			lastName: "Person",
+			email: `chain-middle-${suffix}@example.test`,
+			companyId,
+			linkedinUrl: `https://www.linkedin.com/in/chain-b-${suffix}-555555`,
+		});
+		await db.contactEmail.create({
+			data: {
+				contactId: middle,
+				email: `chain-${suffix}@example.test`,
+				status: ContactEmailStatus.OK,
+			},
+		});
+		const last = await createContact({
+			id: id("archived-chain-c"),
+			firstName: "Chain",
+			lastName: "Person",
+			companyId,
+			linkedinUrl: `https://www.linkedin.com/in/chain-c-555555`,
+		});
+		await resetScanCheckpoint();
+		await duplicates.scan();
+		expect(
+			(await db.contact.findUnique({ where: { id: middle } }))?.archivedAt,
+		).not.toBeNull();
+		expect(
+			(await db.contact.findUnique({ where: { id: last } }))?.archivedAt,
+		).toBeNull();
+		expect(
+			await db.duplicateCandidate.findUnique({
+				where: {
+					kind_aId_bId: {
+						kind: DuplicateKind.CONTACT,
+						aId: orderedIds(middle, last)[0],
+						bId: orderedIds(middle, last)[1],
+					},
+				},
+			}),
+		).toBeNull();
+		expect(first).not.toBe(middle);
 	});
 });
 

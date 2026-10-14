@@ -58,7 +58,7 @@ export function isNearDomain(
 	);
 }
 
-function domainTld(domain: string): string {
+export function domainTld(domain: string): string {
 	return (
 		COMPANY_DIRECTORY.twoPartTlds.find((suffix) =>
 			domain.endsWith(`.${suffix}`),
