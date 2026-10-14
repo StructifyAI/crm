@@ -5,6 +5,7 @@ import {
 	type MailboxSyncModel as MailboxSync,
 	RecordSource,
 } from "@crm/db";
+import { liveContactsByEmail } from "@crm/db/contact-email";
 import {
 	type CalendarSyncResume,
 	parseCalendarSyncResume,
@@ -385,13 +386,10 @@ export class CalendarSyncService {
 			(attendee.email as string).toLowerCase(),
 		);
 
-		const contacts = await this.db.contact.findMany({
-			where: { email: { in: emails } },
-			select: { id: true, email: true },
-		});
+		const contacts = await liveContactsByEmail(this.db, emails);
 
 		const contactByEmail = new Map(
-			contacts.map((contact) => [contact.email as string, contact.id]),
+			contacts.map((contact) => [contact.matchedEmail, contact.id]),
 		);
 
 		for (const attendee of attendees) {

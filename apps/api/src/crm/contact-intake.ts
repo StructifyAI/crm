@@ -1,5 +1,6 @@
 import { workspaceDomains } from "@crm/auth";
 import { type Db, Prisma } from "@crm/db";
+import { liveContactsByEmail } from "@crm/db/contact-email";
 
 export async function suppressionReason(
 	db: Db,
@@ -36,8 +37,6 @@ export async function racedContact(
 		return null;
 	}
 
-	return db.contact.findFirst({
-		where: { email, archivedAt: null },
-		select: { id: true, ownerId: true },
-	});
+	const [contact] = await liveContactsByEmail(db, [email]);
+	return contact ? { id: contact.id, ownerId: contact.ownerId } : null;
 }

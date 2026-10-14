@@ -19,10 +19,16 @@ import {
 	contactBulkOwnerInput,
 	contactByIdOutput,
 	contactCreateInput,
+	contactEmailAddInput,
+	contactEmailInput,
+	contactEmailStatusInput,
+	contactEmailStatusOutput,
 	contactEnrichOutput,
 	contactIdInput,
 	contactListInput,
 	contactListOutput,
+	contactMergeInput,
+	contactMergeOutput,
 	contactNameOutput,
 	contactUpdateArgs,
 	decideFactOutput,
@@ -71,6 +77,44 @@ export class ContactsRouter {
 	})
 	async update(@Input() input: z.infer<typeof contactUpdateArgs>) {
 		return this.contacts.update(input.id, input.data);
+	}
+
+	@Mutation({
+		input: contactMergeInput,
+		output: contactMergeOutput,
+		meta: restMeta("POST", "/contacts/merge", ["Contacts"]),
+	})
+	async merge(@Input() input: z.infer<typeof contactMergeInput>) {
+		return this.contacts.merge(input);
+	}
+
+	@Mutation({
+		input: contactEmailAddInput,
+		output: contactEmailStatusOutput,
+		meta: restMeta("POST", "/contacts/{contactId}/emails", ["Contacts"]),
+	})
+	async addEmail(@Input() input: z.infer<typeof contactEmailAddInput>) {
+		return this.contacts.addEmail(input);
+	}
+
+	@Mutation({
+		input: contactEmailInput,
+		output: contactEmailStatusOutput,
+		meta: restMeta("DELETE", "/contacts/{contactId}/emails", ["Contacts"]),
+	})
+	async removeEmail(@Input() input: z.infer<typeof contactEmailInput>) {
+		return this.contacts.removeEmail(input);
+	}
+
+	@Mutation({
+		input: contactEmailStatusInput,
+		output: contactEmailStatusOutput,
+		meta: restMeta("PATCH", "/contacts/{contactId}/email-status", ["Contacts"]),
+	})
+	async setEmailStatus(
+		@Input() input: z.infer<typeof contactEmailStatusInput>,
+	) {
+		return this.contacts.setEmailStatus(input);
 	}
 
 	@Mutation({

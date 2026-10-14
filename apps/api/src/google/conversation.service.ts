@@ -1,4 +1,5 @@
 import type { Db } from "@crm/db";
+import { liveContactsByEmail } from "@crm/db/contact-email";
 import { parseStoredRecipients } from "@crm/validation/email-recipients";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -72,11 +73,8 @@ export class ConversationService {
 		];
 		if (emails.length === 0) return new Map();
 
-		const [contacts, users] = await Promise.all([
-			this.db.contact.findMany({
-				where: { email: { in: emails, mode: "insensitive" } },
-				select: { email: true, imageUrl: true },
-			}),
+		const [matches, users] = await Promise.all([
+			liveContactsByEmail(this.db, emails),
 			this.db.user.findMany({
 				where: { email: { in: emails, mode: "insensitive" } },
 				select: { email: true, image: true },
@@ -84,9 +82,19 @@ export class ConversationService {
 		]);
 
 		const faces = new Map<string, string>();
-		for (const contact of contacts) {
-			if (contact.email && contact.imageUrl) {
-				faces.set(contact.email.toLowerCase(), contact.imageUrl);
+		const contactImages = await this.db.contact.findMany({
+			where: { id: { in: [...new Set(matches.map(({ id }) => id))] } },
+			select: { id: true, imageUrl: true },
+		});
+		const imageById = new Map(
+			contactImages.flatMap((contact) =>
+				contact.imageUrl ? [[contact.id, contact.imageUrl] as const] : [],
+			),
+		);
+		for (const match of matches) {
+			const imageUrl = imageById.get(match.id);
+			if (imageUrl) {
+				faces.set(match.matchedEmail, imageUrl);
 			}
 		}
 		for (const user of users) {

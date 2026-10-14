@@ -60,6 +60,43 @@ export const companyUpdateArgs = z.object({
 
 export const companyIdInput = z.object({ id: z.string() });
 
+export const companyMergeInput = z
+	.object({
+		keepId: z.string(),
+		mergeIds: z.array(z.string()).min(1).max(25),
+	})
+	.superRefine(({ keepId, mergeIds }, context) => {
+		if (new Set(mergeIds).size !== mergeIds.length) {
+			context.addIssue({
+				code: "custom",
+				path: ["mergeIds"],
+				message: "Merge IDs must be distinct.",
+			});
+		}
+		if (mergeIds.includes(keepId)) {
+			context.addIssue({
+				code: "custom",
+				path: ["mergeIds"],
+				message: "The kept company cannot also be merged.",
+			});
+		}
+	});
+
+export const companyMergeOutput = z.object({
+	keepId: z.string(),
+	mergedIds: z.array(z.string()),
+	moved: z.object({
+		contacts: z.number(),
+		deals: z.number(),
+		activities: z.number(),
+		emailThreads: z.number(),
+		calendarEvents: z.number(),
+		contactEvents: z.number(),
+		fieldValues: z.number(),
+	}),
+	alternateDomains: z.array(z.string()),
+});
+
 export const setPrimaryContactInput = z.object({
 	companyId: z.string(),
 	contactId: z.string().nullable(),

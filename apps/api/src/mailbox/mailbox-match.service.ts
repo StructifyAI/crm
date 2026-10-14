@@ -1,5 +1,6 @@
 import { workspaceDomains } from "@crm/auth/workspace";
 import { type Db, RecordSource } from "@crm/db";
+import { liveContactsByEmail } from "@crm/db/contact-email";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
@@ -119,15 +120,14 @@ export class MailboxMatchService {
 		if (domain && context.suppressedDomains.has(domain)) return false;
 		if (addressed?.has(email)) return true;
 
-		const contact = await this.db.contact.findFirst({
-			where: { email },
-			select: { id: true },
-		});
-		if (contact) return true;
+		if ((await liveContactsByEmail(this.db, [email])).length > 0) return true;
 		if (!domain) return false;
 
 		const company = await this.db.company.findFirst({
-			where: { domain },
+			where: {
+				archivedAt: null,
+				OR: [{ domain }, { alternateDomains: { some: { domain } } }],
+			},
 			select: { id: true },
 		});
 
@@ -149,16 +149,18 @@ export class MailboxMatchService {
 			return { companyId: null, contactId: null, domain: null, external };
 		}
 
-		const contact = await this.db.contact.findFirst({
-			where: { email: { in: external.map((person) => person.email) } },
-			select: { id: true, companyId: true, email: true },
-		});
+		const contact = (
+			await liveContactsByEmail(
+				this.db,
+				external.map((person) => person.email),
+			)
+		)[0];
 
 		if (contact) {
 			return {
 				companyId: contact.companyId,
 				contactId: contact.id,
-				domain: contact.email ? workDomain(contact.email) : null,
+				domain: workDomain(contact.matchedEmail),
 				external,
 			};
 		}
@@ -172,14 +174,25 @@ export class MailboxMatchService {
 		];
 
 		const known = await this.db.company.findMany({
-			where: { domain: { in: domains } },
-			select: { id: true, domain: true },
+			where: {
+				archivedAt: null,
+				OR: [
+					{ domain: { in: domains } },
+					{ alternateDomains: { some: { domain: { in: domains } } } },
+				],
+			},
+			select: {
+				id: true,
+				domain: true,
+				alternateDomains: { select: { domain: true } },
+			},
 		});
 
 		const knownDomains = new Set(
-			known
-				.map((company) => company.domain)
-				.filter((domain): domain is string => domain !== null),
+			known.flatMap((company) => [
+				...(company.domain ? [company.domain] : []),
+				...company.alternateDomains.map(({ domain }) => domain),
+			]),
 		);
 
 		const domain = dominantDomain(external, knownDomains);
@@ -187,7 +200,13 @@ export class MailboxMatchService {
 			return { companyId: null, contactId: null, domain: null, external };
 		}
 
-		const existing = known.find((company) => company.domain === domain);
+		const existing = known.find(
+			(company) =>
+				company.domain === domain ||
+				company.alternateDomains.some(
+					(alternate) => alternate.domain === domain,
+				),
+		);
 		if (existing) {
 			return {
 				companyId: existing.id,
@@ -269,18 +288,21 @@ export class MailboxMatchService {
 		const { firstName, lastName } = splitName(person.name, person.email);
 
 		const outcome = await this.agent.withCrmEvents(async (tx, emit) => {
-			await lockIdempotencyKey(tx, `mailbox-contact:${person.email}`);
-			const existing = await tx.contact.findUnique({
-				where: { email: person.email },
-				select: {
-					id: true,
-					firstName: true,
-					lastName: true,
-					email: true,
-					companyId: true,
-					createdAt: true,
-				},
-			});
+			await lockIdempotencyKey(tx, `contact-email:${person.email}`);
+			const match = (await liveContactsByEmail(tx, [person.email]))[0];
+			const existing = match
+				? await tx.contact.findUnique({
+						where: { id: match.id },
+						select: {
+							id: true,
+							firstName: true,
+							lastName: true,
+							email: true,
+							companyId: true,
+							createdAt: true,
+						},
+					})
+				: null;
 			if (existing) return { contact: existing, created: false as const };
 
 			const contact = await tx.contact.create({

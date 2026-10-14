@@ -1,4 +1,5 @@
 import { type Db, EmailClassification, EmailDirection } from "@crm/db";
+import { liveContactsByEmail } from "@crm/db/contact-email";
 import { Injectable } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import {
@@ -25,7 +26,7 @@ export type ThreadClassificationTarget = {
 export type ThreadClassificationScope = Pick<
 	ThreadClassificationTarget,
 	"companyId" | "contactId" | "dealId" | "companyDomain"
->;
+> & { fromEmail?: string };
 
 @Injectable()
 export class EmailClassificationService {
@@ -58,7 +59,7 @@ export class EmailClassificationService {
 		target: Pick<
 			ThreadClassificationTarget,
 			"contactId" | "companyId" | "dealId"
-		>,
+		> & { fromEmail?: string },
 	): Promise<Set<string>> {
 		const OR = [
 			...(target.companyId ? [{ companyId: target.companyId }] : []),
@@ -71,12 +72,27 @@ export class EmailClassificationService {
 
 		const contacts = await this.db.contact.findMany({
 			where: { archivedAt: null, OR },
-			select: { email: true },
+			select: {
+				id: true,
+				email: true,
+				alternateEmails: { select: { email: true } },
+			},
 		});
-		return new Set(
-			contacts.flatMap((contact) =>
-				contact.email ? [contact.email.trim().toLowerCase()] : [],
-			),
+		const emails = new Set(
+			contacts.flatMap((contact) => [
+				...(contact.email ? [contact.email.trim().toLowerCase()] : []),
+				...contact.alternateEmails.map(({ email }) =>
+					email.trim().toLowerCase(),
+				),
+			]),
 		);
+		if (target.fromEmail) {
+			const scopedIds = new Set(contacts.map(({ id }) => id));
+			const matches = await liveContactsByEmail(this.db, [target.fromEmail]);
+			if (matches.some(({ id }) => scopedIds.has(id))) {
+				emails.add(target.fromEmail.trim().toLowerCase());
+			}
+		}
+		return emails;
 	}
 }

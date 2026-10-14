@@ -368,6 +368,280 @@ export class CompaniesService {
 		return { id: company.id, name: company.name, domain: company.domain };
 	}
 
+	async merge(input: { keepId: string; mergeIds: string[] }) {
+		const { keepId, mergeIds } = input;
+		if (
+			mergeIds.length < 1 ||
+			mergeIds.length > 25 ||
+			new Set(mergeIds).size !== mergeIds.length ||
+			mergeIds.includes(keepId)
+		) {
+			throw new BadRequestException("Choose 1–25 distinct companies to merge.");
+		}
+		const result = await this.db.$transaction(async (tx) => {
+			const ids = [keepId, ...mergeIds];
+			await tx.$queryRaw`SELECT id FROM "company" WHERE id IN (${PrismaNamespace.join(ids)}) ORDER BY id FOR UPDATE`;
+			const companies = await tx.company.findMany({
+				where: { id: { in: ids } },
+				include: {
+					alternateDomains: { select: { domain: true, needsReview: true } },
+				},
+			});
+			const kept = companies.find(({ id }) => id === keepId);
+			const sources = mergeIds.map((id) =>
+				companies.find((row) => row.id === id),
+			);
+			if (!kept || kept.archivedAt)
+				throw new NotFoundException(`No live company with id ${keepId}.`);
+			if (sources.some((source) => !source))
+				throw new NotFoundException("A merged company does not exist.");
+			const merged = sources.filter((row) => row !== undefined);
+			const now = new Date();
+			const date = now.toISOString().slice(0, 10);
+			await tx.company.updateMany({
+				where: { id: { in: mergeIds }, archivedAt: null },
+				data: { archivedAt: now },
+			});
+
+			const domains = new Set<string>();
+			const keptDomain =
+				kept.domain ?? merged.find(({ domain }) => domain)?.domain ?? null;
+			if (keptDomain) {
+				for (const source of merged) {
+					for (const domain of [
+						source.domain,
+						...source.alternateDomains.map(({ domain }) => domain),
+					]) {
+						const normalized = normalizeDomain(domain);
+						if (normalized && normalized !== normalizeDomain(keptDomain))
+							domains.add(normalized);
+					}
+				}
+				for (const alternate of kept.alternateDomains) {
+					const normalized = normalizeDomain(alternate.domain);
+					if (normalized && normalized !== normalizeDomain(keptDomain))
+						domains.add(normalized);
+				}
+			}
+			const updates: Prisma.CompanyUpdateInput = {};
+			if (!kept.domain && keptDomain) updates.domain = keptDomain;
+			const candidates = [
+				"website",
+				"phone",
+				"linkedinUrl",
+				"ownerId",
+				"city",
+				"stateCode",
+				"country",
+				"countryCode",
+				"email",
+				"twitterUrl",
+				"githubUrl",
+				"logoUrl",
+				"logoDarkUrl",
+				"iconUrl",
+				"iconDarkUrl",
+				"iconTone",
+				"brandColor",
+				"description",
+				"employeeCount",
+				"employeeRange",
+				"employeeSource",
+				"employeeSourceUrl",
+				"pricingUrl",
+				"careersUrl",
+			] as const;
+			const filledName =
+				kept.domain && kept.name === kept.domain
+					? merged.find(({ name }) => name && name !== kept.domain)?.name
+					: undefined;
+			if (filledName) updates.name = filledName;
+			for (const field of candidates) {
+				const current = kept[field];
+				if (current !== null && current !== "") continue;
+				const source = merged.find(
+					(row) => row[field] !== null && row[field] !== "",
+				);
+				if (source) Object.assign(updates, { [field]: source[field] });
+			}
+			const primary =
+				kept.primaryContactId === null
+					? merged.find(({ primaryContactId }) => primaryContactId)
+							?.primaryContactId
+					: null;
+			if (Object.keys(updates).length)
+				await tx.company.update({ where: { id: keepId }, data: updates });
+			await tx.company.updateMany({
+				where: { id: { in: mergeIds }, primaryContactId: { not: null } },
+				data: { primaryContactId: null },
+			});
+			if (primary) {
+				await tx.company.update({
+					where: { id: keepId },
+					data: { primaryContactId: primary },
+				});
+			}
+			for (const domain of domains) {
+				await tx.companyDomain.upsert({
+					where: { companyId_domain: { companyId: keepId, domain } },
+					create: { companyId: keepId, domain, needsReview: false },
+					update: {},
+				});
+			}
+
+			const moved = {
+				contacts: (
+					await tx.contact.updateMany({
+						where: { companyId: { in: mergeIds } },
+						data: { companyId: keepId },
+					})
+				).count,
+				deals: (
+					await tx.deal.updateMany({
+						where: { companyId: { in: mergeIds } },
+						data: { companyId: keepId },
+					})
+				).count,
+				activities: (
+					await tx.activity.updateMany({
+						where: { companyId: { in: mergeIds } },
+						data: { companyId: keepId },
+					})
+				).count,
+				emailThreads: (
+					await tx.emailThread.updateMany({
+						where: { companyId: { in: mergeIds } },
+						data: { companyId: keepId },
+					})
+				).count,
+				calendarEvents: (
+					await tx.calendarEvent.updateMany({
+						where: { companyId: { in: mergeIds } },
+						data: { companyId: keepId },
+					})
+				).count,
+				contactEvents: (
+					await tx.contactEvent.updateMany({
+						where: { companyId: { in: mergeIds } },
+						data: { companyId: keepId },
+					})
+				).count,
+				fieldValues: await this.mergeFieldValues(tx, keepId, mergeIds, date),
+			};
+			await tx.agentConversation.updateMany({
+				where: { companyId: { in: mergeIds } },
+				data: { companyId: keepId },
+			});
+			await tx.agentTask.updateMany({
+				where: { companyId: { in: mergeIds } },
+				data: { companyId: keepId },
+			});
+			await recomputeCompanyIcp(tx, { id: keepId });
+			const stampTargets = await this.stamp.targetsOf(
+				{ companyId: keepId },
+				tx,
+			);
+			const contactEventTargets = await this.contactEvents.targetsForEvents(
+				{ companyId: keepId },
+				tx,
+			);
+			return {
+				keepId,
+				mergedIds: mergeIds,
+				moved,
+				alternateDomains: [...domains],
+				stampTargets,
+				contactEventTargets,
+			};
+		});
+		this.logger.log({
+			message: "Companies merged",
+			keepId: result.keepId,
+			mergedIds: result.mergedIds,
+			moved: result.moved,
+			alternateDomains: result.alternateDomains,
+		});
+		try {
+			await this.stamp.recomputeMany(result.stampTargets);
+			await this.contactEvents.refreshAffected(result.contactEventTargets);
+		} catch (error) {
+			this.logger.error(
+				{ message: "Company merge stamps were not refreshed", keepId },
+				error instanceof Error ? error.stack : String(error),
+			);
+		}
+		return {
+			keepId: result.keepId,
+			mergedIds: result.mergedIds,
+			moved: result.moved,
+			alternateDomains: result.alternateDomains,
+		};
+	}
+
+	private async mergeFieldValues(
+		tx: Prisma.TransactionClient,
+		keepId: string,
+		mergeIds: string[],
+		date: string,
+	): Promise<number> {
+		const values = await tx.fieldValue.findMany({
+			where: { companyId: { in: mergeIds } },
+			include: {
+				field: { select: { key: true } },
+				options: { select: { optionId: true } },
+			},
+		});
+		let moved = 0;
+		for (const value of values) {
+			const target = await tx.fieldValue.findUnique({
+				where: {
+					fieldId_companyId: { fieldId: value.fieldId, companyId: keepId },
+				},
+				include: { options: { select: { optionId: true } } },
+			});
+			const prefix = `Merged from ${value.companyId} on ${date}`;
+			if (target && value.field.key === "notes") {
+				await tx.fieldValue.update({
+					where: { id: target.id },
+					data: {
+						text: [target.text, prefix, value.text]
+							.filter(Boolean)
+							.join("\n\n"),
+					},
+				});
+			} else if (target) {
+				if (value.options.length)
+					await tx.fieldValueOption.createMany({
+						data: value.options
+							.filter(
+								(option) =>
+									!target.options.some(
+										(item) => item.optionId === option.optionId,
+									),
+							)
+							.map((option) => ({
+								fieldValueId: target.id,
+								optionId: option.optionId,
+							})),
+					});
+			} else {
+				const data =
+					value.field.key === "notes"
+						? {
+								companyId: keepId,
+								text: [prefix, value.text].filter(Boolean).join("\n\n"),
+							}
+						: { companyId: keepId };
+				await tx.fieldValue.update({ where: { id: value.id }, data });
+				moved += 1;
+				continue;
+			}
+			await tx.fieldValue.delete({ where: { id: value.id } });
+			moved += 1;
+		}
+		return moved;
+	}
+
 	async update(id: string, input: CompanyUpdateInput) {
 		const data: Prisma.CompanyUpdateInput = {};
 

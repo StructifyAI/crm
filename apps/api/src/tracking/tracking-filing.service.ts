@@ -1,5 +1,6 @@
 import { ActivityType, type Db, RecordSource } from "@crm/db";
 import type { Touch } from "@crm/db/attribution";
+import { liveContactsByEmail } from "@crm/db/contact-email";
 import {
 	CONTACT_CAP_REASON,
 	CONTACTS_PER_HOUR,
@@ -85,10 +86,7 @@ export class TrackingFilingService {
 		const suppressed = await suppressionReason(this.db, email, domain);
 		if (suppressed) return this.skip(submission.id, suppressed);
 
-		const existing = await this.db.contact.findFirst({
-			where: { email, archivedAt: null },
-			select: { id: true },
-		});
+		const [existing] = await liveContactsByEmail(this.db, [email]);
 
 		if (existing) {
 			await this.attach(submission.id, existing.id, submission);
