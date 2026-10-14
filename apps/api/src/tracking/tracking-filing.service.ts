@@ -14,7 +14,11 @@ import {
 	ActivityStampService,
 	activityTime,
 } from "../crm/activity-stamp.service";
-import { racedContact, suppressionReason } from "../crm/contact-intake";
+import {
+	intakeContact,
+	racedContact,
+	suppressionReason,
+} from "../crm/contact-intake";
 import { normalizeEmail } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
 import {
@@ -100,21 +104,20 @@ export class TrackingFilingService {
 		}
 
 		const companyId = await this.companies.companyForEmail(email);
-		const { firstName, lastName } = splitName(submission.name, email);
+		const { firstName, lastName } = splitName(submission.name, "");
 
-		let contact: { id: string };
+		let contact: Awaited<ReturnType<typeof intakeContact>>;
 		try {
-			contact = await this.db.contact.create({
-				data: {
-					firstName,
-					lastName,
-					email,
-					companyId,
-					source: RecordSource.TRACKING,
-					lastActivityAt: new Date(),
-				},
-				select: { id: true },
+			contact = await intakeContact(this.agent, {
+				firstName,
+				lastName,
+				email,
+				companyId,
+				source: RecordSource.TRACKING,
+				needsName: !firstName,
+				lastActivityAt: new Date(),
 			});
+			if (!contact) throw new Error("Contact intake returned no result");
 		} catch (error) {
 			await this.counters.release(window);
 
@@ -126,18 +129,21 @@ export class TrackingFilingService {
 			return { filed: true, contactId: raced.id };
 		}
 
+		if (!contact.created) await this.counters.release(window);
 		await this.attach(submission.id, contact.id, submission);
 
-		await this.agent.contactCreated(
-			contact.id,
-			`Submitted a form on ${submission.host}`,
-		);
+		if (contact.created) {
+			await this.agent.contactCreated(
+				contact.id,
+				`Submitted a form on ${submission.host}`,
+			);
 
-		this.logger.log({
-			message: "Contact filed from a form submission",
-			contactId: contact.id,
-			host: submission.host,
-		});
+			this.logger.log({
+				message: "Contact filed from a form submission",
+				contactId: contact.id,
+				host: submission.host,
+			});
+		}
 
 		return { filed: true, contactId: contact.id };
 	}

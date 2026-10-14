@@ -34,6 +34,7 @@ import {
 	type StampTargets,
 } from "../crm/activity-stamp.service";
 import { type BulkResult, requireOwner, runBulk } from "../crm/bulk";
+import { intakeContact } from "../crm/contact-intake";
 import { blankToNull, normalizeEmail, toCents } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
 import { FieldsService } from "../fields/fields.service";
@@ -380,8 +381,6 @@ export class ContactsService {
 	async create(input: ContactCreateInput) {
 		const email = normalizeEmail(input.email ?? "");
 
-		if (email) await this.assertEmailAvailable(this.db, email);
-
 		const companyId =
 			input.companyId ??
 			(email
@@ -390,68 +389,44 @@ export class ContactsService {
 					})
 				: null);
 
-		const contact = await this.agent.withCrmEvents(async (tx, emit) => {
-			if (email) {
-				await lockIdempotencyKey(tx, `contact-email:${email}`);
-				await this.assertEmailAvailable(tx, email);
-			}
-			await this.allowAgain(tx, email);
-
-			const created = await tx.contact.create({
-				data: {
-					firstName: input.firstName.trim(),
-					lastName: blankToNull(input.lastName ?? ""),
-					email,
-					phone: blankToNull(input.phone ?? ""),
-					title: blankToNull(input.title ?? ""),
-					companyId,
-					ownerId: input.ownerId ?? null,
-				},
-				select: {
-					id: true,
-					firstName: true,
-					lastName: true,
-					email: true,
-					companyId: true,
-					createdAt: true,
-				},
-			});
-			await emit({
-				type: "contact.created",
-				record: { kind: "contact", id: created.id },
-				occurredAt: created.createdAt,
-				data: {
-					firstName: created.firstName,
-					lastName: created.lastName,
-					email: created.email,
-					companyId: created.companyId,
-				},
-			});
-			return created;
+		const contact = await intakeContact(this.agent, {
+			firstName: input.firstName,
+			lastName: input.lastName,
+			email,
+			phone: input.phone,
+			title: input.title,
+			linkedinUrl: input.linkedinUrl,
+			companyId,
+			ownerId: input.ownerId,
+			allowSuppressedEmail: true,
 		});
 
-		this.logger.log({ message: "Contact created", contactId: contact.id });
+		if (!contact) throw new Error("Contact intake returned no result");
 
-		await this.agent.contactCreated(
-			contact.id,
-			"Added by a rep, with nothing on the record yet",
-		);
-		this.fields
-			.queueBackfillForNewRecord("CONTACT", contact.id)
-			.catch((error: Error) => {
-				this.logger.error(
-					{
-						message: "Contact backfill queueing failed",
-						contactId: contact.id,
-					},
-					error.stack,
-				);
-			});
+		if (contact.created) {
+			this.logger.log({ message: "Contact created", contactId: contact.id });
+			await this.agent.contactCreated(
+				contact.id,
+				"Added by a rep, with nothing on the record yet",
+			);
+			this.fields
+				.queueBackfillForNewRecord("CONTACT", contact.id)
+				.catch((error: Error) => {
+					this.logger.error(
+						{
+							message: "Contact backfill queueing failed",
+							contactId: contact.id,
+						},
+						error.stack,
+					);
+				});
+		}
 
 		return {
 			id: contact.id,
 			firstName: contact.firstName,
 			lastName: contact.lastName,
+			matched: contact.matched,
 		};
 	}
 

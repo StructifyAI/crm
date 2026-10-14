@@ -6,6 +6,7 @@ import {
 	expect,
 	it,
 } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { db, type FieldEntity, Prisma } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
 import type {
@@ -520,7 +521,14 @@ async function clean() {
 		where: {
 			OR: [
 				{ linkedinUrl: { contains: suffix } },
-				{ linkedinUrl: "https://www.linkedin.com/in/Slug/" },
+				{
+					linkedinUrl: {
+						in: [
+							"https://www.linkedin.com/in/Slug/",
+							"https://www.linkedin.com/in/slug",
+						],
+					},
+				},
 			],
 		},
 	});
@@ -848,18 +856,20 @@ describe("Extrovert client", () => {
 
 describe("Extrovert filing", () => {
 	it("matches slug variants, creates contacts without email, and fills only null owners", async () => {
+		const slug = `slug-${suffix}-${randomUUID()}`;
+		const linkedinUrl = `https://www.linkedin.com/in/${slug}/`;
 		const existing = await db.contact.create({
 			data: {
 				firstName: "Existing",
 				lastName: "Contact",
-				linkedinUrl: "https://www.linkedin.com/in/Slug/",
+				linkedinUrl,
 				ownerId: null,
 			},
 			select: { id: true },
 		});
 
 		const matched = await filing.resolveContact({
-			linkedinUrl: "http://linkedin.com/in/Slug/",
+			linkedinUrl: `http://linkedin.com/in/${slug.toUpperCase()}`,
 			firstName: "Ignored",
 			campaignOwnerId: ownerId,
 			queueEnrichment: false,
@@ -875,7 +885,7 @@ describe("Extrovert filing", () => {
 			data: { ownerId: manualOwnerId },
 		});
 		await filing.resolveContact({
-			linkedinUrl: "https://www.linkedin.com/in/slug",
+			linkedinUrl: `https://www.linkedin.com/in/${slug}`,
 			campaignOwnerId: ownerId,
 			queueEnrichment: false,
 		});

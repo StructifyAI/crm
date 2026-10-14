@@ -189,13 +189,19 @@ export class ExtrovertSyncService {
 					!prospect.isDeleted && Boolean(prospect.linkedInProfile?.linkedInUrl),
 			)
 			.map((prospect) => {
-				const names = splitFullName(
-					prospect.linkedInProfile?.name ?? "Unknown",
-				);
+				const names = splitFullName(prospect.linkedInProfile?.name ?? "");
 				return {
 					linkedinUrl: prospect.linkedInProfile?.linkedInUrl ?? "",
 					firstName: names.firstName,
 					lastName: names.lastName,
+					companyName:
+						prospect.companyName ??
+						prospect.linkedInProfile?.companyName ??
+						null,
+					companyDomain:
+						prospect.companyDomain ??
+						prospect.linkedInProfile?.companyDomain ??
+						null,
 					campaignOwnerId: prospect.user?.id
 						? (memberOwners.get(prospect.user.id)?.ownerId ?? null)
 						: null,
@@ -716,9 +722,12 @@ export class ExtrovertSyncService {
 }
 
 function splitFullName(fullName: string) {
+	if (!fullName.trim() || fullName.trim().toLowerCase() === "unknown") {
+		return { firstName: "", lastName: null };
+	}
 	const [firstName, ...rest] = fullName.trim().split(/\s+/);
 	return {
-		firstName: firstName || "Unknown",
+		firstName: firstName || "",
 		lastName: rest.join(" ") || null,
 	};
 }

@@ -345,15 +345,19 @@ describe("contact and company merges", () => {
 		).toBe(`Kept note\n\nMerged from ${mergeId} on ${date}\n\nOld note`);
 	});
 
-	it("rejects creating a contact with another live contact's alternate email", async () => {
+	it("matches creating a contact with another live contact's alternate email", async () => {
 		const domain = `${suffix()}.test`;
 		const ownerId = await contact(`main@${domain}`);
 		await db.contactEmail.create({
 			data: { contactId: ownerId, email: `alternate@${domain}` },
 		});
-		await expect(
-			contacts.create({ firstName: "New", email: `ALTERNATE@${domain}` }),
-		).rejects.toThrow("already uses");
+		const result = await contacts.create({
+			firstName: "New",
+			email: `ALTERNATE@${domain}`,
+		});
+
+		expect(result.id).toBe(ownerId);
+		expect(result.matched).toBe(true);
 	});
 
 	it("adds, removes, and updates primary and alternate email status", async () => {

@@ -1,3 +1,5 @@
+import { COMPANY_DIRECTORY } from "./company-directory-config";
+
 export function normalizeDomain(
 	input: string | null | undefined,
 ): string | null {
@@ -18,6 +20,79 @@ export function normalizeDomain(
 	const bare = host.replace(/^www\./, "");
 
 	return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(bare) ? bare : null;
+}
+
+export function domainLabel(input: string | null | undefined): string | null {
+	const domain = normalizeDomain(input);
+	if (!domain) return null;
+	const suffix = COMPANY_DIRECTORY.twoPartTlds.find((candidate) =>
+		domain.endsWith(`.${candidate}`),
+	);
+	if (suffix) return domain.slice(0, -(suffix.length + 1));
+	return domain.split(".").slice(0, -1).join(".") || null;
+}
+
+export function isNearDomain(
+	leftInput: string | null | undefined,
+	rightInput: string | null | undefined,
+): boolean {
+	const left = normalizeDomain(leftInput);
+	const right = normalizeDomain(rightInput);
+	if (!left || !right || left === right) return false;
+	const leftLabel = domainLabel(left);
+	const rightLabel = domainLabel(right);
+	if (!leftLabel || !rightLabel) return false;
+	const leftTld = domainTld(left);
+	const rightTld = domainTld(right);
+	if (leftTld !== rightTld) {
+		return (
+			leftLabel.length >= COMPANY_DIRECTORY.tldVariantMinLabelLength &&
+			rightLabel.length >= COMPANY_DIRECTORY.tldVariantMinLabelLength &&
+			leftLabel === rightLabel
+		);
+	}
+	return (
+		Math.min(leftLabel.length, rightLabel.length) >=
+			COMPANY_DIRECTORY.editDistanceMinLabelLength &&
+		withinEditDistanceOne(leftLabel, rightLabel)
+	);
+}
+
+function domainTld(domain: string): string {
+	return (
+		COMPANY_DIRECTORY.twoPartTlds.find((suffix) =>
+			domain.endsWith(`.${suffix}`),
+		) ??
+		domain.split(".").at(-1) ??
+		domain
+	);
+}
+
+function withinEditDistanceOne(left: string, right: string): boolean {
+	if (
+		Math.abs(left.length - right.length) > COMPANY_DIRECTORY.domainEditDistance
+	)
+		return false;
+	let leftIndex = 0;
+	let rightIndex = 0;
+	let edits = 0;
+	while (leftIndex < left.length && rightIndex < right.length) {
+		if (left[leftIndex] === right[rightIndex]) {
+			leftIndex += 1;
+			rightIndex += 1;
+		} else {
+			edits += 1;
+			if (edits > COMPANY_DIRECTORY.domainEditDistance) return false;
+			if (left.length > right.length) leftIndex += 1;
+			else if (left.length < right.length) rightIndex += 1;
+			else {
+				leftIndex += 1;
+				rightIndex += 1;
+			}
+		}
+	}
+	if (leftIndex < left.length || rightIndex < right.length) edits += 1;
+	return edits <= COMPANY_DIRECTORY.domainEditDistance;
 }
 
 export function domainFromEmail(
