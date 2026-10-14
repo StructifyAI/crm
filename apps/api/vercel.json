@@ -35,7 +35,7 @@
 		},
 		{
 			"path": "/internal/sync/duplicates",
-			"schedule": "0 2 * * *"
+			"schedule": "0 * * * *"
 		},
 		{
 			"path": "/internal/sync/rates",
