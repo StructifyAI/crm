@@ -150,24 +150,22 @@ export function DuplicatesReview() {
 	const candidates = query.data?.pages.flatMap((page) => page.items) ?? [];
 	const merge = useMutation(
 		trpc.duplicates.merge.mutationOptions({
-			onSuccess: async () => {
-				await queryClient.invalidateQueries({
-					queryKey: trpc.duplicates.list.queryKey(),
-				});
-				toast.success("Duplicate records merged.");
-			},
+			onSuccess: () => toast.success("Duplicate records merged."),
 			onError: (error) => toast.error(error.message),
+			onSettled: () =>
+				queryClient.invalidateQueries({
+					queryKey: trpc.duplicates.list.pathKey(),
+				}),
 		}),
 	);
 	const dismiss = useMutation(
 		trpc.duplicates.dismiss.mutationOptions({
-			onSuccess: async () => {
-				await queryClient.invalidateQueries({
-					queryKey: trpc.duplicates.list.queryKey(),
-				});
-				toast.success("Duplicate pair dismissed.");
-			},
+			onSuccess: () => toast.success("Duplicate pair dismissed."),
 			onError: (error) => toast.error(error.message),
+			onSettled: () =>
+				queryClient.invalidateQueries({
+					queryKey: trpc.duplicates.list.pathKey(),
+				}),
 		}),
 	);
 	const pending = merge.isPending || dismiss.isPending;
