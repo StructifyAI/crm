@@ -69,6 +69,28 @@ export class InstantlyClient {
 		return { items: page.items, cursor: page.next_starting_after ?? null };
 	}
 
+	async listLeadSends(
+		key: string,
+		leadEmail: string,
+	): Promise<InstantlyEmail[]> {
+		const sends: InstantlyEmail[] = [];
+		let cursor: string | null = null;
+
+		while (true) {
+			const url = new URL(`${INSTANTLY.api.baseUrl}/emails`);
+			url.searchParams.set("email_type", "sent");
+			url.searchParams.set("lead", leadEmail);
+			url.searchParams.set("sort_order", "asc");
+			url.searchParams.set("limit", String(INSTANTLY.emails.pageSize));
+			if (cursor) url.searchParams.set("starting_after", cursor);
+			await this.pauseForEmailRateLimit();
+			const page = parseInstantlyEmailPage(await this.fetchJson(key, url));
+			sends.push(...page.items);
+			if (page.items.length === 0 || !page.next_starting_after) return sends;
+			cursor = page.next_starting_after;
+		}
+	}
+
 	private async pauseForEmailRateLimit(): Promise<void> {
 		const elapsed = Date.now() - this.lastEmailRequestAt;
 		if (elapsed < INSTANTLY.emails.minRequestGapMs) {

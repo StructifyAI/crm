@@ -4,6 +4,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { InstantlyClient } from "./instantly.client";
 import { INSTANTLY } from "./instantly-config";
+import { sendFromEmail } from "./instantly-email-sync.service";
 import { InstantlyFilingService } from "./instantly-filing.service";
 
 @Injectable()
@@ -20,12 +21,14 @@ export class InstantlySyncService {
 		campaigns: number;
 		leads: number;
 		created: number;
+		reconciled: number;
 		error: string | null;
 	}> {
 		const result = {
 			campaigns: 0,
 			leads: 0,
 			created: 0,
+			reconciled: 0,
 			error: null as string | null,
 		};
 		const setting = await this.db.appSetting.findUnique({
@@ -39,6 +42,9 @@ export class InstantlySyncService {
 				setting.instantlyApiKey,
 			);
 			result.campaigns = campaigns.length;
+			const campaignNames = new Map(
+				campaigns.map((campaign) => [campaign.id, campaign.name]),
+			);
 			const observed = new Set<string>();
 
 			for (const campaign of campaigns) {
@@ -149,6 +155,17 @@ export class InstantlySyncService {
 							await upsert();
 						}
 						if (resolved.created) result.created += 1;
+						if (
+							result.reconciled < INSTANTLY.sync.reconcileLeadsPerRun &&
+							(await this.reconcileLead(setting.instantlyApiKey, {
+								contactId: resolved.id,
+								campaignId: campaign.id,
+								leadEmail: lead.email,
+								lastContactAt,
+								campaignNames,
+							}))
+						)
+							result.reconciled += 1;
 					}
 				}
 			}
@@ -173,6 +190,56 @@ export class InstantlySyncService {
 			});
 			return result;
 		}
+	}
+
+	private async reconcileLead(
+		key: string,
+		lead: {
+			contactId: string;
+			campaignId: string;
+			leadEmail: string;
+			lastContactAt: Date | null;
+			campaignNames: Map<string, string>;
+		},
+	): Promise<boolean> {
+		if (
+			!lead.lastContactAt ||
+			(await this.sendFiled(
+				lead.contactId,
+				lead.campaignId,
+				lead.lastContactAt,
+			))
+		)
+			return false;
+		for (const email of await this.client.listLeadSends(key, lead.leadEmail)) {
+			const send = sendFromEmail(email, lead.campaignNames);
+			if (send) await this.filing.fileSend(send);
+		}
+		return true;
+	}
+
+	private async sendFiled(
+		contactId: string,
+		campaignId: string,
+		lastContactAt: Date,
+	): Promise<boolean> {
+		const filed = await this.db.activity.findFirst({
+			where: {
+				contactId,
+				occurredAt: {
+					gte: new Date(
+						lastContactAt.getTime() - INSTANTLY.sync.lastContactSlackMs,
+					),
+				},
+				AND: [
+					{ meta: { path: ["source"], equals: "instantly" } },
+					{ meta: { path: ["eventType"], equals: "email_sent" } },
+					{ meta: { path: ["campaignId"], equals: campaignId } },
+				],
+			},
+			select: { id: true },
+		});
+		return filed !== null;
 	}
 }
 

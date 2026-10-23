@@ -12,6 +12,8 @@ export const INSTANTLY = {
 	sync: {
 		pageSize: 100,
 		dayMs: 86_400_000,
+		reconcileLeadsPerRun: 5,
+		lastContactSlackMs: MINUTE_MS,
 	},
 	emails: {
 		pageSize: 25,
@@ -19,7 +21,6 @@ export const INSTANTLY = {
 		leaseMs: 2 * MINUTE_MS,
 		minRequestGapMs: 3 * SECOND_MS,
 		replyMatchWindowMs: 15 * MINUTE_MS,
-		cursorOverlapMs: 15 * MINUTE_MS,
 	},
 	filing: {
 		sendEvents: ["email_sent", "email_bounced", "lead_unsubscribed"],

@@ -17,7 +17,6 @@ import {
 	InstantlyClient,
 } from "../src/instantly/instantly.client";
 import { InstantlyController } from "../src/instantly/instantly.controller";
-import { INSTANTLY } from "../src/instantly/instantly-config";
 import { InstantlyEmailSyncService } from "../src/instantly/instantly-email-sync.service";
 import { InstantlyFilingService } from "../src/instantly/instantly-filing.service";
 import { InstantlyIngestService } from "../src/instantly/instantly-ingest.service";
@@ -426,7 +425,7 @@ describe("Instantly email polling", () => {
 		expect(queries).toEqual([
 			{
 				type: "sent",
-				since: new Date(cursor.getTime() - INSTANTLY.emails.cursorOverlapMs),
+				since: new Date(cursor.getTime() - 1_000),
 				cursor: undefined,
 			},
 			{ type: "received", since: null, cursor: undefined },
@@ -811,6 +810,7 @@ describe("Instantly campaign leads", () => {
 		let includeSecond = true;
 		const client = {
 			listCampaigns: async () => [campaign],
+			listLeadSends: async () => [],
 			async *listCampaignLeads() {
 				yield includeSecond ? [firstLead, secondLead] : [firstLead];
 			},
@@ -856,6 +856,83 @@ describe("Instantly campaign leads", () => {
 		).toBeNull();
 	});
 
+	it("files a send the email poll missed when the lead shows a newer last contact", async () => {
+		const mailbox = `reconcile-${suffix}@example.test`;
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const campaign = {
+			id: `campaign-reconcile-${suffix}`,
+			name: "Cold ICP",
+			status: 1,
+			email_list: [mailbox],
+			sequences: [{ steps: [{ delay: 3 }, { delay: 4 }, { delay: 0 }] }],
+		};
+		const lead = {
+			id: `lead-reconcile-${suffix}`,
+			email: `missed@${domain}`,
+			campaign: campaign.id,
+			status: 1,
+			email_reply_count: 0,
+			timestamp_last_contact: "2026-10-09T12:19:46.915Z",
+			status_summary: {
+				lastStep: {
+					from: mailbox,
+					stepID: "0_0_0",
+					timestamp_executed: "2026-10-09T12:19:46.915Z",
+				},
+			},
+		};
+		const asked: string[] = [];
+		const client = {
+			listCampaigns: async () => [campaign],
+			listLeadSends: async (_key: string, leadEmail: string) => {
+				asked.push(leadEmail);
+				return [
+					{
+						id: `email-missed-${suffix}`,
+						timestamp_created: "2026-10-09T12:19:46.000Z",
+						timestamp_email: "2026-10-09T12:19:46.000Z",
+						subject: "preparing your team",
+						to_address_email_list: lead.email,
+						body: { text: "Hi there." },
+						eaccount: mailbox,
+						campaign_id: campaign.id,
+						lead: lead.email,
+					},
+				];
+			},
+			async *listCampaignLeads() {
+				yield [lead];
+			},
+		} as unknown as InstantlyClient;
+		const sync = new InstantlySyncService(db, client, filing);
+
+		expect(await sync.run()).toMatchObject({
+			leads: 1,
+			reconciled: 1,
+			error: null,
+		});
+		expect(asked).toEqual([lead.email]);
+		expect(
+			await db.activity.findMany({
+				where: { contact: { email: lead.email } },
+				select: { type: true, subject: true, occurredAt: true },
+			}),
+		).toEqual([
+			{
+				type: "EMAIL",
+				subject: "preparing your team",
+				occurredAt: new Date("2026-10-09T12:19:46.000Z"),
+			},
+		]);
+
+		expect(await sync.run()).toMatchObject({ reconciled: 0 });
+		expect(asked).toEqual([lead.email]);
+	});
+
 	it("keeps one campaign lead when two Instantly leads now resolve to the same contact", async () => {
 		await db.appSetting.upsert({
 			where: { id: SETTINGS_ID },
@@ -890,6 +967,7 @@ describe("Instantly campaign leads", () => {
 		};
 		const client = {
 			listCampaigns: async () => [campaign],
+			listLeadSends: async () => [],
 			async *listCampaignLeads() {
 				yield [survivingLead];
 			},
@@ -980,6 +1058,7 @@ describe("Instantly campaign leads", () => {
 		];
 		const client = {
 			listCampaigns: async () => [campaign],
+			listLeadSends: async () => [],
 			async *listCampaignLeads() {
 				yield leads;
 			},
