@@ -12,6 +12,8 @@ export const INSTANTLY = {
 	sync: {
 		pageSize: 100,
 		dayMs: 86_400_000,
+		reconcileLeadsPerRun: 5,
+		lastContactSlackMs: MINUTE_MS,
 	},
 	emails: {
 		pageSize: 25,
