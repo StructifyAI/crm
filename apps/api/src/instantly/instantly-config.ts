@@ -19,6 +19,7 @@ export const INSTANTLY = {
 		leaseMs: 2 * MINUTE_MS,
 		minRequestGapMs: 3 * SECOND_MS,
 		replyMatchWindowMs: 15 * MINUTE_MS,
+		cursorOverlapMs: 15 * MINUTE_MS,
 	},
 	filing: {
 		sendEvents: ["email_sent", "email_bounced", "lead_unsubscribed"],

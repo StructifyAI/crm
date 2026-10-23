@@ -17,6 +17,7 @@ import {
 	InstantlyClient,
 } from "../src/instantly/instantly.client";
 import { InstantlyController } from "../src/instantly/instantly.controller";
+import { INSTANTLY } from "../src/instantly/instantly-config";
 import { InstantlyEmailSyncService } from "../src/instantly/instantly-email-sync.service";
 import { InstantlyFilingService } from "../src/instantly/instantly-filing.service";
 import { InstantlyIngestService } from "../src/instantly/instantly-ingest.service";
@@ -425,7 +426,7 @@ describe("Instantly email polling", () => {
 		expect(queries).toEqual([
 			{
 				type: "sent",
-				since: new Date(cursor.getTime() - 1_000),
+				since: new Date(cursor.getTime() - INSTANTLY.emails.cursorOverlapMs),
 				cursor: undefined,
 			},
 			{ type: "received", since: null, cursor: undefined },

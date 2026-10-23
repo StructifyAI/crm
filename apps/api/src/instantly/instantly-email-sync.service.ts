@@ -32,8 +32,6 @@ export type InternalIdentity = {
 	domains: ReadonlySet<string>;
 };
 
-const CURSOR_OVERLAP_MS = 1_000;
-
 const CURSOR_COLUMN = {
 	sent: "instantlyEmailCursor",
 	received: "instantlyReplyCursor",
@@ -127,7 +125,7 @@ export class InstantlyEmailSyncService {
 		},
 	): Promise<boolean> {
 		const since = options.start
-			? new Date(options.start.getTime() - CURSOR_OVERLAP_MS)
+			? new Date(options.start.getTime() - INSTANTLY.emails.cursorOverlapMs)
 			: null;
 		let newest = options.start;
 		let cursor: string | undefined;
