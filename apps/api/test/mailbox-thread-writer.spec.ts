@@ -34,6 +34,8 @@ const stranger = "stranger@unknown-co.com";
 const suppressedAddress = `suppressed-${suffix}@unknown-co.com`;
 const instantlyMailbox = "ronak@getstructify.org";
 const instantlySender = "taichi@getstructify.org";
+const teammateId = `teammate-${suffix}`;
+const teammate = `teammate-${suffix}@example.test`;
 
 const agent = {
 	contactCreated: async () => true,
@@ -116,7 +118,7 @@ async function clean() {
 		where: { emailAccount: instantlyMailbox },
 	});
 	await db.mailboxSync.deleteMany({ where: { userId } });
-	await db.user.deleteMany({ where: { id: userId } });
+	await db.user.deleteMany({ where: { id: { in: [userId, teammateId] } } });
 }
 
 beforeAll(async () => {
@@ -124,6 +126,9 @@ beforeAll(async () => {
 
 	await db.user.create({
 		data: { id: userId, name: "Test Rep", email: mailbox },
+	});
+	await db.user.create({
+		data: { id: teammateId, name: "Test Teammate", email: teammate },
 	});
 	row = await db.mailboxSync.create({
 		data: { userId, source: "gmail", autoCreate: false },
@@ -530,6 +535,76 @@ describe("storing a synced email", () => {
 		});
 		expect(thread.lastMessageAt).toEqual(before.lastMessageAt);
 		expect(thread.activity?.occurredAt).toEqual(before.activity?.occurredAt);
+	});
+
+	it("stores a teammate's email to a buyer as ours and moves the clocks", async () => {
+		const sentAt = new Date("2026-01-23T09:00:00Z");
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(`<teammate-out-${suffix}@mail.test>`, sentAt, rootId, {
+				email: teammate,
+				name: "Test Teammate",
+			}),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: {
+				lastMessageAt: true,
+				messages: {
+					where: { rfcMessageId: `<teammate-out-${suffix}@mail.test>` },
+					select: {
+						direction: true,
+						correspondence: true,
+						classification: true,
+					},
+				},
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(thread.messages[0]).toEqual({
+			direction: "OUTBOUND",
+			correspondence: true,
+			classification: "OURS",
+		});
+		expect(thread.lastMessageAt).toEqual(sentAt);
+		expect(thread.activity?.occurredAt).toEqual(sentAt);
+	});
+
+	it("keeps a teammate's internal-only email out of the clocks", async () => {
+		const before = new Date("2026-01-23T09:00:00Z");
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(
+				`<teammate-internal-${suffix}@mail.test>`,
+				new Date("2026-01-24T09:00:00Z"),
+				rootId,
+				{ email: teammate, name: "Test Teammate" },
+				[{ email: mailbox, name: "Test Rep", kind: "to" }],
+			),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: rootId },
+			select: {
+				lastMessageAt: true,
+				messages: {
+					where: { rfcMessageId: `<teammate-internal-${suffix}@mail.test>` },
+					select: { direction: true, classification: true },
+				},
+			},
+		});
+		expect(thread.messages[0]).toEqual({
+			direction: "INBOUND",
+			classification: "INTERNAL",
+		});
+		expect(thread.lastMessageAt).toEqual(before);
 	});
 
 	it("treats an inbound reply to an outbound participant as correspondence", async () => {
