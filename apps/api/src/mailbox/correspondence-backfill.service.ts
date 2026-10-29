@@ -4,6 +4,7 @@ import {
 	EmailDirection,
 	type Prisma,
 } from "@crm/db";
+import { parseStoredRecipients } from "@crm/validation/email-recipients";
 import { Injectable, Logger } from "@nestjs/common";
 import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
@@ -11,7 +12,11 @@ import {
 	type StampTargets,
 } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
-import { addressedIn, correspondenceSpan } from "./correspondence";
+import {
+	addressedIn,
+	correspondenceSpan,
+	sentByTeammate,
+} from "./correspondence";
 import { deadlineIn, overdue } from "./deadline";
 import { classifyEmail } from "./email-classification";
 import { EmailClassificationService } from "./email-classification.service";
@@ -121,6 +126,18 @@ export class CorrespondenceBackfillService {
 				},
 				context,
 			);
+			const directionFlips = thread.messages.filter(
+				(message) =>
+					message.direction === EmailDirection.INBOUND &&
+					sentByTeammate(
+						message.fromEmail,
+						parseStoredRecipients(message.recipients),
+						context,
+					),
+			);
+			for (const message of directionFlips) {
+				message.direction = EmailDirection.OUTBOUND;
+			}
 			const correspondenceFlips = await Promise.all(
 				thread.messages.map(async (message) => ({
 					id: message.id,
@@ -146,10 +163,18 @@ export class CorrespondenceBackfillService {
 					flip.correspondence !== thread.messages[index]?.correspondence,
 			);
 			if (
+				directionFlips.length === 0 &&
 				classificationFlips.length === 0 &&
 				updatedCorrespondence.length === 0
 			) {
 				continue;
+			}
+
+			if (directionFlips.length > 0) {
+				await this.db.emailMessage.updateMany({
+					where: { id: { in: directionFlips.map((message) => message.id) } },
+					data: { direction: EmailDirection.OUTBOUND },
+				});
 			}
 
 			for (const classification of Object.values(EmailClassification)) {

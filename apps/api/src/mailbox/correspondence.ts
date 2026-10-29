@@ -1,5 +1,6 @@
 import { EmailClassification, type Prisma } from "@crm/db";
 import { parseStoredRecipients } from "@crm/validation/email-recipients";
+import { workDomain } from "./participants";
 
 export type CorrespondenceSpan = {
 	messageCount: number;
@@ -17,6 +18,26 @@ export function addressedIn(
 		}
 	}
 	return addressed;
+}
+
+export function sentByTeammate(
+	fromEmail: string,
+	recipients: readonly { email: string }[],
+	context: {
+		teammates: ReadonlySet<string>;
+		ourAddresses: ReadonlySet<string>;
+		ourDomains: ReadonlySet<string>;
+	},
+): boolean {
+	if (!context.teammates.has(fromEmail.trim().toLowerCase())) return false;
+	return recipients.some((recipient) => {
+		const email = recipient.email.trim().toLowerCase();
+		const domain = workDomain(email);
+		return (
+			!context.ourAddresses.has(email) &&
+			!(domain && context.ourDomains.has(domain))
+		);
+	});
 }
 
 export async function correspondenceSpan(

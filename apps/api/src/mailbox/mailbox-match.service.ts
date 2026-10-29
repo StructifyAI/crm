@@ -55,6 +55,7 @@ export class MailboxMatchService {
 	async internalIdentity(): Promise<{
 		addresses: Set<string>;
 		domains: Set<string>;
+		users: Set<string>;
 	}> {
 		const [users, mailboxes] = await Promise.all([
 			this.db.user.findMany({ select: { email: true } }),
@@ -71,7 +72,10 @@ export class MailboxMatchService {
 			const domain = workDomain(address);
 			if (domain) domains.add(domain);
 		}
-		return { addresses, domains };
+		const userAddresses = new Set(
+			users.map((user) => user.email.trim().toLowerCase()),
+		);
+		return { addresses, domains, users: userAddresses };
 	}
 
 	async suppressedDomains(): Promise<Set<string>> {

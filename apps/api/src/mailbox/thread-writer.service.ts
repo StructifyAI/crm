@@ -16,7 +16,11 @@ import {
 	activityTime,
 } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
-import { addressedIn, correspondenceSpan } from "./correspondence";
+import {
+	addressedIn,
+	correspondenceSpan,
+	sentByTeammate,
+} from "./correspondence";
 import type { Deadline } from "./deadline";
 import { DealLinkService, type DealLinkTarget } from "./deal-link.service";
 import { EmailClassificationService } from "./email-classification.service";
@@ -46,7 +50,10 @@ export type IncomingMessage = {
 	outlookWebLink?: string | null;
 };
 
-export type WriteContext = MatchContext & { deadline: Deadline };
+export type WriteContext = MatchContext & {
+	deadline: Deadline;
+	teammates: ReadonlySet<string>;
+};
 
 @Injectable()
 export class ThreadWriterService {
@@ -74,6 +81,7 @@ export class ThreadWriterService {
 			ourDomains: internal.domains,
 			suppressedDomains,
 			suppressedEmails,
+			teammates: internal.users,
 			deadline,
 		};
 	}
@@ -103,7 +111,9 @@ export class ThreadWriterService {
 
 		const repair = existing !== null;
 		const participants = [parsed.from, ...parsed.recipients];
-		const outbound = parsed.from.email === options.mailbox;
+		const outbound =
+			parsed.from.email === options.mailbox ||
+			sentByTeammate(parsed.from.email, parsed.recipients, context);
 
 		const thread = existing
 			? {

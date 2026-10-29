@@ -29,6 +29,9 @@ const reminder = `reminder-${suffix}@superhuman.com`;
 const rootId = `<root-${suffix}@mail.test>`;
 const machineRootId = `<root-${suffix}-machine@mail.test>`;
 const addressedRoot = `<addressed-${suffix}@mail.test>`;
+const teammateRoot = `<teammate-${suffix}@mail.test>`;
+const teammateId = `teammate-${suffix}`;
+const teammate = `teammate-${suffix}@example.test`;
 
 const humanAt = new Date("2026-03-01T10:00:00Z");
 const reminderAt = new Date("2026-03-09T10:00:00Z");
@@ -71,13 +74,17 @@ let dealId: string;
 
 async function clean() {
 	await db.emailThread.deleteMany({
-		where: { rootMessageId: { in: [rootId, machineRootId, addressedRoot] } },
+		where: {
+			rootMessageId: {
+				in: [rootId, machineRootId, addressedRoot, teammateRoot],
+			},
+		},
 	});
 	await db.deal.deleteMany({ where: { company: { domain } } });
 	await db.contact.deleteMany({ where: { email: buyer } });
 	await db.contact.deleteMany({ where: { email: reminder } });
 	await db.company.deleteMany({ where: { domain } });
-	await db.user.deleteMany({ where: { id: userId } });
+	await db.user.deleteMany({ where: { id: { in: [userId, teammateId] } } });
 }
 
 async function runToEnd(all = false) {
@@ -98,6 +105,9 @@ beforeAll(async () => {
 
 	await db.user.create({
 		data: { id: userId, name: "Backfill Rep", email: mailbox },
+	});
+	await db.user.create({
+		data: { id: teammateId, name: "Backfill Teammate", email: teammate },
 	});
 	const company = await db.company.create({
 		data: { name: "Buyer Co", domain },
@@ -393,5 +403,94 @@ describe("correspondence backfill", () => {
 		expect(await runToEnd()).toBe(0);
 
 		await db.contact.deleteMany({ where: { email: reminder } });
+	});
+	it("files a teammate's email that another mailbox stored as inbound as ours", async () => {
+		const buyerAt = new Date("2026-03-04T10:00:00Z");
+		const teammateAt = new Date("2026-03-04T11:00:00Z");
+		const company = await db.company.findUniqueOrThrow({
+			where: { domain },
+			select: { id: true },
+		});
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: buyer },
+			select: { id: true },
+		});
+		await db.emailThread.create({
+			data: {
+				rootMessageId: teammateRoot,
+				subject: "Pricing",
+				companyId: company.id,
+				contactId: contact.id,
+				firstMessageAt: buyerAt,
+				lastMessageAt: buyerAt,
+				messageCount: 2,
+				messages: {
+					create: [
+						{
+							rfcMessageId: `<teammate-buyer-${suffix}@mail.test>`,
+							syncedByUserId: userId,
+							direction: EmailDirection.INBOUND,
+							classification: EmailClassification.THEIRS,
+							correspondence: true,
+							fromEmail: buyer,
+							fromName: "A Buyer",
+							recipients: [
+								{ email: mailbox, name: null, kind: "to" },
+								{ email: teammate, name: null, kind: "cc" },
+							],
+							subject: "Pricing",
+							sentAt: buyerAt,
+						},
+						{
+							rfcMessageId: `<teammate-reply-${suffix}@mail.test>`,
+							syncedByUserId: userId,
+							direction: EmailDirection.INBOUND,
+							classification: EmailClassification.INTERNAL,
+							correspondence: true,
+							fromEmail: teammate,
+							fromName: "Backfill Teammate",
+							recipients: [
+								{ email: buyer, name: null, kind: "to" },
+								{ email: mailbox, name: null, kind: "cc" },
+							],
+							subject: "Pricing",
+							sentAt: teammateAt,
+						},
+					],
+				},
+				activity: {
+					create: {
+						type: ActivityType.EMAIL,
+						subject: "Pricing",
+						occurredAt: buyerAt,
+						companyId: company.id,
+						contactId: contact.id,
+						dealId,
+						createdById: userId,
+						meta: { synced: true, source: "gmail" },
+					},
+				},
+			},
+		});
+
+		await runToEnd(true);
+
+		const thread = await db.emailThread.findUniqueOrThrow({
+			where: { rootMessageId: teammateRoot },
+			select: {
+				lastMessageAt: true,
+				messages: {
+					orderBy: { sentAt: "asc" },
+					select: { direction: true, classification: true },
+				},
+				activity: { select: { occurredAt: true } },
+			},
+		});
+		expect(thread.messages).toEqual([
+			{ direction: "INBOUND", classification: "THEIRS" },
+			{ direction: "OUTBOUND", classification: "OURS" },
+		]);
+		expect(thread.lastMessageAt).toEqual(teammateAt);
+		expect(thread.activity?.occurredAt).toEqual(teammateAt);
 	});
 });
