@@ -60,7 +60,7 @@ export const EXTROVERT = {
 		capacityBuffer: 100,
 		addBatchSize: 500,
 		activeDays: 30,
-		recheckInactiveDays: 30,
+		recheckInactiveDays: 10,
 		skipDays: 30,
 		connectionRequestDays: 21,
 		cycleIntervalMs: 4 * HOUR_MS,
