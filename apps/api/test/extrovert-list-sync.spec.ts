@@ -1725,3 +1725,87 @@ describe("ExtrovertListSyncService two-target pool", () => {
 		]);
 	});
 });
+
+describe("ExtrovertListSyncService inactive pruning", () => {
+	it("removes Inactive members not sent a connection request and keeps the rest", async () => {
+		const urls = [
+			`https://www.linkedin.com/in/${suffix}-inactive-unsent`,
+			`https://www.linkedin.com/in/${suffix}-inactive-queued`,
+			`https://www.linkedin.com/in/${suffix}-inactive-pending`,
+			`https://www.linkedin.com/in/${suffix}-inactive-sent`,
+			`https://www.linkedin.com/in/${suffix}-active-unsent`,
+			`https://www.linkedin.com/in/${suffix}-not-in-crm`,
+		];
+		const contacts = await Promise.all(
+			urls
+				.slice(0, 5)
+				.map((url, index) =>
+					createContact(`extrovert-list-${suffix}-inactive-${index}`, url),
+				),
+		);
+		for (const [index, contact] of contacts.entries()) {
+			await setField(
+				contact.id,
+				"linkedin_active",
+				index === 4 ? "Active" : "Inactive",
+			);
+		}
+
+		const client = new StubExtrovertClient();
+		client.campaignMembers = [
+			membership("inactive-unsent", urls[0] ?? "", {
+				connectionStatus: "not_connected",
+				wasConnectionRequestSentViaExtrovert: false,
+			}),
+			membership("inactive-pending", urls[2] ?? "", {
+				connectionStatus: "pending",
+				wasConnectionRequestSentViaExtrovert: true,
+			}),
+			membership("inactive-sent", urls[3] ?? "", {
+				connectionStatus: "not_connected",
+				wasConnectionRequestSentViaExtrovert: true,
+			}),
+			membership("active-unsent", urls[4] ?? "", {
+				connectionStatus: "not_connected",
+				wasConnectionRequestSentViaExtrovert: false,
+			}),
+			membership("not-in-crm", urls[5] ?? "", {
+				listId: "another-gm-list",
+				connectionStatus: "not_connected",
+				wasConnectionRequestSentViaExtrovert: false,
+			}),
+		];
+		client.ronakCampaignMembers = [
+			membership("inactive-queued", urls[1] ?? "", {
+				listId: ronakTarget.listId,
+				connectionStatus: "queued",
+				wasConnectionRequestSentViaExtrovert: false,
+			}),
+		];
+		await db.extrovertListSync.update({
+			where: { listId },
+			data: { enabled: true, previousUrls: urls.slice(0, 5) },
+		});
+
+		await makeService(client, undefined, []).run({ now, apiKey });
+
+		expect(client.removalCalls).toEqual([
+			{ prospectProfileUrl: urls[0] ?? "", campaignId: alexTarget.campaignId },
+			{ prospectProfileUrl: urls[1] ?? "", campaignId: ronakTarget.campaignId },
+		]);
+		expect(client.campaignMembers.map(({ id }) => id)).toEqual([
+			"inactive-pending",
+			"inactive-sent",
+			"active-unsent",
+			"not-in-crm",
+		]);
+		const state = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+		expect(state.lastSummary).toContain(
+			"removed 0 connected and 2 Inactive not sent a connection request",
+		);
+		expect(state.skippedUrls).toEqual([]);
+		expect(state.previousUrls).toEqual([]);
+	});
+});

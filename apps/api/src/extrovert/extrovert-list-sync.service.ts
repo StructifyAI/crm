@@ -78,6 +78,12 @@ export type HeadlineJudge = (
 	items: HeadlineJudgeItem[],
 ) => Promise<Map<string, HeadlineVerdict>>;
 
+type CampaignMemberRef = {
+	prospectProfileUrl: string;
+	url: string;
+	campaignId: string;
+};
+
 export type QueueCandidate = {
 	id: string;
 	firstName: string;
@@ -158,6 +164,7 @@ type DryRunPlan = {
 	writes: PlannedContactWrite[];
 	removals: PlannedContactWrite[];
 	connectedRemovals: number;
+	inactiveRemovals: number;
 	counts: ExtrovertListSyncCycle["counts"];
 	summary: string;
 };
@@ -564,6 +571,7 @@ export class ExtrovertListSyncService {
 					judgeUnavailable: false,
 					removalsApplied: false,
 					connectedRemovedUrls: [],
+					inactiveRemovedUrls: [],
 				};
 				await this.db.extrovertListSync.update({
 					where: { listId: EXTROVERT.icpList.stateListId },
@@ -676,6 +684,7 @@ export class ExtrovertListSyncService {
 			judgeUnavailable: false,
 			removalsApplied: false,
 			connectedRemovedUrls: [],
+			inactiveRemovedUrls: [],
 		};
 		const writes: PlannedContactWrite[] = [];
 		for (
@@ -717,9 +726,10 @@ export class ExtrovertListSyncService {
 				.map(({ url }) => url)
 				.filter((url): url is string => !!url),
 		);
-		const connectedMembers = allCrashed
-			? []
-			: await this.connectedCampaignMembers(key);
+		const { connected: connectedMembers, inactive: inactiveMembers } =
+			allCrashed
+				? { connected: [], inactive: [] }
+				: await this.campaignMembersToRemove(key);
 		const connectedUrls = new Set(
 			connectedMembers
 				.map(({ url }) => url)
@@ -756,7 +766,7 @@ export class ExtrovertListSyncService {
 					`Extrovert ICP list dry run ${now.toISOString()}:`,
 					`${members.length} members, queue ${queuePlan.queue.length},`,
 					`would add ${wouldAdd}, capacity ${capacity},`,
-					`would remove ${connectedMembers.length} connected,`,
+					`would remove ${connectedMembers.length} connected and ${inactiveMembers.length} Inactive,`,
 					`${writes.length} contact writes, ${removals.length} removals`,
 					cycle.judgeUnavailable ? "(job-change judge unavailable)." : ".",
 				].join(" ");
@@ -780,16 +790,16 @@ export class ExtrovertListSyncService {
 			writes,
 			removals,
 			connectedRemovals: connectedMembers.length,
+			inactiveRemovals: inactiveMembers.length,
 			counts: cycle.counts,
 			summary,
 		};
 	}
 
-	private async connectedCampaignMembers(
-		key: string,
-	): Promise<
-		Array<{ prospectProfileUrl: string; url: string; campaignId: string }>
-	> {
+	private async campaignMembersToRemove(key: string): Promise<{
+		connected: CampaignMemberRef[];
+		inactive: CampaignMemberRef[];
+	}> {
 		const members = (
 			await Promise.all(
 				EXTROVERT.icpList.targets.map(async (target) =>
@@ -813,29 +823,40 @@ export class ExtrovertListSyncService {
 				.map(({ linkedinUrl }) => canonicalLinkedinUrl(linkedinUrl))
 				.filter((url): url is string => Boolean(url)),
 		);
+		const inactiveUrls = new Set(
+			contacts
+				.filter(
+					({ id, current }) =>
+						!connectedContactIds.has(id) &&
+						current.fields.linkedin_active === "Inactive",
+				)
+				.map(({ linkedinUrl }) => canonicalLinkedinUrl(linkedinUrl))
+				.filter((url): url is string => Boolean(url)),
+		);
 		const seen = new Set<string>();
-		const connectedMembers: Array<{
-			prospectProfileUrl: string;
-			url: string;
-			campaignId: string;
-		}> = [];
+		const connected: CampaignMemberRef[] = [];
+		const inactive: CampaignMemberRef[] = [];
 		for (const member of members) {
 			const url = canonicalLinkedinUrl(member.prospectProfileUrl);
-			if (
-				!url ||
-				seen.has(url) ||
-				(member.connectionStatus !== "connected" && !connectedUrls.has(url))
-			) {
-				continue;
-			}
-			seen.add(url);
-			connectedMembers.push({
+			if (!url || seen.has(url)) continue;
+			const ref = {
 				prospectProfileUrl: member.prospectProfileUrl,
 				url,
 				campaignId: member.campaignId,
-			});
+			};
+			if (member.connectionStatus === "connected" || connectedUrls.has(url)) {
+				seen.add(url);
+				connected.push(ref);
+			} else if (
+				inactiveUrls.has(url) &&
+				member.connectionStatus !== "pending" &&
+				!member.wasConnectionRequestSentViaExtrovert
+			) {
+				seen.add(url);
+				inactive.push(ref);
+			}
 		}
-		return connectedMembers;
+		return { connected, inactive };
 	}
 
 	private async listMembership(key: string) {
@@ -1218,9 +1239,23 @@ export class ExtrovertListSyncService {
 					.map(canonicalLinkedinUrl)
 					.filter((url): url is string => Boolean(url)),
 			);
-			const connectedMembers = await this.connectedCampaignMembers(key);
-			for (const member of connectedMembers) {
-				if (alreadyRemoved.has(member.url)) continue;
+			const inactiveAlreadyRemoved = new Set(cycle.inactiveRemovedUrls);
+			const toRemove = await this.campaignMembersToRemove(key);
+			for (const [member, removedUrls, done] of [
+				...toRemove.connected.map(
+					(member) =>
+						[member, cycle.connectedRemovedUrls, alreadyRemoved] as const,
+				),
+				...toRemove.inactive.map(
+					(member) =>
+						[
+							member,
+							cycle.inactiveRemovedUrls,
+							inactiveAlreadyRemoved,
+						] as const,
+				),
+			]) {
+				if (done.has(member.url)) continue;
 				if (Date.now() - startedAt >= budgetMs) {
 					await this.db.extrovertListSync.update({
 						where: { listId: EXTROVERT.icpList.stateListId },
@@ -1232,8 +1267,8 @@ export class ExtrovertListSyncService {
 					prospectProfileUrl: member.prospectProfileUrl,
 					campaignId: member.campaignId,
 				});
-				cycle.connectedRemovedUrls.push(member.url);
-				alreadyRemoved.add(member.url);
+				removedUrls.push(member.url);
+				done.add(member.url);
 			}
 			const connectedRemovedUrls = new Set(alreadyRemoved);
 			const removedUrls = previousUrls.filter((url) => {
@@ -1368,9 +1403,11 @@ export class ExtrovertListSyncService {
 		const addedUrls = submittedUrls
 			.map(canonicalLinkedinUrl)
 			.filter((url): url is string => Boolean(url));
+		const inactiveRemovedUrls = new Set(cycle.inactiveRemovedUrls);
 		const previous = new Set(
 			[...memberUrls, ...addedUrls].filter(
-				(url) => !connectedRemovedUrls.has(url),
+				(url) =>
+					!connectedRemovedUrls.has(url) && !inactiveRemovedUrls.has(url),
 			),
 		);
 		const queueRemaining = Math.max(
@@ -1378,7 +1415,7 @@ export class ExtrovertListSyncService {
 			queuePlan.queue.length - added - existed,
 		);
 		const capacityLeft = Math.max(0, capacity - added);
-		const summary = `Extrovert ICP list cycle ${cycle.startedAt}: added ${added} (${existed} already in other campaigns, ${outOfLimit} out of limit), removed ${cycle.connectedRemovedUrls.length} connected, newly Active ${cycle.counts.newlyActive}, newly Inactive ${cycle.counts.newlyInactive} (${cycle.counts.pruned} pruned by Extrovert), job changes flagged ${cycle.counts.jobChanges}, checked ${cycle.counts.checked} of ${cycle.prospects.length} (${cycle.counts.notChecked} not checked yet, ${cycle.counts.crashed} crashed), queue remaining ${queueRemaining}, capacity left ${capacityLeft}.${cycle.judgeUnavailable ? " job-change judge unavailable." : ""}`;
+		const summary = `Extrovert ICP list cycle ${cycle.startedAt}: added ${added} (${existed} already in other campaigns, ${outOfLimit} out of limit), removed ${cycle.connectedRemovedUrls.length} connected and ${cycle.inactiveRemovedUrls.length} Inactive not sent a connection request, newly Active ${cycle.counts.newlyActive}, newly Inactive ${cycle.counts.newlyInactive} (${cycle.counts.pruned} pruned by Extrovert), job changes flagged ${cycle.counts.jobChanges}, checked ${cycle.counts.checked} of ${cycle.prospects.length} (${cycle.counts.notChecked} not checked yet, ${cycle.counts.crashed} crashed), queue remaining ${queueRemaining}, capacity left ${capacityLeft}.${cycle.judgeUnavailable ? " job-change judge unavailable." : ""}`;
 
 		await this.db.extrovertListSync.update({
 			where: { listId: EXTROVERT.icpList.stateListId },

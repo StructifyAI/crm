@@ -16,6 +16,7 @@ export const extrovertListSyncCycle = z
 		judgeUnavailable: z.boolean().default(false),
 		removalsApplied: z.boolean().default(false),
 		connectedRemovedUrls: z.array(z.string()).default([]),
+		inactiveRemovedUrls: z.array(z.string()).default([]),
 		counts: z.object({
 			checked: z.number().int().nonnegative(),
 			crashed: z.number().int().nonnegative(),
