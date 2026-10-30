@@ -227,6 +227,8 @@ export class OutlookSyncService {
 			);
 		}
 
+		if (context) await this.threads.drain(context);
+
 		if (page.outcome !== "ok") {
 			return this.handleFailure(row, page);
 		}

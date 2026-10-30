@@ -406,46 +406,50 @@ export class GmailSyncService {
 
 		let written = 0;
 
-		for (const [index, id] of batch.entries()) {
-			if (overdue(deadline)) {
-				remaining += batch.length - index;
-				break;
-			}
-
-			const message = await session.call((accessToken) =>
-				this.gmail.getMessage(accessToken, id),
-			);
-			if (message.outcome === "unauthorized") {
-				return { written, remaining, finished, unauthorized: message.reason };
-			}
-			if (message.outcome === "rate-limited") {
-				remaining += batch.length - index;
-				break;
-			}
-			if (message.outcome === "cursor-invalid") {
-				finished.add(id);
-				continue;
-			}
-			if (message.outcome === "failed") {
-				if (message.retryable) {
+		try {
+			for (const [index, id] of batch.entries()) {
+				if (overdue(deadline)) {
 					remaining += batch.length - index;
 					break;
 				}
+
+				const message = await session.call((accessToken) =>
+					this.gmail.getMessage(accessToken, id),
+				);
+				if (message.outcome === "unauthorized") {
+					return { written, remaining, finished, unauthorized: message.reason };
+				}
+				if (message.outcome === "rate-limited") {
+					remaining += batch.length - index;
+					break;
+				}
+				if (message.outcome === "cursor-invalid") {
+					finished.add(id);
+					continue;
+				}
+				if (message.outcome === "failed") {
+					if (message.retryable) {
+						remaining += batch.length - index;
+						break;
+					}
+					finished.add(id);
+					continue;
+				}
+
 				finished.add(id);
-				continue;
+				const parsed = this.parse(message.data);
+				if (!parsed) continue;
+
+				const stored = await this.threads.store(
+					row,
+					{ mailbox, origin: "gmail" },
+					parsed,
+					context,
+				);
+				if (stored) written += 1;
 			}
-
-			finished.add(id);
-			const parsed = this.parse(message.data);
-			if (!parsed) continue;
-
-			const stored = await this.threads.store(
-				row,
-				{ mailbox, origin: "gmail" },
-				parsed,
-				context,
-			);
-			if (stored) written += 1;
+		} finally {
+			await this.threads.drain(context);
 		}
 
 		return { written, remaining, finished };

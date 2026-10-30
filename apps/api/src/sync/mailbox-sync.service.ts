@@ -1,3 +1,4 @@
+import type { MailboxSyncModel as MailboxSync } from "@crm/db";
 import { syncError } from "@crm/telemetry";
 import { Injectable, Logger } from "@nestjs/common";
 import { GoogleConnectionService } from "../google/google-connection.service";
@@ -50,53 +51,9 @@ export class MailboxSyncService {
 
 		const due = await this.state.due(new Date());
 
-		for (const [index, row] of due.entries()) {
-			if (overdue(deadline)) {
-				this.logger.log({
-					message: "Sync tick budget reached",
-					remaining: due.length - index,
-				});
-				break;
-			}
-
-			if (!(await this.state.claim(row, new Date()))) continue;
-
-			summary.attempted += 1;
-
-			try {
-				const outcome = await this.runOne(row.userId, row.source, deadline);
-
-				if (outcome === null || outcome.status === "skipped") {
-					summary.skipped += 1;
-					await this.state.release(row.id);
-				} else if (outcome.status === "rate-limited") {
-					summary.rateLimited += 1;
-				} else if (
-					outcome.status === "failed" ||
-					outcome.status === "reconnect"
-				) {
-					summary.failed += 1;
-				} else {
-					summary.synced += 1;
-				}
-			} catch (error) {
-				summary.failed += 1;
-				await this.state.markFailed(
-					row.id,
-					error instanceof Error ? error.message : String(error),
-				);
-				this.logger.error(
-					{
-						message: "Sync threw",
-						userId: row.userId,
-						source: row.source,
-					},
-					error instanceof Error ? error.stack : String(error),
-				);
-
-				syncError({ error, source: row.source });
-			}
-		}
+		await Promise.all(
+			due.map((row) => this.runClaimed(row, deadline, summary)),
+		);
 
 		summary.durationMs = Date.now() - startedAt;
 
@@ -111,6 +68,51 @@ export class MailboxSyncService {
 		});
 
 		return summary;
+	}
+
+	private async runClaimed(
+		row: MailboxSync,
+		deadline: Deadline,
+		summary: TickSummary,
+	): Promise<void> {
+		if (overdue(deadline)) return;
+		if (!(await this.state.claim(row, new Date()))) return;
+
+		summary.attempted += 1;
+
+		try {
+			const outcome = await this.runOne(row.userId, row.source, deadline);
+
+			if (outcome === null || outcome.status === "skipped") {
+				summary.skipped += 1;
+				await this.state.release(row.id);
+			} else if (outcome.status === "rate-limited") {
+				summary.rateLimited += 1;
+			} else if (
+				outcome.status === "failed" ||
+				outcome.status === "reconnect"
+			) {
+				summary.failed += 1;
+			} else {
+				summary.synced += 1;
+			}
+		} catch (error) {
+			summary.failed += 1;
+			await this.state.markFailed(
+				row.id,
+				error instanceof Error ? error.message : String(error),
+			);
+			this.logger.error(
+				{
+					message: "Sync threw",
+					userId: row.userId,
+					source: row.source,
+				},
+				error instanceof Error ? error.stack : String(error),
+			);
+
+			syncError({ error, source: row.source });
+		}
 	}
 
 	private async runOne(userId: string, source: string, deadline: Deadline) {

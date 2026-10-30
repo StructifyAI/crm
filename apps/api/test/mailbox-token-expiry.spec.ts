@@ -273,6 +273,7 @@ function gmail(
 	} as unknown as GmailClient;
 	const threads = {
 		context: async () => ({}),
+		drain: async () => {},
 		store: async (
 			_row: MailboxSync,
 			_options: { mailbox: string; origin: SyncSource },
@@ -368,6 +369,7 @@ function outlook(log: StateLog, refresh: TokenResult) {
 	} as unknown as GraphClient;
 	const threads = {
 		context: async () => ({}),
+		drain: async () => {},
 		store: async () => true,
 	} as unknown as ThreadWriterService;
 	const kit = tokenStub(refresh);

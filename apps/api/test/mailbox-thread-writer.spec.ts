@@ -836,3 +836,48 @@ describe("storing a synced email", () => {
 		expect(thread.activity?.occurredAt).toEqual(sentAt);
 	});
 });
+
+describe("linking a stored email to a deal", () => {
+	it("stores the next email without waiting for the agent, and drain waits for it", async () => {
+		let answer: () => void = () => {};
+		const answered = new Promise<void>((resolve) => {
+			answer = resolve;
+		});
+		let linked = false;
+		const slowLink = {
+			attach: async () => {
+				await answered;
+				linked = true;
+				return null;
+			},
+		} as unknown as DealLinkService;
+		const writer = new ThreadWriterService(
+			db,
+			match,
+			stamp,
+			triage,
+			slowLink,
+			new EmailClassificationService(db),
+			contactEvents,
+		);
+		const root = `<slow-link-${suffix}@mail.test>`;
+		const context = await writer.context(deadlineIn(60_000));
+
+		const stored = await writer.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(root, new Date("2026-01-01T10:10:00Z"), root),
+			context,
+		);
+
+		expect(stored).toBe(true);
+		expect(linked).toBe(false);
+
+		const drained = writer.drain(context);
+		answer();
+		await drained;
+
+		expect(linked).toBe(true);
+		await db.emailThread.deleteMany({ where: { rootMessageId: root } });
+	});
+});
