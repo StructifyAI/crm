@@ -209,6 +209,8 @@ const extrovertListMembership = z
 		prospectProfileUrl: z.string(),
 		connectionStatus: z.string().nullable().optional(),
 		wasConnectionRequestSentViaExtrovert: z.boolean().optional(),
+		connectionRequestSentDate: z.string().nullable().optional(),
+		createdAt: z.string().optional(),
 	})
 	.passthrough();
 

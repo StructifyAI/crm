@@ -24,6 +24,7 @@ import {
 	headlineNamesCompany,
 	isRetiredOrStudent,
 	isSalesOrMarketingTitle,
+	liveSkippedUrls,
 	planProspectWrites,
 	type QueueCandidate,
 } from "../src/extrovert/extrovert-list-sync.service";
@@ -35,6 +36,11 @@ const companyId = `extrovert-list-company-${suffix}`;
 const listId = EXTROVERT.icpList.stateListId;
 const [alexTarget, ronakTarget] = EXTROVERT.icpList.targets;
 const now = new Date("2026-06-10T12:00:00.000Z");
+const DAY_MS = 24 * 60 * 60 * 1_000;
+
+function daysAgo(days: number) {
+	return new Date(now.getTime() - days * DAY_MS);
+}
 
 type AddInput = Parameters<ExtrovertClient["addUsersToList"]>[1];
 type FieldSpec = {
@@ -276,6 +282,7 @@ function queueCandidate(
 		active: null,
 		jobChange: null,
 		headline: null,
+		activityChecked: null,
 		connected: false,
 		...overrides,
 	};
@@ -562,7 +569,7 @@ describe("ICP list pure helpers", () => {
 					roleOptionId: EXTROVERT.icpList.roleOptionIds[1],
 				}),
 			],
-			{ inListUrls: [], skippedUrls: [] },
+			{ inListUrls: [], skippedUrls: [], now },
 		);
 
 		expect(queue.queue.map(({ id }) => id)).toEqual([
@@ -586,6 +593,7 @@ describe("ICP list pure helpers", () => {
 			{
 				inListUrls: ["https://www.linkedin.com/in/a-member"],
 				skippedUrls: [],
+				now,
 			},
 		);
 		expect(queue.queue.map(({ id }) => id)).toEqual(["b-eb", "a-eb"]);
@@ -594,7 +602,10 @@ describe("ICP list pure helpers", () => {
 		const exclusions = buildQueue(
 			[
 				queueCandidate("bad-url", { url: "invalid" }),
-				queueCandidate("inactive", { active: "Inactive" }),
+				queueCandidate("inactive", {
+					active: "Inactive",
+					activityChecked: now,
+				}),
 				queueCandidate("job-change", { jobChange: "Possible job change" }),
 				queueCandidate("sales", { title: "VP Sales" }),
 				queueCandidate("retired", { headline: "Retired" }),
@@ -616,6 +627,7 @@ describe("ICP list pure helpers", () => {
 			{
 				inListUrls: ["https://www.linkedin.com/in/in-list"],
 				skippedUrls: ["https://www.linkedin.com/in/other-campaign"],
+				now,
 			},
 		);
 		expect(exclusions.exclusions).toEqual({
@@ -632,13 +644,62 @@ describe("ICP list pure helpers", () => {
 		expect(exclusions.queue[0]?.id).toBe("duplicate-b");
 	});
 
+	it("rechecks Inactive contacts after the recheck window and ranks them last", () => {
+		const plan = buildQueue(
+			[
+				queueCandidate("recent-inactive", {
+					companyId: "a",
+					active: "Inactive",
+					activityChecked: daysAgo(1),
+				}),
+				queueCandidate("stale-inactive", {
+					companyId: "b",
+					active: "Inactive",
+					activityChecked: daysAgo(EXTROVERT.icpList.recheckInactiveDays + 1),
+				}),
+				queueCandidate("unchecked", { companyId: "c" }),
+				queueCandidate("active", { companyId: "d", active: "Active" }),
+			],
+			{ inListUrls: [], skippedUrls: [], now },
+		);
+
+		expect(plan.queue.map(({ id }) => id)).toEqual([
+			"active",
+			"unchecked",
+			"stale-inactive",
+		]);
+		expect(plan.exclusions.inactive).toBe(1);
+	});
+
+	it("expires timed skips and keeps permanent ones", () => {
+		expect(
+			liveSkippedUrls(
+				[
+					{ url: "https://www.linkedin.com/in/connected", skippedAt: null },
+					{
+						url: "https://www.linkedin.com/in/recent",
+						skippedAt: daysAgo(1).toISOString(),
+					},
+					{
+						url: "https://www.linkedin.com/in/old",
+						skippedAt: daysAgo(EXTROVERT.icpList.skipDays + 1).toISOString(),
+					},
+				],
+				now,
+			),
+		).toEqual([
+			"https://www.linkedin.com/in/connected",
+			"https://www.linkedin.com/in/recent",
+		]);
+	});
+
 	it("excludes connected contacts from the queue", () => {
 		const plan = buildQueue(
 			[
 				queueCandidate("connected", { connected: true }),
 				queueCandidate("eligible"),
 			],
-			{ inListUrls: [], skippedUrls: [] },
+			{ inListUrls: [], skippedUrls: [], now },
 		);
 
 		expect(plan.queue.map(({ id }) => id)).toEqual(["eligible"]);
@@ -1112,7 +1173,10 @@ describe("ExtrovertListSyncService", () => {
 			where: { listId },
 		});
 		expect(state.skippedUrls).toEqual([
-			canonicalLinkedinUrl(candidate.linkedinUrl),
+			{
+				url: canonicalLinkedinUrl(candidate.linkedinUrl),
+				skippedAt: now.toISOString(),
+			},
 		]);
 		expect(client.addCalls).toHaveLength(1);
 
@@ -1121,6 +1185,12 @@ describe("ExtrovertListSyncService", () => {
 			apiKey,
 		});
 		expect(client.addCalls).toHaveLength(1);
+
+		await makeService(client, undefined, toQueueCandidates(candidates)).run({
+			now: new Date(now.getTime() + EXTROVERT.icpList.skipDays * DAY_MS + 1),
+			apiKey,
+		});
+		expect(client.addCalls).toHaveLength(2);
 	});
 
 	it("stops adding to Ronak after Alex returns out-of-limit URLs", async () => {
@@ -1807,5 +1877,63 @@ describe("ExtrovertListSyncService inactive pruning", () => {
 		);
 		expect(state.skippedUrls).toEqual([]);
 		expect(state.previousUrls).toEqual([]);
+	});
+
+	it("removes members with an old connection request and keeps re-added Inactive members until rechecked", async () => {
+		const urls = ["old-request", "recent-request", "readded-inactive"].map(
+			(name) => `https://www.linkedin.com/in/${suffix}-${name}`,
+		);
+		const contacts = await Promise.all(
+			urls.map((url, index) =>
+				createContact(`extrovert-list-${suffix}-request-${index}`, url),
+			),
+		);
+		const readded = contacts[2];
+		if (!readded) throw new Error("The fixture has no re-added contact.");
+		await setField(readded.id, "linkedin_active", "Inactive");
+		await setField(readded.id, "linkedin_activity_checked", "2026-01-01");
+
+		const client = new StubExtrovertClient();
+		client.campaignMembers = [
+			membership("old-request", urls[0] ?? "", {
+				connectionStatus: "pending",
+				wasConnectionRequestSentViaExtrovert: true,
+				connectionRequestSentDate: daysAgo(
+					EXTROVERT.icpList.connectionRequestDays + 1,
+				).toISOString(),
+			}),
+			membership("recent-request", urls[1] ?? "", {
+				connectionStatus: "pending",
+				wasConnectionRequestSentViaExtrovert: true,
+				connectionRequestSentDate: daysAgo(1).toISOString(),
+			}),
+			membership("readded-inactive", urls[2] ?? "", {
+				connectionStatus: "not_connected",
+				wasConnectionRequestSentViaExtrovert: false,
+				createdAt: daysAgo(1).toISOString(),
+			}),
+		];
+		await db.extrovertListSync.update({
+			where: { listId },
+			data: { enabled: true },
+		});
+
+		await makeService(client, undefined, []).run({ now, apiKey });
+
+		expect(client.removalCalls).toEqual([
+			{ prospectProfileUrl: urls[0] ?? "", campaignId: alexTarget.campaignId },
+		]);
+		const state = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+		expect(state.lastSummary).toContain(
+			`1 sent a connection request over ${EXTROVERT.icpList.connectionRequestDays} days ago`,
+		);
+		expect(state.skippedUrls).toEqual([
+			{
+				url: canonicalLinkedinUrl(urls[0] ?? ""),
+				skippedAt: now.toISOString(),
+			},
+		]);
 	});
 });
