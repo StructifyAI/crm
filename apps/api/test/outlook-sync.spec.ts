@@ -124,6 +124,7 @@ function harness(options: {
 		async context() {
 			return {};
 		},
+		async drain() {},
 		async store(
 			_row: MailboxSync,
 			_options: StoreOptions,

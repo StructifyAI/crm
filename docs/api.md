@@ -192,10 +192,11 @@ Two rules follow for the serverless build:
   deployment's cron keeps working).
 - **One tick shares one `Deadline` (`mailbox/deadline.ts`, `SYNC_TICK.budgetMs`).**
   The Vercel function dies at 60 seconds, so `runDue` hands every provider the same
-  35-second deadline. Calendar checks it between events and pages and stores the
+  35-second deadline and runs every due row at once, so one busy mailbox never
+  waits behind another. Calendar checks it between events and pages and stores the
   page token it stopped at; Gmail and Outlook stop between messages and leave the
-  cursor where it was. A paused run is `synced`, never `failed`, and `due` orders by
-  `lastSyncedAt`, so the row that gave up its turn goes first next tick.
+  cursor where it was. A paused run is `synced`, never `failed`, and resumes on the
+  next tick.
 - **A `401` is not proof the user revoked access.** `better-auth` refreshes an access
   token only in its last five seconds, and a calendar pass runs on one token for up to
   35 seconds, so a token that was valid at the start of a tick expires halfway through

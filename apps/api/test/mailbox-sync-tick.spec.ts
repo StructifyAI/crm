@@ -205,22 +205,26 @@ describe("runDue claims a mailbox before it syncs", () => {
 		expect((await service.runDue()).attempted).toBe(0);
 	});
 
-	it("stops claiming rows once the tick deadline has passed", async () => {
-		state.add("a", "calendar");
+	it("runs every due mailbox at once instead of one after another", async () => {
+		state.add("a", "gmail");
 		state.add("b", "gmail");
 
-		const calls: string[] = [];
-		const service = build(state, async (userId, source, deadline) => {
-			calls.push(`${userId}:${source}`);
-			(deadline as { at: number }).at = 0;
+		let started = 0;
+		let release: () => void = () => {};
+		const bothStarted = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const service = build(state, async (userId, source) => {
+			started += 1;
+			if (started === 2) release();
+			await bothStarted;
 			return { source, userId, status: "synced" };
 		});
 
 		const summary = await service.runDue();
 
-		expect(calls).toEqual(["user-a:calendar"]);
-		expect(summary.attempted).toBe(1);
-		expect(state.rows.get("b")?.retryAfter).toBeNull();
+		expect(started).toBe(2);
+		expect(summary.synced).toBe(2);
 	});
 });
 

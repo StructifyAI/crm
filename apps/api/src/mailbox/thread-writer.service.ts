@@ -53,6 +53,7 @@ export type IncomingMessage = {
 export type WriteContext = MatchContext & {
 	deadline: Deadline;
 	teammates: ReadonlySet<string>;
+	linking: Promise<void>[];
 };
 
 @Injectable()
@@ -83,7 +84,12 @@ export class ThreadWriterService {
 			suppressedEmails,
 			teammates: internal.users,
 			deadline,
+			linking: [],
 		};
+	}
+
+	async drain(context: WriteContext): Promise<void> {
+		await Promise.all(context.linking);
 	}
 
 	async store(
@@ -363,7 +369,9 @@ export class ThreadWriterService {
 			stored.occurredAt,
 			parsed.rfcMessageId,
 		);
-		await this.attachDeal(stored.threadId, { companyId, contactId }, context);
+		context.linking.push(
+			this.attachDeal(stored.threadId, { companyId, contactId }, context),
+		);
 
 		return !repair;
 	}
