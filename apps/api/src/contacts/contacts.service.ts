@@ -10,6 +10,7 @@ import {
 } from "@crm/db";
 import { ICP_STATUSES, type IcpStatus } from "@crm/db/company-icp";
 import { liveContactsByEmail } from "@crm/db/contact-email";
+import { linkedinCandidates, sameLinkedinProfile } from "@crm/db/contact-match";
 import type { FieldDefinitionWithOptions } from "@crm/db/fields";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
 import {
@@ -129,7 +130,10 @@ export class ContactsService {
 
 	async list(input: ContactListInput): Promise<ListResult<ContactRow>> {
 		const filterableFields = await this.fields.filterableFieldsFor("CONTACT");
-		const where = this.buildWhere(input, filterableFields);
+		const linkedin = await this.linkedinFilter(input.linkedinUrl);
+		const where: Prisma.ContactWhereInput = {
+			AND: [this.buildWhere(input, filterableFields), ...linkedin],
+		};
 		const { skip, take } = paginate(input);
 
 		const [rows, total, facetCounts] = await Promise.all([
@@ -144,6 +148,7 @@ export class ContactsService {
 					lastName: true,
 					email: true,
 					title: true,
+					linkedinUrl: true,
 					imageUrl: true,
 					source: true,
 					company: { select: COMPANY_SELECT },
@@ -1443,6 +1448,19 @@ export class ContactsService {
 		});
 
 		return { contactId: fact.contactId, field: fact.field, applied: accepted };
+	}
+
+	private async linkedinFilter(
+		urls: string[],
+	): Promise<Prisma.ContactWhereInput[]> {
+		if (urls.length === 0) return [];
+		const candidates = await linkedinCandidates(this.db, urls);
+		const ids = candidates
+			.filter((candidate) =>
+				urls.some((url) => sameLinkedinProfile(candidate.linkedinUrl, url)),
+			)
+			.map((candidate) => candidate.id);
+		return [{ id: { in: ids } }];
 	}
 
 	private searchFilter(q: string): Prisma.ContactWhereInput {
