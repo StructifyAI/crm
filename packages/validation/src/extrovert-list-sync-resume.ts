@@ -16,6 +16,8 @@ export const extrovertListSyncCycle = z
 		judgeUnavailable: z.boolean().default(false),
 		removalsApplied: z.boolean().default(false),
 		connectedRemovedUrls: z.array(z.string()).default([]),
+		inactiveRemovedUrls: z.array(z.string()).default([]),
+		requestExpiredUrls: z.array(z.string()).default([]),
 		counts: z.object({
 			checked: z.number().int().nonnegative(),
 			crashed: z.number().int().nonnegative(),
@@ -36,6 +38,23 @@ export type ExtrovertListSyncCycle = z.infer<typeof extrovertListSyncCycle>;
 
 export const extrovertListSyncUrls = z.array(z.string());
 
+const extrovertListSkippedUrl = z.union([
+	z.string().transform((url) => ({ url, skippedAt: null })),
+	z.object({
+		url: z.string(),
+		skippedAt: z.string().datetime({ offset: true }),
+	}),
+]);
+
+export const extrovertListSkippedUrls = z.array(extrovertListSkippedUrl);
+
+export type ExtrovertListSkip = {
+	url: string;
+	skippedAt: string | null;
+};
+
+export type ExtrovertListSkippedUrls = ExtrovertListSkip[];
+
 export function parseExtrovertListSyncCycle(
 	value: unknown,
 ): ExtrovertListSyncCycle | null {
@@ -45,4 +64,18 @@ export function parseExtrovertListSyncCycle(
 
 export function parseExtrovertListSyncUrls(value: unknown): string[] {
 	return extrovertListSyncUrls.parse(value);
+}
+
+export function parseExtrovertListSkippedUrls(
+	value: unknown,
+): ExtrovertListSkippedUrls {
+	return extrovertListSkippedUrls.parse(value);
+}
+
+export function serializeExtrovertListSkippedUrls(
+	entries: ExtrovertListSkippedUrls,
+): Array<string | { url: string; skippedAt: string }> {
+	return entries.map(({ url, skippedAt }) =>
+		skippedAt === null ? url : { url, skippedAt },
+	);
 }
