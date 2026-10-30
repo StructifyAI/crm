@@ -1248,20 +1248,20 @@ export class ExtrovertListSyncService {
 		const writes: PlannedContactWrite[] = [];
 		const checked = now.toISOString().slice(0, 10);
 		for (const contact of contacts) {
-			if (
-				connectedContactIds.has(contact.id) ||
-				contact.current.fields.linkedin_active === "Inactive"
-			) {
-				continue;
+			if (connectedContactIds.has(contact.id)) continue;
+			const values: Record<string, string> = {};
+			if (contact.current.fields.linkedin_active !== "Inactive") {
+				values.linkedin_active = "Inactive";
 			}
+			if (contact.current.fields.linkedin_activity_checked !== checked) {
+				values.linkedin_activity_checked = checked;
+			}
+			if (Object.keys(values).length === 0) continue;
 			writes.push({
 				contactId: contact.id,
 				name: [contact.firstName, contact.lastName].filter(Boolean).join(" "),
 				url: contact.linkedinUrl,
-				values: {
-					linkedin_active: "Inactive",
-					linkedin_activity_checked: checked,
-				},
+				values,
 			});
 		}
 		return writes;
@@ -1386,12 +1386,14 @@ export class ExtrovertListSyncService {
 				await this.applyWrite(removal.contactId, {
 					values: removal.values,
 					imageUrl: undefined,
-					activeTransition: "Inactive",
+					activeTransition: removal.values.linkedin_active ? "Inactive" : null,
 					jobChangeFlagged: false,
 				});
-				cycle.counts.newlyInactive += 1;
+				if (removal.values.linkedin_active) {
+					cycle.counts.newlyInactive += 1;
+					cycle.counts.pruned += 1;
+				}
 				cycle.counts.writes += 1;
-				cycle.counts.pruned += 1;
 			}
 
 			cycle.removalsApplied = true;

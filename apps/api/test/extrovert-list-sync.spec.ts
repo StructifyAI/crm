@@ -1936,4 +1936,28 @@ describe("ExtrovertListSyncService inactive pruning", () => {
 			},
 		]);
 	});
+
+	it("refreshes the check date of an Inactive contact that Extrovert pruned again", async () => {
+		const url = `https://www.linkedin.com/in/${suffix}-pruned-again`;
+		const contact = await createContact(`extrovert-list-${suffix}-pruned`, url);
+		await setField(contact.id, "linkedin_active", "Inactive");
+		await setField(contact.id, "linkedin_activity_checked", "2026-01-01");
+		await db.extrovertListSync.update({
+			where: { listId },
+			data: { enabled: true, previousUrls: [url] },
+		});
+
+		await makeService(new StubExtrovertClient(), undefined, []).run({
+			now,
+			apiKey,
+		});
+
+		expect(await readField(contact.id, "linkedin_activity_checked")).toBe(
+			now.toISOString().slice(0, 10),
+		);
+		const state = await db.extrovertListSync.findUniqueOrThrow({
+			where: { listId },
+		});
+		expect(state.lastSummary).toContain("newly Inactive 0 (0 pruned");
+	});
 });
