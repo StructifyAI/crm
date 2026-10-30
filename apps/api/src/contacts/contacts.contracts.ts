@@ -28,6 +28,7 @@ export const contactListInput = listInput.extend({
 	icp: z.array(z.string()).default([]),
 	fields: z.record(z.string(), z.array(z.string())).default({}),
 	archived: z.boolean().default(false),
+	linkedinUrl: z.array(z.string()).max(100).default([]),
 });
 
 export type ContactListInput = z.infer<typeof contactListInput>;
@@ -215,6 +216,7 @@ export const contactRowOutput = z.object({
 	lastName: z.string().nullable(),
 	email: z.string().nullable(),
 	title: z.string().nullable(),
+	linkedinUrl: z.string().nullable(),
 	imageUrl: z.string().nullable(),
 	source: z.enum(
 		Object.values(RecordSource) as [RecordSource, ...RecordSource[]],
