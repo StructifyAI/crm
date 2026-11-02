@@ -62,6 +62,7 @@ describe("computeCompanyIcp", () => {
 		countryCode: string | null = "US",
 		country: string | null = null,
 		vcBacked: string | null = null,
+		softwareVendor: string | null = null,
 	) =>
 		computeCompanyIcp({
 			naics,
@@ -70,6 +71,7 @@ describe("computeCompanyIcp", () => {
 			countryCode,
 			country,
 			vcBacked,
+			softwareVendor,
 		});
 
 	it("marks a range entirely below the band as not ICP", () => {
@@ -87,6 +89,15 @@ describe("computeCompanyIcp", () => {
 		expect(compute("51 to 200", null, NAICS, "US", null, "No")).toBe("ICP");
 		expect(compute("51 to 200", null, NAICS, "US", null, null)).toBe("ICP");
 		expect(compute("51 to 200", null, null, "US", null, "Yes")).toBe("Not ICP");
+	});
+
+	it("excludes companies that sell software or AI to manufacturers", () => {
+		expect(compute("51 to 200", null, NAICS, "US", null, null, "Yes")).toBe(
+			"Not ICP",
+		);
+		expect(compute("51 to 200", null, NAICS, "US", null, null, "No")).toBe(
+			"ICP",
+		);
 	});
 
 	it("uses the count for a range that crosses the upper bound", () => {
