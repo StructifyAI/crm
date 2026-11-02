@@ -62,7 +62,7 @@ describe("computeCompanyIcp", () => {
 		countryCode: string | null = "US",
 		country: string | null = null,
 		vcBacked: string | null = null,
-		sellsToManufacturers: string | null = null,
+		softwareVendor: string | null = null,
 	) =>
 		computeCompanyIcp({
 			naics,
@@ -71,7 +71,7 @@ describe("computeCompanyIcp", () => {
 			countryCode,
 			country,
 			vcBacked,
-			sellsToManufacturers,
+			softwareVendor,
 		});
 
 	it("marks a range entirely below the band as not ICP", () => {
