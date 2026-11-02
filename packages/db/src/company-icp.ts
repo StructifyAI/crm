@@ -43,7 +43,12 @@ export const ICP_NAICS_CODES = new Set([
 
 export const NAICS_FIELD_KEY = "naics";
 export const VC_BACKED_FIELD_KEY = "vc_backed_startup";
-export const ICP_FIELD_KEYS = new Set([NAICS_FIELD_KEY, VC_BACKED_FIELD_KEY]);
+export const SELLS_TO_MANUFACTURERS_FIELD_KEY = "sells_to_manufacturers";
+export const ICP_FIELD_KEYS = new Set([
+	NAICS_FIELD_KEY,
+	VC_BACKED_FIELD_KEY,
+	SELLS_TO_MANUFACTURERS_FIELD_KEY,
+]);
 
 export const NAICS_VALUE_SELECT = {
 	where: {
@@ -83,10 +88,12 @@ export function computeCompanyIcp(company: {
 	countryCode: string | null;
 	country: string | null;
 	vcBacked: string | null;
+	sellsToManufacturers: string | null;
 }): IcpStatus {
 	const country = icpCountry(company);
 	if (country && !ICP_COUNTRIES.has(country)) return "Not ICP";
 	if (company.vcBacked === "Yes") return "Not ICP";
+	if (company.sellsToManufacturers === "Yes") return "Not ICP";
 
 	const status = (() => {
 		const code = company.naics?.trim().slice(0, 3);
@@ -120,6 +127,7 @@ export type IcpChange = {
 	newIcp: IcpStatus;
 	naics: string | null;
 	vcBacked: string | null;
+	sellsToManufacturers: string | null;
 	employeeRange: string | null;
 	employeeCount: number | null;
 	countryCode: string | null;
@@ -174,9 +182,14 @@ export async function recomputeCompanyIcp(
 			const vcBacked =
 				row.fieldValues.find(({ field }) => field.key === VC_BACKED_FIELD_KEY)
 					?.option?.label ?? null;
+			const sellsToManufacturers =
+				row.fieldValues.find(
+					({ field }) => field.key === SELLS_TO_MANUFACTURERS_FIELD_KEY,
+				)?.option?.label ?? null;
 			const newIcp = computeCompanyIcp({
 				naics,
 				vcBacked,
+				sellsToManufacturers,
 				employeeRange: row.employeeRange,
 				employeeCount: row.employeeCount,
 				countryCode: row.countryCode,
@@ -191,6 +204,7 @@ export async function recomputeCompanyIcp(
 				newIcp,
 				naics,
 				vcBacked,
+				sellsToManufacturers,
 				employeeRange: row.employeeRange,
 				employeeCount: row.employeeCount,
 				countryCode: row.countryCode,

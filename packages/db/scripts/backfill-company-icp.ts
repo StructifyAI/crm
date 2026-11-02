@@ -30,7 +30,7 @@ try {
 	const changes = await recomputeCompanyIcp(db, { archivedAt: null }, { dry });
 	const file = out ?? `company-icp-changes-${new Date().toISOString()}.csv`;
 	const csv = [
-		"id,name,old_icp,new_icp,naics,vc_backed,employee_range,employee_count,country_code,country",
+		"id,name,old_icp,new_icp,naics,vc_backed,sells_to_manufacturers,employee_range,employee_count,country_code,country",
 		...changes.map((change) =>
 			[
 				change.id,
@@ -39,6 +39,7 @@ try {
 				change.newIcp,
 				change.naics,
 				change.vcBacked,
+				change.sellsToManufacturers,
 				change.employeeRange,
 				change.employeeCount,
 				change.countryCode,
