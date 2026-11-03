@@ -30,6 +30,7 @@ import { ExtrovertListSyncService } from "../extrovert/extrovert-list-sync.servi
 import { ExtrovertSyncService } from "../extrovert/extrovert-sync.service";
 import { InstantlyEmailSyncService } from "../instantly/instantly-email-sync.service";
 import { InstantlySyncService } from "../instantly/instantly-sync.service";
+import { LinkedinAdsReportingService } from "../linkedin-ads/linkedin-ads-reporting.service";
 import { CorrespondenceBackfillService } from "../mailbox/correspondence-backfill.service";
 import { DealLinkService } from "../mailbox/deal-link.service";
 import { ActivityDirectionBackfillService } from "./activity-direction-backfill.service";
@@ -56,6 +57,7 @@ export class SyncController {
 		private readonly extrovert: ExtrovertSyncService,
 		private readonly extrovertEngagement: ExtrovertEngagementSyncService,
 		private readonly extrovertIcpList: ExtrovertListSyncService,
+		private readonly linkedinAds: LinkedinAdsReportingService,
 		private readonly dealLinks: DealLinkService,
 		private readonly correspondence: CorrespondenceBackfillService,
 		private readonly activityDirections: ActivityDirectionBackfillService,
@@ -145,6 +147,23 @@ export class SyncController {
 	@ApiExcludeEndpoint()
 	async extrovertViaPost(@Headers("authorization") authorization?: string) {
 		return this.runExtrovert(authorization);
+	}
+
+	@Get("linkedin-ads")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary:
+			"Store daily LinkedIn Ads campaign totals and check the access token expiry",
+	})
+	async linkedinAdsViaGet(@Headers("authorization") authorization?: string) {
+		return this.runLinkedinAds(authorization);
+	}
+
+	@Post("linkedin-ads")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async linkedinAdsViaPost(@Headers("authorization") authorization?: string) {
+		return this.runLinkedinAds(authorization);
 	}
 
 	@Get("extrovert-engagement")
@@ -408,6 +427,11 @@ export class SyncController {
 	private async runExtrovert(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.extrovert.run();
+	}
+
+	private async runLinkedinAds(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.linkedinAds.run();
 	}
 
 	private async runExtrovertEngagement(authorization?: string) {

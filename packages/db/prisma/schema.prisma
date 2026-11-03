@@ -1933,3 +1933,18 @@ model Apikey {
   @@index([key])
   @@map("apikey")
 }
+
+model LinkedinAdsCampaignDay {
+  campaignUrn  String
+  date         DateTime @db.Date
+  campaignName String
+  impressions  Int
+  clicks       Int
+  spendUsd     Decimal  @db.Decimal(12, 2)
+  conversions  Int
+  updatedAt    DateTime @updatedAt
+
+  @@id([campaignUrn, date])
+  @@index([date])
+  @@map("linkedinAdsCampaignDay")
+}
