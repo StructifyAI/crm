@@ -81,6 +81,18 @@ export class EnvironmentVariables {
 	GRANOLA_API_KEY?: string;
 
 	@IsOptional()
+	@IsString()
+	LINKEDIN_CLIENT_ID?: string;
+
+	@IsOptional()
+	@IsString()
+	LINKEDIN_CLIENT_SECRET?: string;
+
+	@IsOptional()
+	@IsString()
+	LINKEDIN_ACCESS_TOKEN?: string;
+
+	@IsOptional()
 	@IsUrl({ require_tld: false })
 	API_URL?: string;
 

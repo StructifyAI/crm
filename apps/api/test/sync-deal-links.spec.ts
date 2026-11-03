@@ -13,6 +13,7 @@ import type { ExtrovertEngagementSyncService } from "../src/extrovert/extrovert-
 import type { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
 import type { InstantlyEmailSyncService } from "../src/instantly/instantly-email-sync.service";
 import type { InstantlySyncService } from "../src/instantly/instantly-sync.service";
+import type { LinkedinAdsReportingService } from "../src/linkedin-ads/linkedin-ads-reporting.service";
 import type {
 	CorrespondenceBackfill,
 	CorrespondenceBackfillService,
@@ -84,7 +85,8 @@ const unused = {} as unknown as MailboxSyncService &
 	ExtrovertEngagementSyncService &
 	ActivityDirectionBackfillService &
 	ContactEventsSyncService &
-	ContactClockService;
+	ContactClockService &
+	LinkedinAdsReportingService;
 
 function controller(secret: string | undefined): SyncController {
 	const config = {
@@ -92,6 +94,7 @@ function controller(secret: string | undefined): SyncController {
 	} as unknown as ConfigService<EnvironmentVariables, true>;
 
 	return new SyncController(
+		unused,
 		unused,
 		unused,
 		unused,
