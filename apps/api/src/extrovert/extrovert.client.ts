@@ -2,16 +2,12 @@ import {
 	type ExtrovertAddUsersToListResult,
 	type ExtrovertCampaign,
 	type ExtrovertCommentV2,
-	type ExtrovertConversationDetail,
-	type ExtrovertConversationV2,
 	type ExtrovertListMembership,
 	type ExtrovertProspectDetail,
 	type ExtrovertTeamMember,
 	parseExtrovertAddUsersToListResult,
 	parseExtrovertCampaignList,
 	parseExtrovertCommentsPage,
-	parseExtrovertConversationDetail,
-	parseExtrovertConversationsPage,
 	parseExtrovertListMembership,
 	parseExtrovertProspectCapacity,
 	parseExtrovertProspectDetail,
@@ -186,53 +182,6 @@ export class ExtrovertClient {
 			}
 			throw error;
 		}
-	}
-
-	async listConversationsPage(
-		key: string,
-		input: { ownerId: string; offset: number },
-	): Promise<{ conversations: ExtrovertConversationV2[]; total: number }> {
-		try {
-			const page = parseExtrovertConversationsPage(
-				await this.request(
-					key,
-					EXTROVERT.api.conversationsPath,
-					{
-						ownerId: input.ownerId,
-						view: "all",
-						limit: String(EXTROVERT.engagement.pageSize),
-						offset: String(input.offset),
-					},
-					{ tolerate: [403] },
-				),
-			);
-			return {
-				conversations: page.conversations,
-				total: page.pagination.total,
-			};
-		} catch (error) {
-			if (error instanceof ExtrovertHttpError && error.status === 403) {
-				return { conversations: [], total: 0 };
-			}
-			throw error;
-		}
-	}
-
-	async getConversation(
-		key: string,
-		connectionId: string,
-	): Promise<ExtrovertConversationDetail> {
-		return parseExtrovertConversationDetail(
-			await this.request(
-				key,
-				`${EXTROVERT.api.conversationsPath}/${connectionId}`,
-				{
-					markAsRead: "false",
-					messageLimit: String(EXTROVERT.engagement.messageLimit),
-					messageOffset: "0",
-				},
-			),
-		);
 	}
 
 	private async request(

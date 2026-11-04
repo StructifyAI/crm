@@ -124,16 +124,16 @@ model InstantlyMailbox {
 }
 
 model ExtrovertMember {
-  id          String   @id
-  name        String
-  email       String?
-  linkedinUrl String?
-  ownerId     String?
-  owner       User?    @relation("ExtrovertMemberOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  lastSeenAt  DateTime
+  id                 String              @id
+  name               String
+  email              String?
+  linkedinUrl        String?
+  ownerId            String?
+  owner              User?               @relation("ExtrovertMemberOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  lastSeenAt         DateTime
   connectedProspects ExtrovertProspect[] @relation("ExtrovertConnectedMember")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@map("extrovertMember")
 }
@@ -390,7 +390,7 @@ model Company {
 
   employeeCount     Int?
   employeeRange     String?
-  icp               String    @default("Unknown")
+  icp               String          @default("Unknown")
   employeeSource    EmployeeSource?
   employeeSourceUrl String?
   employeeCheckedAt DateTime?
@@ -408,9 +408,9 @@ model Company {
   careersUrl  String?
 
   ownerId          String?
-  owner            User?    @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  primaryContactId String?  @unique
-  primaryContact   Contact? @relation("PrimaryContact", fields: [primaryContactId], references: [id], onDelete: SetNull)
+  owner            User?           @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  primaryContactId String?         @unique
+  primaryContact   Contact?        @relation("PrimaryContact", fields: [primaryContactId], references: [id], onDelete: SetNull)
   alternateDomains CompanyDomain[]
 
   enrichmentStatus EnrichmentStatus   @default(PENDING)
@@ -519,20 +519,20 @@ model Contact {
   lastRepliedEventId   String?
   lastRepliedEvent     ContactEvent? @relation("ContactLastReplied", fields: [lastRepliedEventId], references: [id], onDelete: SetNull)
 
-  deals           DealContact[]
-  contactEvents   ContactEvent[]
-  activities      Activity[]
-  emailThreads    EmailThread[]
-  alternateEmails ContactEmail[]
-  calendarEvents  CalendarEvent[]
-  eventAttendance CalendarAttendee[]
-  fieldValues     FieldValue[]
-  visitors        TrackedVisitor[]   @relation("VisitorContact")
-  submissions     FormSubmission[]   @relation("SubmissionContact")
+  deals              DealContact[]
+  contactEvents      ContactEvent[]
+  activities         Activity[]
+  emailThreads       EmailThread[]
+  alternateEmails    ContactEmail[]
+  calendarEvents     CalendarEvent[]
+  eventAttendance    CalendarAttendee[]
+  fieldValues        FieldValue[]
+  visitors           TrackedVisitor[]        @relation("VisitorContact")
+  submissions        FormSubmission[]        @relation("SubmissionContact")
   instantlyCampaigns InstantlyCampaignLead[]
   extrovertProspects ExtrovertProspect[]
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
 
   @@unique([email], map: "contact_email_active_key", where: { archivedAt: null })
   @@index([companyId])
@@ -611,8 +611,8 @@ model ContactFact {
   decidedBy   User?      @relation("FactDecider", fields: [decidedById], references: [id], onDelete: SetNull)
   decidedAt   DateTime?
 
-  observedAt   DateTime  @default(now())
-  supersededAt DateTime?
+  observedAt    DateTime  @default(now())
+  supersededAt  DateTime?
   linkCheckedAt DateTime?
 
   @@index([contactId, field, status])
@@ -1119,12 +1119,12 @@ model Deal {
   lastRepliedEventId   String?
   lastRepliedEvent     ContactEvent? @relation("DealLastReplied", fields: [lastRepliedEventId], references: [id], onDelete: SetNull)
 
-  contacts    DealContact[]
+  contacts      DealContact[]
   contactEvents ContactEvent[]
-  activities  Activity[]
-  fieldValues FieldValue[]
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  activities    Activity[]
+  fieldValues   FieldValue[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   @@index([companyId])
   @@index([ownerId])
@@ -1210,9 +1210,9 @@ model FieldDefinition {
 
   archivedAt DateTime?
 
-  options FieldOption[]
-  values  FieldValue[]
-  extrovertConnectionSettings AppSetting[] @relation("ExtrovertConnectionField")
+  options                     FieldOption[]
+  values                      FieldValue[]
+  extrovertConnectionSettings AppSetting[]  @relation("ExtrovertConnectionField")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1229,8 +1229,8 @@ model FieldOption {
   label    String
   position Int
 
-  archivedAt DateTime?
-  values     FieldValue[]
+  archivedAt  DateTime?
+  values      FieldValue[]
   multiValues FieldValueOption[]
 
   @@index([fieldId, position])
@@ -1250,14 +1250,14 @@ model FieldValue {
   deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
   text     String?
-  number   Decimal?     @db.Decimal(24, 4)
+  number   Decimal?           @db.Decimal(24, 4)
   date     DateTime?
   bool     Boolean?
   optionId String?
-  option   FieldOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  option   FieldOption?       @relation(fields: [optionId], references: [id], onDelete: SetNull)
   options  FieldValueOption[]
   userId   String?
-  user     User?        @relation("FieldValueUser", fields: [userId], references: [id], onDelete: SetNull)
+  user     User?              @relation("FieldValueUser", fields: [userId], references: [id], onDelete: SetNull)
 
   updatedAt DateTime @updatedAt
 
@@ -1326,12 +1326,12 @@ model Activity {
   createdBy   User   @relation("ActivityAuthor", fields: [createdById], references: [id])
   meta        Json?
 
-  emailThreadId   String?        @unique
-  emailThread     EmailThread?   @relation(fields: [emailThreadId], references: [id], onDelete: Cascade)
-  contactEvents   ContactEvent[]
+  emailThreadId     String?            @unique
+  emailThread       EmailThread?       @relation(fields: [emailThreadId], references: [id], onDelete: Cascade)
+  contactEvents     ContactEvent[]
   contactExtraction ContactExtraction?
-  calendarEventId String?        @unique
-  calendarEvent   CalendarEvent? @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
+  calendarEventId   String?            @unique
+  calendarEvent     CalendarEvent?     @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1415,7 +1415,7 @@ model EmailMessage {
   outlookWebLink   String?
 
   direction      EmailDirection
-  correspondence Boolean        @default(true)
+  correspondence Boolean              @default(true)
   classification EmailClassification?
   fromEmail      String
   fromName       String?
@@ -1450,16 +1450,16 @@ model ContactEvent {
   direction        ContactDirection
   origin           ContactEventOrigin
   sourceActivityId String?
-  sourceActivity   Activity? @relation(fields: [sourceActivityId], references: [id], onDelete: Cascade)
+  sourceActivity   Activity?            @relation(fields: [sourceActivityId], references: [id], onDelete: Cascade)
   sourceMessageId  String?
-  sourceMessage    EmailMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: Cascade)
+  sourceMessage    EmailMessage?        @relation(fields: [sourceMessageId], references: [id], onDelete: Cascade)
   bodyHash         String?
   confidence       Float?
   verification     Float?
   quote            String?
-  needsReview      Boolean @default(false)
+  needsReview      Boolean              @default(false)
   supersededAt     DateTime?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime             @default(now())
 
   dealLastContacted    Deal[]    @relation("DealLastContacted")
   dealLastReplied      Deal[]    @relation("DealLastReplied")
@@ -1477,15 +1477,15 @@ model ContactEvent {
 }
 
 model ContactExtraction {
-  activityId String   @id
-  activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  bodyHash   String
-  status     ContactExtractionStatus
-  attempts   Int      @default(0)
-  error      String?
-  model      String?
-  extractedAt DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  activityId  String                  @id
+  activity    Activity                @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  bodyHash    String
+  status      ContactExtractionStatus
+  attempts    Int                     @default(0)
+  error       String?
+  model       String?
+  extractedAt DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
 
   @@map("contactExtraction")
 }
@@ -1566,8 +1566,8 @@ model AppSetting {
 
   agentModelContextWindow Int?
 
-  contextDevApiKey String?
-  granolaSyncedAt DateTime?
+  contextDevApiKey  String?
+  granolaSyncedAt   DateTime?
   granolaSyncResume Json?
 
   reportingCurrency String?
@@ -1576,37 +1576,39 @@ model AppSetting {
 
   archiveRetentionDays Int @default(180)
 
-  trackingSiteId           String? @unique
-  trackingCrossDomain      Boolean @default(true)
-  trackingLimitToDomains   Boolean @default(true)
-  trackingCookieSubdomains Boolean @default(false)
-  trackingSecureCookies    Boolean @default(true)
-  trackingHonourDnt        Boolean @default(true)
-  trackingCookieDays       Int     @default(395)
-  trackingConfigHash       String?
-  trackingPaused           Boolean @default(false)
-  instantlyWebhookSecret   String?
-  instantlyLastEventAt     DateTime?
-  instantlyApiKey          String?
-  instantlyLastSyncAt      DateTime?
-  instantlySyncError       String?
-  instantlyEmailCursor     DateTime?
-  instantlyEmailLeaseUntil DateTime?
-  instantlyReplyCursor     DateTime?
-  duplicateContactCursor   String?
-  duplicateCompanyCursor   String?
-  duplicateContactsComplete Boolean @default(false)
-  duplicateCompaniesComplete Boolean @default(false)
-  extrovertApiKey          String?
-  extrovertWebhookSecret   String?
-  extrovertLastEventAt     DateTime?
-  extrovertLastSyncAt      DateTime?
-  extrovertLastSyncError   String?
-  extrovertSyncResume      Json?
-  extrovertEngagementResume Json?
-  extrovertEngagementSyncAt DateTime?
+  trackingSiteId             String?          @unique
+  trackingCrossDomain        Boolean          @default(true)
+  trackingLimitToDomains     Boolean          @default(true)
+  trackingCookieSubdomains   Boolean          @default(false)
+  trackingSecureCookies      Boolean          @default(true)
+  trackingHonourDnt          Boolean          @default(true)
+  trackingCookieDays         Int              @default(395)
+  trackingConfigHash         String?
+  trackingPaused             Boolean          @default(false)
+  instantlyWebhookSecret     String?
+  instantlyLastEventAt       DateTime?
+  instantlyApiKey            String?
+  instantlyLastSyncAt        DateTime?
+  instantlySyncError         String?
+  instantlyEmailCursor       DateTime?
+  instantlyEmailLeaseUntil   DateTime?
+  instantlyReplyCursor       DateTime?
+  duplicateContactCursor     String?
+  duplicateCompanyCursor     String?
+  duplicateContactsComplete  Boolean          @default(false)
+  duplicateCompaniesComplete Boolean          @default(false)
+  extrovertApiKey            String?
+  extrovertWebhookSecret     String?
+  extrovertLastEventAt       DateTime?
+  extrovertLastSyncAt        DateTime?
+  extrovertLastSyncError     String?
+  extrovertSyncResume        Json?
+  extrovertEngagementResume  Json?
+  extrovertEngagementSyncAt  DateTime?
   extrovertConnectionFieldId String?
-  extrovertConnectionField FieldDefinition? @relation("ExtrovertConnectionField", fields: [extrovertConnectionFieldId], references: [id], onDelete: SetNull)
+  unipileDmState             Json?
+  unipileDmSyncAt            DateTime?
+  extrovertConnectionField   FieldDefinition? @relation("ExtrovertConnectionField", fields: [extrovertConnectionFieldId], references: [id], onDelete: SetNull)
 
   updatedAt DateTime @updatedAt
 
@@ -1636,23 +1638,23 @@ model InstantlyCampaignLead {
 }
 
 model ExtrovertProspect {
-  id               String    @id
-  contactId        String
-  contact          Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  campaignId       String?
-  campaignName     String?
-  listName         String?
-  memberId         String?
+  id                String           @id
+  contactId         String
+  contact           Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  campaignId        String?
+  campaignName      String?
+  listName          String?
+  memberId          String?
   connectedMemberId String?
   connectedMember   ExtrovertMember? @relation("ExtrovertConnectedMember", fields: [connectedMemberId], references: [id], onDelete: SetNull)
-  directComments   Int
-  indirectComments Int
-  likes            Int
-  connectionStatus String?
-  connectedDate    DateTime?
+  directComments    Int
+  indirectComments  Int
+  likes             Int
+  connectionStatus  String?
+  connectedDate     DateTime?
   lastSeenAt        DateTime
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   @@index([contactId])
   @@index([lastSeenAt])

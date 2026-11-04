@@ -251,6 +251,15 @@ Two rules follow for the serverless build:
   it offered, so a closed deal is never linked, and it never overwrites a `dealId` a
   rep already set. No candidate, no call: a thread with no open deal costs nothing.
   The call shares the tick `Deadline`, so a slow model cannot stall the mailbox sync.
+- **LinkedIn DMs come from Unipile through `GET /internal/sync/unipile-dms` every 15
+  minutes.** Set `UNIPILE_DSN` and `UNIPILE_API_KEY` to enable it. Each LinkedIn seat
+  connected to Unipile is walked newest chat first until the seat's stored `since`.
+  The chat partner's LinkedIn slug comes from the seat's relations, else one profile
+  lookup; lookups past `UNIPILE.dm.profileLookupsPerTick` queue the chat for the next
+  tick, because LinkedIn flags more than ~100 profile views per seat per day. Only
+  existing contacts get a `LinkedIn messages with <seat>` note; it takes over the
+  Extrovert DM note with the same subject. Extrovert lists only chats still in a
+  campaign, so it syncs comments only.
 - **The Extrovert ICP list sync asks `/internal/crm/judge-headlines` through the agent bridge**
   to classify employer changes; missing, invalid or timed-out answers become `none`.
 - **Only correspondence moves the clocks.** `ThreadWriterService` stores every message

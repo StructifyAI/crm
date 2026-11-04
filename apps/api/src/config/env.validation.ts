@@ -81,6 +81,14 @@ export class EnvironmentVariables {
 	GRANOLA_API_KEY?: string;
 
 	@IsOptional()
+	@IsString()
+	UNIPILE_DSN?: string;
+
+	@IsOptional()
+	@IsString()
+	UNIPILE_API_KEY?: string;
+
+	@IsOptional()
 	@IsUrl({ require_tld: false })
 	API_URL?: string;
 

@@ -32,6 +32,7 @@ import { InstantlyEmailSyncService } from "../instantly/instantly-email-sync.ser
 import { InstantlySyncService } from "../instantly/instantly-sync.service";
 import { CorrespondenceBackfillService } from "../mailbox/correspondence-backfill.service";
 import { DealLinkService } from "../mailbox/deal-link.service";
+import { UnipileDmSyncService } from "../unipile/unipile-dm-sync.service";
 import { ActivityDirectionBackfillService } from "./activity-direction-backfill.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
 import { backfillCursor } from "./sync.contracts";
@@ -56,6 +57,7 @@ export class SyncController {
 		private readonly extrovert: ExtrovertSyncService,
 		private readonly extrovertEngagement: ExtrovertEngagementSyncService,
 		private readonly extrovertIcpList: ExtrovertListSyncService,
+		private readonly unipileDms: UnipileDmSyncService,
 		private readonly dealLinks: DealLinkService,
 		private readonly correspondence: CorrespondenceBackfillService,
 		private readonly activityDirections: ActivityDirectionBackfillService,
@@ -163,6 +165,20 @@ export class SyncController {
 		@Headers("authorization") authorization?: string,
 	) {
 		return this.runExtrovertEngagement(authorization);
+	}
+
+	@Get("unipile-dms")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "Sync LinkedIn DMs from the Unipile seats" })
+	async unipileDmsViaGet(@Headers("authorization") authorization?: string) {
+		return this.runUnipileDms(authorization);
+	}
+
+	@Post("unipile-dms")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async unipileDmsViaPost(@Headers("authorization") authorization?: string) {
+		return this.runUnipileDms(authorization);
 	}
 
 	@Get("extrovert-icp-list")
@@ -413,6 +429,11 @@ export class SyncController {
 	private async runExtrovertEngagement(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.extrovertEngagement.run();
+	}
+
+	private async runUnipileDms(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.unipileDms.run();
 	}
 
 	private async runExtrovertIcpList(authorization?: string) {
