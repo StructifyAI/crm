@@ -161,18 +161,18 @@ export class UnipileDmSyncService {
 			account.id,
 			tick.state.slugs,
 		);
-		while (seat.pending.length > 0 && identities.canLookUp()) {
-			if (this.expired(tick.startedAt)) return false;
-			const chatId = seat.pending[0];
-			if (!chatId) break;
-			const chat = await this.api.getChat(chatId);
-			const outcome = chat
-				? await this.chat(account, chat, identities, tick)
-				: "unmatched";
-			if (outcome === "deferred") break;
-			seat.pending.shift();
-			tick.result[outcome] += 1;
-		}
+		const scanned = await this.scanNewChats(account, seat, identities, tick);
+		if (!scanned) return false;
+		return this.retryPending(account, seat, identities, tick);
+	}
+
+	private async scanNewChats(
+		account: UnipileAccount,
+		seat: UnipileDmSeat,
+		identities: SeatIdentities,
+		tick: Tick,
+	): Promise<boolean> {
+		let freshDeferred = 0;
 		for (;;) {
 			if (this.expired(tick.startedAt)) return false;
 			const page = await this.api.listChats(account.id, seat.cursor);
@@ -192,7 +192,8 @@ export class UnipileDmSyncService {
 				}
 				const outcome = await this.chat(account, chat, identities, tick);
 				if (outcome === "deferred" && !seat.pending.includes(chat.id)) {
-					seat.pending.push(chat.id);
+					seat.pending.splice(freshDeferred, 0, chat.id);
+					freshDeferred += 1;
 				}
 				tick.result[outcome] += 1;
 			}
@@ -205,6 +206,27 @@ export class UnipileDmSyncService {
 			seat.cursor = page.cursor;
 			await this.save(tick.state, null);
 		}
+	}
+
+	private async retryPending(
+		account: UnipileAccount,
+		seat: UnipileDmSeat,
+		identities: SeatIdentities,
+		tick: Tick,
+	): Promise<boolean> {
+		while (seat.pending.length > 0 && identities.canLookUp()) {
+			if (this.expired(tick.startedAt)) return false;
+			const chatId = seat.pending[0];
+			if (!chatId) break;
+			const chat = await this.api.getChat(chatId);
+			const outcome = chat
+				? await this.chat(account, chat, identities, tick)
+				: "unmatched";
+			if (outcome === "deferred") break;
+			seat.pending.shift();
+			tick.result[outcome] += 1;
+		}
+		return true;
 	}
 
 	private async chat(

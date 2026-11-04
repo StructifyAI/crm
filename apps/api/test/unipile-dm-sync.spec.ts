@@ -262,6 +262,76 @@ describe("Unipile DM sync", () => {
 		);
 		expect(profileLookups).toEqual(["p-x", "p-y"]);
 	});
+
+	it("resolves a new chat before the deferred backlog", async () => {
+		await db.appSetting.update({
+			where: { id: SETTINGS_ID },
+			data: { unipileDmState: Prisma.JsonNull },
+		});
+		const backlog = await contact(`unipile-${suffix}-backlog`);
+		const fresh = await contact(`unipile-${suffix}-fresh`);
+		const chats: UnipileChat[] = [
+			{
+				id: "chat-old-1",
+				type: 0,
+				timestamp: minutesAgo(10),
+				attendee_provider_id: "p-old-1",
+			},
+			{
+				id: "chat-old-2",
+				type: 0,
+				timestamp: minutesAgo(11),
+				attendee_provider_id: "p-old-2",
+			},
+		];
+		const { client, profileLookups } = fakeUnipile({
+			chats,
+			messages: {
+				"chat-old-1": [
+					{ text: "Old one", timestamp: minutesAgo(10), is_sender: 1 },
+				],
+				"chat-old-2": [
+					{ text: "Old two", timestamp: minutesAgo(11), is_sender: 1 },
+				],
+				"chat-new": [
+					{ text: "Fresh InMail", timestamp: minutesAgo(1), is_sender: 1 },
+				],
+			},
+			relations: {},
+			profiles: {
+				"p-old-1": `unipile-${suffix}-missing`,
+				"p-old-2": `unipile-${suffix}-backlog`,
+				"p-new": `unipile-${suffix}-fresh`,
+			},
+		});
+		const sync = new UnipileDmSyncService(
+			db,
+			client,
+			filing,
+			stamp,
+			noContactEvents,
+		);
+
+		await expect(sync.run()).resolves.toMatchObject({ deferred: 1 });
+		chats.unshift({
+			id: "chat-new",
+			type: 0,
+			timestamp: minutesAgo(1),
+			attendee_provider_id: "p-new",
+		});
+
+		await expect(sync.run()).resolves.toMatchObject({ filed: 1 });
+		expect(profileLookups).toEqual(["p-old-1", "p-new"]);
+		expect(await db.activity.count({ where: { contactId: fresh.id } })).toBe(1);
+		expect(await db.activity.count({ where: { contactId: backlog.id } })).toBe(
+			0,
+		);
+
+		await expect(sync.run()).resolves.toMatchObject({ filed: 1 });
+		expect(await db.activity.count({ where: { contactId: backlog.id } })).toBe(
+			1,
+		);
+	});
 });
 
 describe("Unipile client", () => {
