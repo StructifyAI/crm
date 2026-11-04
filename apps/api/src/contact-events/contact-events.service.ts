@@ -10,7 +10,10 @@ import {
 	type Prisma,
 } from "@crm/db";
 import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
-import { parseExtrovertActivityMeta } from "@crm/validation/activity-meta";
+import {
+	parseExtrovertActivityMeta,
+	parseUnipileActivityMeta,
+} from "@crm/validation/activity-meta";
 import { Injectable } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import {
@@ -596,9 +599,11 @@ export class ContactEventsService {
 		},
 		options: ContactEventRecordOptions,
 	): Promise<number> {
-		const parsed = parseExtrovertActivityMeta(activity.meta);
+		const linkedinDm =
+			parseExtrovertActivityMeta(activity.meta)?.extrovert.kind === "dm" ||
+			parseUnipileActivityMeta(activity.meta) !== null;
 		const authorName =
-			parsed?.extrovert.kind === "dm" && activity.body
+			linkedinDm && activity.body
 				? activity.subject?.match(/^LinkedIn messages with (.+)$/)?.[1]
 				: null;
 		if (!authorName || !activity.body) {
