@@ -138,6 +138,10 @@ export class ContactEventsSyncService {
 					AND activity."meta"->'extrovert'->>'kind' = 'dm'
 					AND activity."body" IS NOT NULL
 				)
+				OR (
+					activity."meta"->>'source' = 'unipile'
+					AND activity."body" IS NOT NULL
+				)
 			)
 			${recordedWhere}
 			${cursorWhere}
