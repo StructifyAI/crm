@@ -57,6 +57,13 @@ export type LinkedInCandidate = {
 	linkedinUrl: string | null;
 };
 
+export type PhoneMatch = {
+	companyId: string | null;
+	contactId: string | null;
+};
+
+const noPhoneMatch: PhoneMatch = { companyId: null, contactId: null };
+
 const generationPattern = /\b(jr|sr|ii|iii|iv)\b\.?/i;
 
 export function profileKey(url: string | null | undefined): string | null {
@@ -276,4 +283,48 @@ export async function findContactMatch(
 		return { kind: "match", contactId: candidate.id, rule: "name" };
 	}
 	return review;
+}
+
+export function phoneDigits(value: string | null | undefined): string {
+	const digits = value?.replace(/\D/g, "") ?? "";
+	return digits.startsWith("1") ? digits.slice(1) : digits;
+}
+
+export async function matchByPhone(
+	db: ContactMatchDatabase,
+	phone: string,
+): Promise<PhoneMatch> {
+	const digits = phoneDigits(phone);
+	if (digits.length < CONTACT_MATCH.phone.minDigits) return noPhoneMatch;
+
+	const contacts = await db.$queryRaw<
+		{ id: string; companyId: string | null }[]
+	>`
+		SELECT "id", "companyId"
+		FROM "contact"
+		WHERE "archivedAt" IS NULL
+			AND regexp_replace(regexp_replace("phone", '[^0-9]', '', 'g'), '^1', '') = ${digits}
+	`;
+	const [contact] = contacts;
+	if (contacts.length === 1 && contact) {
+		return { companyId: contact.companyId, contactId: contact.id };
+	}
+	const contactCompanies = new Set(contacts.map(({ companyId }) => companyId));
+	const [sharedCompany] = contactCompanies;
+	if (contacts.length > 1) {
+		return contactCompanies.size === 1 && sharedCompany
+			? { companyId: sharedCompany, contactId: null }
+			: noPhoneMatch;
+	}
+
+	const companies = await db.$queryRaw<{ id: string }[]>`
+		SELECT "id"
+		FROM "company"
+		WHERE "archivedAt" IS NULL
+			AND regexp_replace(regexp_replace("phone", '[^0-9]', '', 'g'), '^1', '') = ${digits}
+	`;
+	const [company] = companies;
+	return companies.length === 1 && company
+		? { companyId: company.id, contactId: null }
+		: noPhoneMatch;
 }

@@ -222,7 +222,10 @@ Two rules follow for the serverless build:
 - **Granola syncs meeting notes from `GET /v1/notes` through
   `GET /internal/sync/granola` every 15 minutes.** Set `GRANOLA_API_KEY` to enable
   it. Notes enrich matching Google Calendar meetings,
-  or create `MEETING` activities from attendee and invitee matches. It matches
+  or create `MEETING` activities from attendee and invitee matches. A note titled
+  "Phone call with <number>" with no attendee match falls back to `matchByPhone`
+  in `@crm/db/contact-match`: one contact with that number, else the one company
+  its contacts or main line share. It matches
   existing CRM records without creating them and links only the company's single
   open deal. The sync stores the Granola URL and note id in activity metadata.
   Each tick resumes within a 40-second budget until the listing completes.

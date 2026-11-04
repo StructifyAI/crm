@@ -1,5 +1,8 @@
 export const CONTACT_MATCH = {
 	firstNamePrefixMinLength: 3,
+	phone: {
+		minDigits: 10,
+	},
 	linkedin: {
 		trailingIdMinLength: 6,
 	},

@@ -1,4 +1,5 @@
 import { ActivityType, type Db, type Prisma, RecordSource } from "@crm/db";
+import { matchByPhone, type PhoneMatch } from "@crm/db/contact-match";
 import {
 	readGranolaSyncState,
 	writeGranolaSyncState,
@@ -253,9 +254,11 @@ export class GranolaSyncService {
 			context,
 		);
 
-		if (!match.companyId && !match.contactId) return "unmatched";
+		const matched =
+			match.companyId || match.contactId ? match : await this.phoneMatch(note);
+		if (!matched.companyId && !matched.contactId) return "unmatched";
 
-		const dealId = await singleOpenDealId(this.db, match.companyId);
+		const dealId = await singleOpenDealId(this.db, matched.companyId);
 		const occurredAt =
 			note.calendar_event?.scheduled_start_time !== null &&
 			note.calendar_event?.scheduled_start_time !== undefined
@@ -267,8 +270,8 @@ export class GranolaSyncService {
 				subject: note.title ?? note.calendar_event?.event_title ?? "Meeting",
 				body: this.composeBody(note),
 				occurredAt,
-				companyId: match.companyId,
-				contactId: match.contactId,
+				companyId: matched.companyId,
+				contactId: matched.contactId,
 				dealId,
 				createdById: author.id,
 				meta: this.meta(null, note),
@@ -277,11 +280,18 @@ export class GranolaSyncService {
 		});
 
 		await this.stamp.touch(
-			{ companyId: match.companyId, contactId: match.contactId, dealId },
+			{ companyId: matched.companyId, contactId: matched.contactId, dealId },
 			activityTime(activity),
 		);
 		await this.contactEvents.recordActivity(activity.id);
 		return "created";
+	}
+
+	private async phoneMatch(note: GranolaNote): Promise<PhoneMatch> {
+		const phone = note.title?.match(GRANOLA.phoneCallTitle)?.[1];
+		return phone
+			? matchByPhone(this.db, phone)
+			: { companyId: null, contactId: null };
 	}
 
 	private async calendarActivity(note: GranolaNote) {
