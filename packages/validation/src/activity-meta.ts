@@ -50,3 +50,25 @@ export function parseExtrovertActivityMeta(
 	const result = extrovertActivityMeta.safeParse(meta);
 	return result.success ? result.data : null;
 }
+
+export const unipileActivityMeta = z
+	.object({
+		automated: z.literal(true),
+		source: z.literal("unipile"),
+		unipile: z.object({
+			kind: z.literal("dm"),
+			chatId: z.string(),
+			accountId: z.string(),
+			syncedThrough: z.string(),
+		}),
+	})
+	.passthrough();
+
+export type UnipileActivityMeta = z.infer<typeof unipileActivityMeta>;
+
+export function parseUnipileActivityMeta(
+	meta: unknown,
+): UnipileActivityMeta | null {
+	const result = unipileActivityMeta.safeParse(meta);
+	return result.success ? result.data : null;
+}

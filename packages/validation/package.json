@@ -31,7 +31,9 @@
 		"./extrovert-engagement-resume": "./src/extrovert-engagement-resume.ts",
 		"./extrovert-sync-resume": "./src/extrovert-sync-resume.ts",
 		"./extrovert-webhook": "./src/extrovert-webhook.ts",
-		"./linkedin-url": "./src/linkedin-url.ts"
+		"./linkedin-url": "./src/linkedin-url.ts",
+		"./unipile-api": "./src/unipile-api.ts",
+		"./unipile-dm-state": "./src/unipile-dm-state.ts"
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",

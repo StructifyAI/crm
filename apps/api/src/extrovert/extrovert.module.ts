@@ -39,6 +39,7 @@ import { ExtrovertSyncService } from "./extrovert-sync.service";
 		ExtrovertService,
 	],
 	exports: [
+		ExtrovertFilingService,
 		ExtrovertSyncService,
 		ExtrovertEngagementSyncService,
 		ExtrovertListSyncService,

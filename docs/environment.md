@@ -49,6 +49,10 @@ with none, the sign-in page says so by name rather than rendering nothing.
 **`GRANOLA_API_KEY`** enables the optional Granola meeting-notes sync. Without it,
 the Granola cron exits with a skipped result.
 
+**`UNIPILE_DSN`** and **`UNIPILE_API_KEY`** enable the optional LinkedIn DM sync
+for every LinkedIn seat connected to Unipile. Without them, the Unipile cron exits
+with a skipped result.
+
 **`ALLOWED_SIGN_IN`** — comma-separated whole domains or single addresses (bare
 addresses exist for a solo self-hoster, where `gmail.com` would be an open door). **One
 list, read by the sign-in guard *and* the sync's "which side is external" decision** —
