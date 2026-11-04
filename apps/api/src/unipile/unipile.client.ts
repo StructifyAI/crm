@@ -47,6 +47,7 @@ export class UnipileClient {
 		const body = await this.readOrMissing(
 			`/chats/${encodeURIComponent(chatId)}`,
 			{},
+			UNIPILE.api.missingStatuses,
 		);
 		return body === null ? null : parseUnipileChat(body);
 	}
@@ -79,6 +80,7 @@ export class UnipileClient {
 		const body = await this.readOrMissing(
 			`/users/${encodeURIComponent(providerId)}`,
 			{ account_id: accountId },
+			UNIPILE.api.unreachableProfileStatuses,
 		);
 		return body === null ? null : parseUnipileProfile(body);
 	}
@@ -97,9 +99,10 @@ export class UnipileClient {
 	private async readOrMissing(
 		path: string,
 		params: Record<string, string | undefined>,
+		missing: readonly number[],
 	): Promise<unknown | null> {
 		const response = await this.fetch(path, params);
-		if (response.status === 404) return null;
+		if (missing.includes(response.status)) return null;
 		if (!response.ok) {
 			throw new Error(`Unipile request failed with status ${response.status}.`);
 		}
