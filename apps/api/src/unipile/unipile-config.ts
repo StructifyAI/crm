@@ -3,6 +3,8 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 export const UNIPILE = {
 	api: {
 		basePath: "/api/v1",
+		missingStatuses: [404],
+		unreachableProfileStatuses: [404, 422],
 	},
 	dm: {
 		chatPageSize: 100,

@@ -9,7 +9,7 @@ import type {
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { ExtrovertFilingService } from "../src/extrovert/extrovert-filing.service";
-import type { UnipileClient } from "../src/unipile/unipile.client";
+import { UnipileClient } from "../src/unipile/unipile.client";
 import { UnipileDmSyncService } from "../src/unipile/unipile-dm-sync.service";
 import { noContactEvents } from "./contact-events.stub";
 
@@ -261,5 +261,30 @@ describe("Unipile DM sync", () => {
 			1,
 		);
 		expect(profileLookups).toEqual(["p-x", "p-y"]);
+	});
+});
+
+describe("Unipile client", () => {
+	it("treats an unreachable profile as unresolved", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response(
+				JSON.stringify({ status: 422, type: "errors/invalid_recipient" }),
+				{ status: 422 },
+			)) as unknown as typeof fetch;
+		try {
+			const config = {
+				get: (key: string) =>
+					key === "UNIPILE_DSN" ? "https://api1.unipile.test:1" : "key",
+			} as unknown as ConstructorParameters<typeof UnipileClient>[0];
+			await expect(
+				new UnipileClient(config).getProfile("account", "11248046"),
+			).resolves.toBeNull();
+			await expect(new UnipileClient(config).getChat("chat")).rejects.toThrow(
+				"status 422",
+			);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 });
