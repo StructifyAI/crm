@@ -129,6 +129,7 @@ export const AGENT_TOOLS = [
 	"read_company_history",
 	"read_crm_history",
 	"read_deal_history",
+	"read_meeting_notes",
 	"record_fact",
 	"record_job_change",
 	"research_company",
