@@ -47,7 +47,8 @@ Microsoft equivalent of `hd`**: `tenantId` is the whole of it.
 with none, the sign-in page says so by name rather than rendering nothing.
 
 **`GRANOLA_API_KEY`** enables the optional Granola meeting-notes sync. Without it,
-the Granola cron exits with a skipped result.
+the Granola cron exits with a skipped result. On the agent it enables
+`read_meeting_notes`, which reads a synced note's full summary and transcript.
 
 **`UNIPILE_DSN`** and **`UNIPILE_API_KEY`** enable the optional LinkedIn DM sync
 for every LinkedIn seat connected to Unipile. Without them, the Unipile cron exits
