@@ -304,10 +304,16 @@ ask a rep who had a company open, contacts on screen, to paste an email.
 
 | Read (all free) | Hands back |
 | --- | --- |
-| `read_crm_history` | the contact's **company id**, their deals, their colleagues |
+| `read_crm_history` | the contact's **company id**, their deals, their colleagues, notes |
 | `read_company_history` | **every contact with id**, deals, threads, meetings, notes |
 | `read_deal_history` | stage clock and history, **people with ids**, last reply |
 | `search_crm` | contacts, companies and deals matching typed text |
+
+**Notes include Granola meetings.** A `MEETING` activity with `meta.granola` is a
+recorded call; its note carries the summary, `granolaNoteId` and the Granola `link`.
+Calendar projections stay out. `read_meeting_notes` reads the full summary and
+transcript from Granola, only for a note id already on a CRM activity, and needs
+`GRANOLA_API_KEY` on the agent.
 
 **A preamble or tool result naming a record without its id is a bug** — the only
 recovery is asking the human. Ambiguity is fine: four Marchettis is four rows with
