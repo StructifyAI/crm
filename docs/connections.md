@@ -227,6 +227,9 @@ Malformed payloads return 204 to prevent repeated vendor retries.
 Only a reply creates a contact or company, through the standard intake filters.
 Sends, bounces, unsubscribes and the campaign sync update contacts that already exist
 and skip leads who are not in the CRM, so a cold-emailed lead enters the CRM on reply.
+A filed reply, an out-of-office included, goes on the company's open deal. When the
+company has none, the reply opens an `ENGAGED` deal named after the company, owned by
+the sending mailbox's owner, with the contact on it.
 Each sending mailbox maps to one workspace member as its contact owner.
 Every sync fills the owner for unowned contacts.
 A new mailbox takes the owner of its campaign when every mapped mailbox in that
@@ -259,7 +262,7 @@ After the sent walk finishes, the same tick polls `GET /api/v2/emails?email_type
 from `AppSetting.instantlyReplyCursor` and files every reply the same way. Instantly
 exposes the whole inbox of a connected mailbox here, not only campaign replies, so the
 walk is selective. A received email whose sender is a workspace user, a mapped Instantly
-mailbox, a workspace domain, or an auto-reply is skipped. When the row's `lead` is an
+mailbox, or a workspace domain is skipped. When the row's `lead` is an
 external address and the sender is that lead or shares its domain, the reply files and
 creates the contact when missing. Any other sender files only when the contact already
 exists in the CRM; a reminder tool, a calendar notice, or a newsletter that lands in the

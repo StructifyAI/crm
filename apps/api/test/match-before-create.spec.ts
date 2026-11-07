@@ -8,6 +8,7 @@ import { ContactsService } from "../src/contacts/contacts.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { intakeContact } from "../src/crm/contact-intake";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
+import type { DealsService } from "../src/deals/deals.service";
 import { ExtrovertFilingService } from "../src/extrovert/extrovert-filing.service";
 import type { FieldsService } from "../src/fields/fields.service";
 import { InstantlyFilingService } from "../src/instantly/instantly-filing.service";
@@ -37,6 +38,7 @@ const instantly = new InstantlyFilingService(
 	agent,
 	stamp,
 	noContactEvents,
+	{} as DealsService,
 );
 const extrovert = new ExtrovertFilingService(db, agent, stamp, companies);
 const fields = {

@@ -12,6 +12,9 @@ import type { InstantlyWebhookEvent } from "@crm/validation/instantly-webhook";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
+import { ConversionService } from "../src/currency/conversion.service";
+import { DealsService } from "../src/deals/deals.service";
+import { FieldsService } from "../src/fields/fields.service";
 import {
 	type EmailQuery,
 	InstantlyClient,
@@ -38,17 +41,27 @@ const agent = {
 	},
 	companyCreated: async () => undefined,
 	companyRequested: async () => true,
+	fieldBackfillRecords: async () => undefined,
 	withCrmEvents: withDiscardedCrmEvents,
 } as unknown as AgentTriggerService;
 
 const directory = new CompanyDirectoryService(agent);
 const stamp = new ActivityStampService(db);
+const deals = new DealsService(
+	db,
+	agent,
+	stamp,
+	new ConversionService(db),
+	new FieldsService(db, agent),
+	noContactEvents,
+);
 const filing = new InstantlyFilingService(
 	db,
 	directory,
 	agent,
 	stamp,
 	noContactEvents,
+	deals,
 );
 const ingest = new InstantlyIngestService(db, filing);
 
@@ -70,9 +83,15 @@ async function clean() {
 	await db.activity.deleteMany({
 		where: { contact: { email: { endsWith: `@${domain}` } } },
 	});
+	await db.deal.deleteMany({
+		where: { company: { domain: { in: [domain, `cold-${domain}`] } } },
+	});
 	await db.contact.deleteMany({ where: { email: { endsWith: `@${domain}` } } });
 	await db.instantlyMailbox.deleteMany({
 		where: { emailAccount: { endsWith: `@example.test` } },
+	});
+	await db.activity.deleteMany({
+		where: { contact: { email: { endsWith: `@cold-${domain}` } } },
 	});
 	await db.contact.deleteMany({
 		where: { email: { endsWith: `@cold-${domain}` } },
@@ -97,6 +116,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
 	queued.length = 0;
+	await db.deal.deleteMany({ where: { company: { domain } } });
 	await db.appSetting.updateMany({
 		where: { id: SETTINGS_ID },
 		data: { instantlySyncResume: Prisma.JsonNull },
@@ -500,7 +520,7 @@ describe("Instantly email polling", () => {
 			from: string,
 			at: string,
 			text: string,
-			extra: { is_auto_reply?: number; lead?: string } = {},
+			extra: { lead?: string } = {},
 		) => ({
 			id,
 			timestamp_created: at,
@@ -538,7 +558,6 @@ describe("Instantly email polling", () => {
 							`replier@${domain}`,
 							"2026-09-25T15:01:00.000Z",
 							"I am out of office.",
-							{ is_auto_reply: 1 },
 						),
 						received(
 							`reply-second-${suffix}`,
@@ -585,7 +604,7 @@ describe("Instantly email polling", () => {
 			emails: 0,
 			filed: 0,
 			replies: 7,
-			repliesFiled: 2,
+			repliesFiled: 3,
 			complete: true,
 			error: null,
 		});
@@ -612,6 +631,13 @@ describe("Instantly email polling", () => {
 			{
 				type: "EMAIL",
 				subject: "Re: First touch",
+				body: "I am out of office.",
+				dealId: deal.id,
+				occurredAt: new Date("2026-09-25T15:01:00.000Z"),
+			},
+			{
+				type: "EMAIL",
+				subject: "Re: First touch",
 				body: "Sounds good.",
 				dealId: deal.id,
 				occurredAt: new Date("2026-09-25T17:30:00.000Z"),
@@ -622,7 +648,7 @@ describe("Instantly email polling", () => {
 				where: { leadId: `lead-replies-${suffix}` },
 				select: { replyCount: true },
 			}),
-		).toEqual({ replyCount: 2 });
+		).toEqual({ replyCount: 3 });
 		expect(
 			await db.contact.count({
 				where: {
@@ -1299,6 +1325,60 @@ describe("Instantly campaign leads", () => {
 		expect(
 			await db.instantlyCampaignLead.count({ where: { leadId: lead.id } }),
 		).toBe(0);
+	});
+	it("opens an Engaged deal owned by the mailbox owner on a cold lead's first reply", async () => {
+		const mailbox = `sender-${suffix}@example.test`;
+		await db.instantlyMailbox.create({
+			data: { emailAccount: mailbox, ownerId: mappedOwnerId },
+		});
+		const lead = `opener@cold-${domain}`;
+
+		await filing.file(
+			event(lead, {
+				email_account: mailbox,
+				reply_subject: "Automatic reply: Hello",
+				reply_text: "I am out of office until Monday.",
+			}),
+		);
+		await filing.file(
+			event(lead, {
+				email_account: mailbox,
+				timestamp: new Date(Date.now() + 60_000).toISOString(),
+				reply_text: "Back now. Send me more.",
+			}),
+		);
+
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: lead },
+			select: { id: true, companyId: true },
+		});
+		expect(contact.companyId).not.toBeNull();
+		const opened = await db.deal.findMany({
+			where: { companyId: contact.companyId ?? "" },
+			select: {
+				id: true,
+				stage: true,
+				ownerId: true,
+				contacts: { select: { contactId: true } },
+			},
+		});
+		expect(opened).toEqual([
+			{
+				id: expect.any(String),
+				stage: "ENGAGED",
+				ownerId: mappedOwnerId,
+				contacts: [{ contactId: contact.id }],
+			},
+		]);
+		expect(
+			await db.activity.findMany({
+				where: { contactId: contact.id },
+				select: { dealId: true },
+			}),
+		).toEqual([
+			{ dealId: opened[0]?.id ?? null },
+			{ dealId: opened[0]?.id ?? null },
+		]);
 	});
 });
 
