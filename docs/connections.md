@@ -230,6 +230,10 @@ Every sync fills the owner for unowned contacts.
 A new mailbox takes the owner of its campaign when every mapped mailbox in that
 campaign has the same owner. Other unmapped mailboxes stay unowned.
 An optional read-only API key syncs campaign leads every 15 minutes.
+A sync pass that runs out of its tick budget stores its place in
+`AppSetting.instantlySyncResume` (finished campaigns, the current campaign and its lead
+cursor), and the next tick continues from there. Active campaigns go first. Campaign
+leads that a full pass did not see are deleted only when that pass finishes.
 Only leads enrolled in campaigns are imported. Lead-list-only leads are ignored.
 The contact status line shows the campaign state and expected next email.
 An `email_sent` webhook updates that status line and files an `EMAIL` activity.

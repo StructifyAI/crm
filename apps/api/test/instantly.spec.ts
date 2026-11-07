@@ -6,7 +6,7 @@ import {
 	expect,
 	it,
 } from "bun:test";
-import { db } from "@crm/db";
+import { db, Prisma } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
 import type { InstantlyWebhookEvent } from "@crm/validation/instantly-webhook";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
@@ -92,6 +92,10 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
 	queued.length = 0;
+	await db.appSetting.updateMany({
+		where: { id: SETTINGS_ID },
+		data: { instantlySyncResume: Prisma.JsonNull },
+	});
 	await db.instantlyMailbox.deleteMany({
 		where: { emailAccount: { endsWith: `@example.test` } },
 	});
@@ -811,8 +815,11 @@ describe("Instantly campaign leads", () => {
 		const client = {
 			listCampaigns: async () => [campaign],
 			listLeadSends: async () => [],
-			async *listCampaignLeads() {
-				yield includeSecond ? [firstLead, secondLead] : [firstLead];
+			async listCampaignLeadPage() {
+				return {
+					items: includeSecond ? [firstLead, secondLead] : [firstLead],
+					cursor: null,
+				};
 			},
 		} as unknown as InstantlyClient;
 		const sync = new InstantlySyncService(db, client, filing);
@@ -904,8 +911,8 @@ describe("Instantly campaign leads", () => {
 					},
 				];
 			},
-			async *listCampaignLeads() {
-				yield [lead];
+			async listCampaignLeadPage() {
+				return { items: [lead], cursor: null };
 			},
 		} as unknown as InstantlyClient;
 		const sync = new InstantlySyncService(db, client, filing);
@@ -968,8 +975,8 @@ describe("Instantly campaign leads", () => {
 		const client = {
 			listCampaigns: async () => [campaign],
 			listLeadSends: async () => [],
-			async *listCampaignLeads() {
-				yield [survivingLead];
+			async listCampaignLeadPage() {
+				return { items: [survivingLead], cursor: null };
 			},
 		} as unknown as InstantlyClient;
 		const sync = new InstantlySyncService(db, client, filing);
@@ -1059,8 +1066,8 @@ describe("Instantly campaign leads", () => {
 		const client = {
 			listCampaigns: async () => [campaign],
 			listLeadSends: async () => [],
-			async *listCampaignLeads() {
-				yield leads;
+			async listCampaignLeadPage() {
+				return { items: leads, cursor: null };
 			},
 		} as unknown as InstantlyClient;
 		const sync = new InstantlySyncService(db, client, filing);
@@ -1099,15 +1106,76 @@ describe("Instantly campaign leads", () => {
 				{ id: `active-${suffix}`, name: "Active", status: 1, email_list: [] },
 			],
 			listLeadSends: async () => [],
-			async *listCampaignLeads(_key: string, campaignId: string) {
+			async listCampaignLeadPage(_key: string, campaignId: string) {
 				order.push(campaignId);
-				yield [];
+				return { items: [], cursor: null };
 			},
 		} as unknown as InstantlyClient;
 
 		await new InstantlySyncService(db, client, filing).run();
 
 		expect(order).toEqual([`active-${suffix}`, `finished-${suffix}`]);
+	});
+
+	it("resumes a cut-off sync and removes missing leads only after a full pass", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const campaign = {
+			id: `campaign-resume-${suffix}`,
+			name: "Resume",
+			status: 1,
+			email_list: [],
+		};
+		const leadFor = (name: string) => ({
+			id: `lead-${name}-${suffix}`,
+			email: `${name}@${domain}`,
+			campaign: campaign.id,
+			status: 1,
+			email_reply_count: 0,
+		});
+		const stale = leadFor("resume-stale");
+		const first = leadFor("resume-first");
+		const second = leadFor("resume-second");
+		const cursors: (string | null)[] = [];
+		let pass: "stale" | "cut-off" | "resumed" = "stale";
+		const client = {
+			listCampaigns: async () => [campaign],
+			listLeadSends: async () => [],
+			async listCampaignLeadPage(
+				_key: string,
+				_campaignId: string,
+				cursor: string | null,
+			) {
+				if (pass === "stale") return { items: [stale], cursor: null };
+				cursors.push(cursor);
+				if (cursor === null) return { items: [first], cursor: "page-2" };
+				if (pass === "cut-off")
+					throw new Error("Instantly request failed with status 429.");
+				return { items: [second], cursor: null };
+			},
+		} as unknown as InstantlyClient;
+		const sync = new InstantlySyncService(db, client, filing);
+		const leadIds = async () =>
+			(
+				await db.instantlyCampaignLead.findMany({
+					where: { campaignId: campaign.id },
+					select: { leadId: true },
+					orderBy: { leadId: "asc" },
+				})
+			).map((row) => row.leadId);
+
+		expect((await sync.run()).complete).toBe(true);
+		pass = "cut-off";
+		expect((await sync.run()).complete).toBe(false);
+		expect(await leadIds()).toEqual([first.id, stale.id]);
+
+		pass = "resumed";
+		expect((await sync.run()).complete).toBe(true);
+		expect(cursors).toEqual([null, "page-2", "page-2"]);
+		expect(await leadIds()).toEqual([first.id, second.id]);
 	});
 
 	it("gives a new campaign mailbox the owner its campaign already has", async () => {
@@ -1144,8 +1212,11 @@ describe("Instantly campaign leads", () => {
 				},
 			],
 			listLeadSends: async () => [],
-			async *listCampaignLeads() {
-				yield [{ ...lead, campaign: `campaign-new-${suffix}` }];
+			async listCampaignLeadPage() {
+				return {
+					items: [{ ...lead, campaign: `campaign-new-${suffix}` }],
+					cursor: null,
+				};
 			},
 		} as unknown as InstantlyClient;
 

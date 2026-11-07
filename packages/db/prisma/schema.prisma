@@ -1590,6 +1590,7 @@ model AppSetting {
   instantlyApiKey            String?
   instantlyLastSyncAt        DateTime?
   instantlySyncError         String?
+  instantlySyncResume        Json?
   instantlyEmailCursor       DateTime?
   instantlyEmailLeaseUntil   DateTime?
   instantlyReplyCursor       DateTime?
