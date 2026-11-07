@@ -1081,6 +1081,35 @@ describe("Instantly campaign leads", () => {
 		).toEqual({ ownerId: existingOwnerId });
 	});
 
+	it("syncs active campaigns before finished ones", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const order: string[] = [];
+		const client = {
+			listCampaigns: async () => [
+				{
+					id: `finished-${suffix}`,
+					name: "Finished",
+					status: 3,
+					email_list: [],
+				},
+				{ id: `active-${suffix}`, name: "Active", status: 1, email_list: [] },
+			],
+			listLeadSends: async () => [],
+			async *listCampaignLeads(_key: string, campaignId: string) {
+				order.push(campaignId);
+				yield [];
+			},
+		} as unknown as InstantlyClient;
+
+		await new InstantlySyncService(db, client, filing).run();
+
+		expect(order).toEqual([`active-${suffix}`, `finished-${suffix}`]);
+	});
+
 	it("gives a new campaign mailbox the owner its campaign already has", async () => {
 		const mappedMailbox = `campaign-mapped-${suffix}@example.test`;
 		const newMailbox = `campaign-new-${suffix}@example.test`;

@@ -47,7 +47,10 @@ export class InstantlySyncService {
 			);
 			const observed = new Set<string>();
 
-			for (const campaign of campaigns) {
+			const activeFirst = campaigns.toSorted(
+				(a, b) => Number(b.status === 1) - Number(a.status === 1),
+			);
+			for (const campaign of activeFirst) {
 				const mailboxes = [
 					...new Set(
 						campaign.email_list.map((email) => email.trim().toLowerCase()),
