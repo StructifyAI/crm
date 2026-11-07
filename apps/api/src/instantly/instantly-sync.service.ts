@@ -1,5 +1,13 @@
 import { type Db, Prisma } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
+import type {
+	InstantlyCampaign,
+	InstantlyLead,
+} from "@crm/validation/instantly-api";
+import {
+	type InstantlySyncResume,
+	parseInstantlySyncResume,
+} from "@crm/validation/instantly-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { InstantlyClient } from "./instantly.client";
@@ -22,22 +30,33 @@ export class InstantlySyncService {
 		leads: number;
 		created: number;
 		reconciled: number;
+		complete: boolean;
 		error: string | null;
 	}> {
+		const startedAt = Date.now();
 		const result = {
 			campaigns: 0,
 			leads: 0,
 			created: 0,
 			reconciled: 0,
+			complete: false,
 			error: null as string | null,
 		};
 		const setting = await this.db.appSetting.findUnique({
 			where: { id: SETTINGS_ID },
-			select: { instantlyApiKey: true },
+			select: { instantlyApiKey: true, instantlySyncResume: true },
 		});
 		if (!setting?.instantlyApiKey) return result;
 
 		try {
+			const pass: InstantlySyncResume = parseInstantlySyncResume(
+				setting.instantlySyncResume,
+			) ?? {
+				passStartedAt: new Date().toISOString(),
+				doneCampaignIds: [],
+				campaignId: null,
+				cursor: null,
+			};
 			const campaigns = await this.client.listCampaigns(
 				setting.instantlyApiKey,
 			);
@@ -45,12 +64,15 @@ export class InstantlySyncService {
 			const campaignNames = new Map(
 				campaigns.map((campaign) => [campaign.id, campaign.name]),
 			);
-			const observed = new Set<string>();
-
-			const activeFirst = campaigns.toSorted(
-				(a, b) => Number(b.status === 1) - Number(a.status === 1),
-			);
-			for (const campaign of activeFirst) {
+			const pending = campaigns
+				.filter((campaign) => !pass.doneCampaignIds.includes(campaign.id))
+				.toSorted(
+					(a, b) =>
+						Number(b.id === pass.campaignId) -
+							Number(a.id === pass.campaignId) ||
+						Number(b.status === 1) - Number(a.status === 1),
+				);
+			for (const campaign of pending) {
 				const mailboxes = [
 					...new Set(
 						campaign.email_list.map((email) => email.trim().toLowerCase()),
@@ -83,109 +105,48 @@ export class InstantlySyncService {
 						row.ownerId ?? campaignOwnerId,
 					]),
 				);
-				for await (const leads of this.client.listCampaignLeads(
-					setting.instantlyApiKey,
-					campaign.id,
-				)) {
-					for (const lead of leads) {
-						result.leads += 1;
-						observed.add(lead.id);
-						const lastStep = lead.status_summary?.lastStep;
-						const resolved = await this.filing.resolveContact({
-							email: lead.email,
-							firstName: lead.first_name,
-							lastName: lead.last_name,
-							mailbox: lastStep?.from ?? null,
-							reason: "Enrolled in an Instantly campaign",
-							status: lead.status,
-						});
-						if (!resolved) continue;
-
-						const mailboxOwner = lastStep?.from
-							? ownerByMailbox.get(lastStep.from.trim().toLowerCase())
-							: null;
-						const candidateOwnerId = mailboxOwner ?? campaignOwnerId;
-						if (resolved.ownerId === null && candidateOwnerId) {
-							await this.db.contact.update({
-								where: { id: resolved.id },
-								data: { ownerId: candidateOwnerId },
-							});
-						}
-
-						const stepIndex = stepIndexFrom(lastStep?.stepID);
-						const stepCount = campaign.sequences?.[0]?.steps?.length ?? null;
-						const lastContactAt = lead.timestamp_last_contact
-							? new Date(lead.timestamp_last_contact)
-							: null;
-						const nextContactAt = nextContact(
-							lead.status,
-							lastContactAt,
-							stepIndex,
-							stepCount,
-							campaign.sequences?.[0]?.steps?.[
-								stepIndex === null ? -1 : stepIndex + 1
-							]?.delay,
-						);
-						const fields = {
-							contactId: resolved.id,
-							campaignId: campaign.id,
-							campaignName: campaign.name,
-							status: lead.status,
-							interestStatus: lead.lt_interest_status ?? null,
-							replyCount: lead.email_reply_count,
-							stepIndex,
-							stepCount,
-							sendingMailbox: lastStep?.from ?? null,
-							lastContactAt,
-							nextContactAt,
-						};
-						const upsert = () =>
-							this.db.instantlyCampaignLead.upsert({
-								where: { leadId: lead.id },
-								create: { leadId: lead.id, ...fields },
-								update: fields,
-							});
-						try {
-							await upsert();
-						} catch (error) {
-							if (
-								!(error instanceof Prisma.PrismaClientKnownRequestError) ||
-								error.code !== "P2002"
-							)
-								throw error;
-							// A merged contact can still hold another Instantly lead's row for this campaign.
-							await this.db.instantlyCampaignLead.deleteMany({
-								where: {
-									contactId: resolved.id,
-									campaignId: campaign.id,
-									leadId: { not: lead.id },
-								},
-							});
-							await upsert();
-						}
-						if (resolved.created) result.created += 1;
-						if (
-							result.reconciled < INSTANTLY.sync.reconcileLeadsPerRun &&
-							(await this.reconcileLead(setting.instantlyApiKey, {
-								contactId: resolved.id,
-								campaignId: campaign.id,
-								leadEmail: lead.email,
-								lastContactAt,
-								campaignNames,
-							}))
-						)
-							result.reconciled += 1;
+				let cursor = campaign.id === pass.campaignId ? pass.cursor : null;
+				for (;;) {
+					if (Date.now() - startedAt >= INSTANTLY.sync.tickBudgetMs) {
+						await this.saveResume({ ...pass, campaignId: campaign.id, cursor });
+						return result;
 					}
+					const page = await this.client.listCampaignLeadPage(
+						setting.instantlyApiKey,
+						campaign.id,
+						cursor,
+					);
+					for (const lead of page.items) {
+						result.leads += 1;
+						await this.syncLead(setting.instantlyApiKey, campaign, lead, {
+							ownerByMailbox,
+							campaignOwnerId,
+							campaignNames,
+							result,
+						});
+					}
+					if (!page.cursor || page.items.length === 0) break;
+					cursor = page.cursor;
+					await this.saveResume({ ...pass, campaignId: campaign.id, cursor });
 				}
+				pass.doneCampaignIds.push(campaign.id);
+				pass.campaignId = null;
+				pass.cursor = null;
+				await this.saveResume(pass);
 			}
 
 			await this.db.instantlyCampaignLead.deleteMany({
-				where: observed.size ? { leadId: { notIn: [...observed] } } : {},
+				where: { updatedAt: { lt: new Date(pass.passStartedAt) } },
 			});
 			await this.db.appSetting.update({
 				where: { id: SETTINGS_ID },
-				data: { instantlyLastSyncAt: new Date(), instantlySyncError: null },
+				data: {
+					instantlyLastSyncAt: new Date(),
+					instantlySyncError: null,
+					instantlySyncResume: Prisma.JsonNull,
+				},
 			});
+			result.complete = true;
 			return result;
 		} catch (error) {
 			result.error = error instanceof Error ? error.message : String(error);
@@ -199,6 +160,121 @@ export class InstantlySyncService {
 			});
 			return result;
 		}
+	}
+
+	private async syncLead(
+		key: string,
+		campaign: InstantlyCampaign,
+		lead: InstantlyLead,
+		{
+			ownerByMailbox,
+			campaignOwnerId,
+			campaignNames,
+			result,
+		}: {
+			ownerByMailbox: Map<string, string | null | undefined>;
+			campaignOwnerId: string | null | undefined;
+			campaignNames: Map<string, string>;
+			result: { created: number; reconciled: number };
+		},
+	): Promise<void> {
+		const lastStep = lead.status_summary?.lastStep;
+		const resolved = await this.filing.resolveContact({
+			email: lead.email,
+			firstName: lead.first_name,
+			lastName: lead.last_name,
+			mailbox: lastStep?.from ?? null,
+			reason: "Enrolled in an Instantly campaign",
+			status: lead.status,
+		});
+		if (!resolved) {
+			await this.db.instantlyCampaignLead.updateMany({
+				where: { leadId: lead.id },
+				data: { updatedAt: new Date() },
+			});
+			return;
+		}
+
+		const mailboxOwner = lastStep?.from
+			? ownerByMailbox.get(lastStep.from.trim().toLowerCase())
+			: null;
+		const candidateOwnerId = mailboxOwner ?? campaignOwnerId;
+		if (resolved.ownerId === null && candidateOwnerId) {
+			await this.db.contact.update({
+				where: { id: resolved.id },
+				data: { ownerId: candidateOwnerId },
+			});
+		}
+
+		const stepIndex = stepIndexFrom(lastStep?.stepID);
+		const stepCount = campaign.sequences?.[0]?.steps?.length ?? null;
+		const lastContactAt = lead.timestamp_last_contact
+			? new Date(lead.timestamp_last_contact)
+			: null;
+		const nextContactAt = nextContact(
+			lead.status,
+			lastContactAt,
+			stepIndex,
+			stepCount,
+			campaign.sequences?.[0]?.steps?.[stepIndex === null ? -1 : stepIndex + 1]
+				?.delay,
+		);
+		const fields = {
+			contactId: resolved.id,
+			campaignId: campaign.id,
+			campaignName: campaign.name,
+			status: lead.status,
+			interestStatus: lead.lt_interest_status ?? null,
+			replyCount: lead.email_reply_count,
+			stepIndex,
+			stepCount,
+			sendingMailbox: lastStep?.from ?? null,
+			lastContactAt,
+			nextContactAt,
+		};
+		const upsert = () =>
+			this.db.instantlyCampaignLead.upsert({
+				where: { leadId: lead.id },
+				create: { leadId: lead.id, ...fields },
+				update: fields,
+			});
+		try {
+			await upsert();
+		} catch (error) {
+			if (
+				!(error instanceof Prisma.PrismaClientKnownRequestError) ||
+				error.code !== "P2002"
+			)
+				throw error;
+			// A merged contact can still hold another Instantly lead's row for this campaign.
+			await this.db.instantlyCampaignLead.deleteMany({
+				where: {
+					contactId: resolved.id,
+					campaignId: campaign.id,
+					leadId: { not: lead.id },
+				},
+			});
+			await upsert();
+		}
+		if (resolved.created) result.created += 1;
+		if (
+			result.reconciled < INSTANTLY.sync.reconcileLeadsPerRun &&
+			(await this.reconcileLead(key, {
+				contactId: resolved.id,
+				campaignId: campaign.id,
+				leadEmail: lead.email,
+				lastContactAt,
+				campaignNames,
+			}))
+		)
+			result.reconciled += 1;
+	}
+
+	private async saveResume(resume: InstantlySyncResume): Promise<void> {
+		await this.db.appSetting.update({
+			where: { id: SETTINGS_ID },
+			data: { instantlySyncResume: resume, instantlySyncError: null },
+		});
 	}
 
 	private async reconcileLead(
