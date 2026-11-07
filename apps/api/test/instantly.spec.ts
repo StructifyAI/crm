@@ -842,7 +842,7 @@ describe("Instantly campaign leads", () => {
 				where: { email: secondLead.email },
 				select: { ownerId: true },
 			}),
-		).toEqual({ ownerId: null });
+		).toEqual({ ownerId: mappedOwnerId });
 		expect(instantlyState(1, 0, new Date("2026-01-01T00:00:00.000Z"))).toBe(
 			"active",
 		);
@@ -1079,6 +1079,61 @@ describe("Instantly campaign leads", () => {
 				select: { ownerId: true },
 			}),
 		).toEqual({ ownerId: existingOwnerId });
+	});
+
+	it("gives a new campaign mailbox the owner its campaign already has", async () => {
+		const mappedMailbox = `campaign-mapped-${suffix}@example.test`;
+		const newMailbox = `campaign-new-${suffix}@example.test`;
+		await db.instantlyMailbox.create({
+			data: { emailAccount: mappedMailbox, ownerId: mappedOwnerId },
+		});
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const lead = {
+			id: `campaign-new-lead-${suffix}`,
+			email: `campaign-new@${domain}`,
+			status: 1,
+			email_reply_count: 0,
+			status_summary: {
+				lastStep: {
+					from: newMailbox,
+					stepID: "0_0_0",
+					timestamp_executed: "2026-01-01T00:00:00.000Z",
+				},
+			},
+		};
+		const client = {
+			listCampaigns: async () => [
+				{
+					id: `campaign-new-${suffix}`,
+					name: "New mailboxes",
+					status: 1,
+					email_list: [mappedMailbox, newMailbox],
+				},
+			],
+			listLeadSends: async () => [],
+			async *listCampaignLeads() {
+				yield [{ ...lead, campaign: `campaign-new-${suffix}` }];
+			},
+		} as unknown as InstantlyClient;
+
+		await new InstantlySyncService(db, client, filing).run();
+
+		expect(
+			await db.instantlyMailbox.findUnique({
+				where: { emailAccount: newMailbox },
+				select: { ownerId: true },
+			}),
+		).toEqual({ ownerId: mappedOwnerId });
+		expect(
+			await db.contact.findFirst({
+				where: { email: `campaign-new@${domain}` },
+				select: { ownerId: true },
+			}),
+		).toEqual({ ownerId: mappedOwnerId });
 	});
 });
 

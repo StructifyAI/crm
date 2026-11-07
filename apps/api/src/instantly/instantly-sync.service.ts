@@ -64,15 +64,21 @@ export class InstantlySyncService {
 					where: { emailAccount: { in: mailboxes } },
 					select: { emailAccount: true, ownerId: true },
 				});
-				const ownerId = mailboxOwners[0]?.ownerId;
-				const campaignOwnerId =
-					ownerId &&
-					mailboxOwners.length === mailboxes.length &&
-					mailboxOwners.every((row) => row.ownerId === ownerId)
-						? ownerId
-						: null;
+				const owners = new Set(
+					mailboxOwners.flatMap((row) => (row.ownerId ? [row.ownerId] : [])),
+				);
+				const campaignOwnerId = owners.size === 1 ? [...owners][0] : null;
+				if (campaignOwnerId) {
+					await this.db.instantlyMailbox.updateMany({
+						where: { emailAccount: { in: mailboxes }, ownerId: null },
+						data: { ownerId: campaignOwnerId },
+					});
+				}
 				const ownerByMailbox = new Map(
-					mailboxOwners.map((row) => [row.emailAccount, row.ownerId]),
+					mailboxOwners.map((row) => [
+						row.emailAccount,
+						row.ownerId ?? campaignOwnerId,
+					]),
 				);
 				for await (const leads of this.client.listCampaignLeads(
 					setting.instantlyApiKey,
