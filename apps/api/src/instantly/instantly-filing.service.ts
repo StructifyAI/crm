@@ -32,6 +32,7 @@ type ResolveContactInput = {
 	mailbox?: string | null;
 	reason: string;
 	status?: number;
+	create: boolean;
 };
 
 type SendEventType = (typeof INSTANTLY.filing.sendEvents)[number];
@@ -121,10 +122,10 @@ export class InstantlyFilingService {
 					select: { ownerId: true },
 				})
 			: null;
-		const bounced = input.status === -1;
+		const create = input.create && input.status !== -1;
 		const companyId = await this.companies.companyForEmail(email, {
 			ownerId: mailbox?.ownerId,
-			create: !bounced,
+			create,
 		});
 		const firstName = input.firstName?.trim() ?? "";
 		try {
@@ -136,8 +137,8 @@ export class InstantlyFilingService {
 				ownerId: mailbox?.ownerId ?? null,
 				source: RecordSource.INSTANTLY,
 				needsName: !firstName,
-				bouncedEmail: bounced,
-				createIfUnmatched: !bounced,
+				bouncedEmail: input.status === -1,
+				createIfUnmatched: create,
 				lastActivityAt: new Date(),
 			});
 			if (!contact) return null;
@@ -167,6 +168,7 @@ export class InstantlyFilingService {
 				lastName: event.lastName,
 				mailbox: event.email_account,
 				reason: "Replied to an Instantly campaign",
+				create: false,
 			});
 			if (!resolved || !event.campaign_id) return;
 			const interestStatus = interestStatusFor(event.event_type);
@@ -225,6 +227,7 @@ export class InstantlyFilingService {
 			lastName: send.lastName,
 			mailbox: send.mailbox,
 			reason: "Emailed from an Instantly campaign",
+			create: false,
 		});
 		if (!resolved) return "skipped";
 
@@ -267,6 +270,7 @@ export class InstantlyFilingService {
 					lastName: reply.lastName,
 					mailbox: reply.mailbox,
 					reason: "Replied to an Instantly campaign",
+					create: true,
 				})
 			: await this.existingContact(reply.leadEmail);
 		if (!resolved) return "skipped";

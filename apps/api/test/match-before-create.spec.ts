@@ -272,6 +272,7 @@ describe("match before create", () => {
 			lastName: "Lovley",
 			status: -1,
 			reason: "Instantly bounce",
+			create: false,
 		});
 
 		expect(result).toMatchObject({ id: existingId, created: false });

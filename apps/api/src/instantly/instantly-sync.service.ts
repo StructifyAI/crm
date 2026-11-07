@@ -186,6 +186,7 @@ export class InstantlySyncService {
 			mailbox: lastStep?.from ?? null,
 			reason: "Enrolled in an Instantly campaign",
 			status: lead.status,
+			create: false,
 		});
 		if (!resolved) {
 			await this.db.instantlyCampaignLead.updateMany({

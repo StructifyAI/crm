@@ -224,7 +224,9 @@ microsoft, nextjs, slack, stripe, vercel. **Stripe is there** — use it.
 Instantly sends webhook events to `/api/instantly/events/:secret`.
 The webhook secret stays in the URL and rotates from the connection page.
 Malformed payloads return 204 to prevent repeated vendor retries.
-Lead events create or update contacts through the standard intake filters.
+Only a reply creates a contact or company, through the standard intake filters.
+Sends, bounces, unsubscribes and the campaign sync update contacts that already exist
+and skip leads who are not in the CRM, so a cold-emailed lead enters the CRM on reply.
 Each sending mailbox maps to one workspace member as its contact owner.
 Every sync fills the owner for unowned contacts.
 A new mailbox takes the owner of its campaign when every mapped mailbox in that
