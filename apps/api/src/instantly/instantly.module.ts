@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { AgentModule } from "../agent/agent.module";
 import { CompaniesModule } from "../companies/companies.module";
 import { ContactEventsModule } from "../contact-events/contact-events.module";
+import { DealsModule } from "../deals/deals.module";
 import { TrpcModule } from "../trpc/trpc.module";
 import { InstantlyClient } from "./instantly.client";
 import { InstantlyController } from "./instantly.controller";
@@ -13,7 +14,13 @@ import { InstantlyIngestService } from "./instantly-ingest.service";
 import { InstantlySyncService } from "./instantly-sync.service";
 
 @Module({
-	imports: [TrpcModule, AgentModule, CompaniesModule, ContactEventsModule],
+	imports: [
+		TrpcModule,
+		AgentModule,
+		CompaniesModule,
+		ContactEventsModule,
+		DealsModule,
+	],
 	controllers: [InstantlyController],
 	providers: [
 		InstantlyFilingService,

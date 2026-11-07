@@ -21,6 +21,7 @@ import {
 } from "../crm/contact-intake";
 import { normalizeEmail } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
+import { DealsService } from "../deals/deals.service";
 import { stripQuotedHistory } from "../mailbox/message-text";
 import { isAutomatedAddress, isMachineAddress } from "../mailbox/participants";
 import { INSTANTLY } from "./instantly-config";
@@ -60,6 +61,7 @@ type TimelineEntry = {
 	uniboxUrl?: string | null;
 	mailbox: string | null;
 	occurredAt: Date;
+	opensDeal?: boolean;
 } & (
 	| { type: typeof ActivityType.EMAIL; direction: ContactDirection }
 	| { type: typeof ActivityType.NOTE; direction?: undefined }
@@ -104,6 +106,7 @@ export class InstantlyFilingService {
 		private readonly agent: AgentTriggerService,
 		private readonly stamp: ActivityStampService,
 		private readonly contactEvents: ContactEventsService,
+		private readonly deals: DealsService,
 	) {}
 
 	async resolveContact(
@@ -288,6 +291,7 @@ export class InstantlyFilingService {
 			uniboxUrl: reply.uniboxUrl,
 			mailbox: reply.mailbox,
 			occurredAt: reply.occurredAt,
+			opensDeal: true,
 		});
 		if (outcome === "filed" && reply.campaignId) {
 			await this.db.instantlyCampaignLead.updateMany({
@@ -337,7 +341,11 @@ export class InstantlyFilingService {
 			contact.ownerId ??
 			(await this.db.user.findFirst({ select: { id: true } }))?.id;
 		if (!author) return "skipped";
-		const deal = await this.openDealFor(contactId, contact.companyId);
+		const deal =
+			(await this.openDealFor(contactId, contact.companyId)) ??
+			(entry.opensDeal && contact.companyId
+				? await this.openReplyDeal(contactId, contact.companyId, author)
+				: null);
 
 		const activity = await this.db.activity.create({
 			data: {
@@ -387,6 +395,26 @@ export class InstantlyFilingService {
 			orderBy: [{ lastActivityAt: "desc" }, { createdAt: "desc" }],
 			select: { id: true },
 		});
+	}
+
+	private async openReplyDeal(
+		contactId: string,
+		companyId: string,
+		ownerId: string,
+	): Promise<{ id: string } | null> {
+		const company = await this.db.company.findUnique({
+			where: { id: companyId },
+			select: { name: true },
+		});
+		if (!company) return null;
+		const deal = await this.deals.create({
+			name: company.name,
+			companyId,
+			ownerId,
+			stage: "ENGAGED",
+		});
+		await this.deals.attachContact({ dealId: deal.id, contactId });
+		return { id: deal.id };
 	}
 }
 
