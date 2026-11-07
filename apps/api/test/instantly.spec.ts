@@ -74,7 +74,12 @@ async function clean() {
 	await db.instantlyMailbox.deleteMany({
 		where: { emailAccount: { endsWith: `@example.test` } },
 	});
-	await db.company.deleteMany({ where: { domain } });
+	await db.contact.deleteMany({
+		where: { email: { endsWith: `@cold-${domain}` } },
+	});
+	await db.company.deleteMany({
+		where: { domain: { in: [domain, `cold-${domain}`] } },
+	});
 	await db.user.deleteMany({
 		where: { id: { in: [existingOwnerId, mappedOwnerId] } },
 	});
@@ -373,7 +378,7 @@ describe("Instantly email polling", () => {
 
 		expect(await sync.run()).toEqual({
 			emails: 3,
-			filed: 2,
+			filed: 1,
 			replies: 0,
 			repliesFiled: 0,
 			complete: true,
@@ -399,16 +404,8 @@ describe("Instantly email polling", () => {
 			{ type: "EMAIL", subject: "Bump", body: "Bump body", dealId: deal.id },
 		]);
 		expect(
-			await db.activity.findFirst({
-				where: { contact: { email: `manual@${domain}` } },
-				select: { type: true, subject: true, body: true, occurredAt: true },
-			}),
-		).toEqual({
-			type: "EMAIL",
-			subject: "Manual note",
-			body: "Hi Chris,\n\nManual note body",
-			occurredAt: new Date("2026-09-25T09:00:00.000Z"),
-		});
+			await db.contact.count({ where: { email: `manual@${domain}` } }),
+		).toBe(0);
 		expect(
 			await db.instantlyCampaignLead.findUnique({
 				where: { leadId: `lead-polled-${suffix}` },
@@ -811,6 +808,12 @@ describe("Instantly campaign leads", () => {
 			status: 3,
 			email_reply_count: 0,
 		};
+		await db.contact.createMany({
+			data: [
+				{ email: firstLead.email, firstName: "First" },
+				{ email: secondLead.email, firstName: "Second" },
+			],
+		});
 		let includeSecond = true;
 		const client = {
 			listCampaigns: async () => [campaign],
@@ -828,7 +831,7 @@ describe("Instantly campaign leads", () => {
 		expect(firstRun).toMatchObject({
 			campaigns: 1,
 			leads: 2,
-			created: 2,
+			created: 0,
 			error: null,
 		});
 		const stored = await db.instantlyCampaignLead.findUnique({
@@ -892,6 +895,9 @@ describe("Instantly campaign leads", () => {
 				},
 			},
 		};
+		await db.contact.create({
+			data: { email: lead.email, firstName: "Lead" },
+		});
 		const asked: string[] = [];
 		const client = {
 			listCampaigns: async () => [campaign],
@@ -1139,6 +1145,12 @@ describe("Instantly campaign leads", () => {
 		const stale = leadFor("resume-stale");
 		const first = leadFor("resume-first");
 		const second = leadFor("resume-second");
+		await db.contact.createMany({
+			data: [stale, first, second].map((lead) => ({
+				email: lead.email,
+				firstName: "Resume",
+			})),
+		});
 		const cursors: (string | null)[] = [];
 		let pass: "stale" | "cut-off" | "resumed" = "stale";
 		const client = {
@@ -1202,6 +1214,9 @@ describe("Instantly campaign leads", () => {
 				},
 			},
 		};
+		await db.contact.create({
+			data: { email: lead.email, firstName: "Lead" },
+		});
 		const client = {
 			listCampaigns: async () => [
 				{
@@ -1234,6 +1249,56 @@ describe("Instantly campaign leads", () => {
 				select: { ownerId: true },
 			}),
 		).toEqual({ ownerId: mappedOwnerId });
+	});
+
+	it("keeps a campaign lead who has not replied out of the CRM", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const campaign = {
+			id: `campaign-cold-${suffix}`,
+			name: "Cold",
+			status: 1,
+			email_list: [],
+		};
+		const lead = {
+			id: `lead-cold-${suffix}`,
+			email: `cold@cold-${domain}`,
+			campaign: campaign.id,
+			status: 1,
+			email_reply_count: 0,
+		};
+		const client = {
+			listCampaigns: async () => [campaign],
+			listLeadSends: async () => [],
+			async listCampaignLeadPage() {
+				return { items: [lead], cursor: null };
+			},
+		} as unknown as InstantlyClient;
+
+		await new InstantlySyncService(db, client, filing).run();
+		await filing.fileSend({
+			leadEmail: lead.email,
+			firstName: "Cold",
+			lastName: null,
+			mailbox: null,
+			campaignId: campaign.id,
+			campaignName: campaign.name,
+			emailId: `email-cold-${suffix}`,
+			subject: "Hello",
+			text: "Hi there.",
+			occurredAt: new Date("2026-10-01T00:00:00.000Z"),
+		});
+
+		expect(await db.contact.count({ where: { email: lead.email } })).toBe(0);
+		expect(
+			await db.company.count({ where: { domain: `cold-${domain}` } }),
+		).toBe(0);
+		expect(
+			await db.instantlyCampaignLead.count({ where: { leadId: lead.id } }),
+		).toBe(0);
 	});
 });
 
