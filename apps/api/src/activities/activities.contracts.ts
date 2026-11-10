@@ -11,6 +11,7 @@ const COMPOSABLE_TYPES = [
 	ActivityType.EMAIL,
 	ActivityType.MEETING,
 	ActivityType.TASK,
+	ActivityType.LINKEDIN_POST,
 ] as const;
 
 const composableEnum = z.enum(COMPOSABLE_TYPES);
@@ -23,6 +24,7 @@ const ALL_ACTIVITY_TYPES = [
 	ActivityType.TASK,
 	ActivityType.STAGE_CHANGE,
 	ActivityType.ENRICHMENT,
+	ActivityType.LINKEDIN_POST,
 ] as const;
 
 const activityTypeOutput = z.enum(ALL_ACTIVITY_TYPES);

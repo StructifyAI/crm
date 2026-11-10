@@ -218,6 +218,7 @@ enum ActivityType {
   TASK
   STAGE_CHANGE
   ENRICHMENT
+  LINKEDIN_POST
 }
 
 enum EmailClassification {

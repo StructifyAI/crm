@@ -2,6 +2,7 @@ import ArrowRight from "@carbon/icons-react/es/ArrowRight";
 import Chat from "@carbon/icons-react/es/Chat";
 import Email from "@carbon/icons-react/es/Email";
 import Events from "@carbon/icons-react/es/Events";
+import LogoLinkedin from "@carbon/icons-react/es/LogoLinkedin";
 import MagicWand from "@carbon/icons-react/es/MagicWand";
 import Phone from "@carbon/icons-react/es/Phone";
 import Task from "@carbon/icons-react/es/Task";
@@ -21,6 +22,7 @@ const PRESENTATION: ActivityPresentation = {
 	TASK: { icon: Task, label: "Task" },
 	STAGE_CHANGE: { icon: ArrowRight, label: "Stage change" },
 	ENRICHMENT: { icon: MagicWand, label: "Enrichment" },
+	LINKEDIN_POST: { icon: LogoLinkedin, label: "LinkedIn post" },
 };
 
 export function activityLabel(type: ActivityType): string {
