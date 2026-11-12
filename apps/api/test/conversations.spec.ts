@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { DEFAULT_WORKSPACE_NAME, WORKSPACE_ID } from "@crm/auth";
+import { DEFAULT_WORKSPACE_NAME, WORKSPACE_ID } from "@crm/auth/organization";
 import { db } from "@crm/db";
 import { workspaceSlug } from "@crm/db/workspace";
 import { z } from "zod";
@@ -274,12 +274,18 @@ describe("ConversationsService", () => {
 		const sessionId = `ses_${suffix}_events`;
 		const saved = await service.save({ contactId, sessionId }, userId);
 		const emittedAt = new Date("2026-08-05T12:00:00.000Z");
+		const eventTypes = [
+			"turn.started",
+			"turn.completed",
+			"step.started",
+			"step.completed",
+		];
 		await db.agentEvent.createMany({
-			data: [0, 1, 2, 3].map((position) => ({
+			data: eventTypes.map((type, position) => ({
 				id: `evt_${suffix}_window_${position}`,
 				sessionId,
 				contactId,
-				type: `event.${position}`,
+				type,
 				data: {},
 				emittedAt: new Date(emittedAt.getTime() + position),
 			})),
@@ -289,7 +295,7 @@ describe("ConversationsService", () => {
 			(await service.events({ id: saved.id, limit: 2 }, userId)).map(
 				(event) => event.type,
 			),
-		).toEqual(["event.2", "event.3"]);
+		).toEqual(["step.started", "step.completed"]);
 	});
 
 	it("returns builder events from descendant sessions", async () => {
@@ -316,7 +322,16 @@ describe("ConversationsService", () => {
 					sessionId: rootSessionId,
 					conversationId: builder.id,
 					type: "actions.requested",
-					data: {},
+					data: {
+						actions: [
+							{
+								kind: "tool-call",
+								callId: "call-root",
+								toolName: "search_crm",
+								input: {},
+							},
+						],
+					},
 					emittedAt,
 				},
 				{
@@ -324,7 +339,21 @@ describe("ConversationsService", () => {
 					sessionId: `builder-question-${suffix}-child`,
 					conversationId: builder.id,
 					type: "input.requested",
-					data: {},
+					data: {
+						requests: [
+							{
+								requestId: "request-child",
+								kind: "question",
+								action: {
+									kind: "tool-call",
+									callId: "call-child",
+									toolName: "ask_user",
+									input: {},
+								},
+								prompt: "Choose one option.",
+							},
+						],
+					},
 					emittedAt: new Date(emittedAt.getTime() + 1),
 				},
 			],
@@ -336,7 +365,49 @@ describe("ConversationsService", () => {
 			),
 		).toEqual(["actions.requested", "input.requested"]);
 	});
+});
 
+describe("ConversationsService resume", () => {
+	it("returns the indexed root prefix for a builder reload", async () => {
+		const builder = await service.createBuilder(
+			{
+				clientRequestId: crypto.randomUUID(),
+				commandType: "CHAT",
+				message: "Keep this chat durable",
+				resources: [],
+				attachments: [],
+			},
+			userId,
+		);
+		const sessionId = `builder-resume-${suffix}`;
+		await db.agentConversation.update({
+			where: { id: builder.id },
+			data: { sessionId, streamIndex: 2 },
+		});
+		await db.agentEvent.createMany({
+			data: [0, 1].map((streamIndex) => ({
+				id: `evt_${suffix}_resume_${streamIndex}`,
+				sessionId,
+				conversationId: builder.id,
+				streamIndex,
+				deliveryIds: [`delivery-${streamIndex}`],
+				type: "message.completed",
+				data: { message: `Message ${streamIndex}` },
+				emittedAt: new Date(1_786_000_000_000 + streamIndex),
+			})),
+		});
+
+		const reloaded = await service.builderById(builder.id, userId);
+
+		expect(reloaded.resume?.session).toEqual({ sessionId, streamIndex: 2 });
+		expect(reloaded.resume?.events.map((event) => event.meta.id)).toEqual([
+			`evt_${suffix}_resume_0`,
+			`evt_${suffix}_resume_1`,
+		]);
+	});
+});
+
+describe("ConversationsService continued", () => {
 	it("forgets a conversation and the events behind it", async () => {
 		const sessionId = `ses_${suffix}_delete`;
 		const conversation = await service.save({ contactId, sessionId }, userId);
@@ -698,13 +769,21 @@ describe("ConversationsService", () => {
 			data: {
 				sessionId,
 				continuationToken: `crm:builder:${conversation.id}`,
-				pendingInputRequest: {
-					kind: "question",
-					requestId: "question-1",
-					prompt: "Where should this go?",
-					display: "select",
-					options: [{ id: "crm-task", label: "Create a CRM task" }],
-				},
+				pendingInputRequests: [
+					{
+						kind: "question",
+						requestId: "question-1",
+						prompt: "Where should this go?",
+						action: {
+							kind: "tool-call",
+							callId: "call-question-1",
+							toolName: "ask_question",
+							input: { prompt: "Where should this go?" },
+						},
+						display: "select",
+						options: [{ id: "crm-task", label: "Create a CRM task" }],
+					},
+				],
 			},
 		});
 
@@ -746,6 +825,185 @@ describe("ConversationsService", () => {
 				},
 			},
 		});
+	});
+
+	it("persists permission modes and queues durable tool approvals", async () => {
+		const conversation = await service.createBuilder(
+			{
+				clientRequestId: crypto.randomUUID(),
+				commandType: "CHAT",
+				message: "Archive the unused field",
+				resources: [],
+				attachments: [],
+			},
+			userId,
+		);
+		const sessionId = `builder-question-${suffix}-approval`;
+		await db.agentConversation.update({
+			where: { id: conversation.id },
+			data: {
+				sessionId,
+				continuationToken: `crm:builder:${conversation.id}`,
+				pendingInputRequests: [
+					{
+						kind: "tool-approval",
+						requestId: "approval-1",
+						prompt: "Archive the Renewal date field?",
+						action: {
+							kind: "tool-call",
+							callId: "call-approval-1",
+							toolName: "archive_field",
+							input: { fieldId: "field-1" },
+						},
+						options: [
+							{ id: "approve", label: "Approve", style: "primary" },
+							{ id: "cancel", label: "Decline", style: "danger" },
+						],
+					},
+				],
+			},
+		});
+
+		expect(
+			(await service.builderById(conversation.id, userId)).permissionMode,
+		).toBe("manual");
+		await service.setBuilderPermissionMode(
+			{ id: conversation.id, permissionMode: "auto" },
+			userId,
+		);
+		const detail = await service.builderById(conversation.id, userId);
+		expect(detail.permissionMode).toBe("auto");
+		expect(detail.pendingApproval).toMatchObject({
+			requestId: "approval-1",
+			action: { toolName: "archive_field" },
+		});
+
+		const response = await service.answerBuilderApproval(
+			{
+				id: conversation.id,
+				clientRequestId: crypto.randomUUID(),
+				requestId: "approval-1",
+				decision: "approve",
+			},
+			userId,
+		);
+		const submission = await db.agentConversationSubmission.findUnique({
+			where: { id: response.id },
+			select: {
+				commandType: true,
+				inputRequestId: true,
+				message: true,
+				status: true,
+			},
+		});
+
+		expect(submission).toMatchObject({
+			commandType: "CHAT",
+			inputRequestId: "approval-1",
+			status: "PENDING",
+			message: {
+				text: "Approved",
+				inputResponse: {
+					requestId: "approval-1",
+					optionId: "approve",
+				},
+			},
+		});
+	});
+
+	it("keeps every pending request and presents them by explicit priority", async () => {
+		const conversation = await service.createBuilder(
+			{
+				clientRequestId: crypto.randomUUID(),
+				commandType: "CREATE_AGENT",
+				message: "/Create agent Review new deals",
+				resources: [],
+				attachments: [],
+			},
+			userId,
+		);
+		await db.agentConversation.update({
+			where: { id: conversation.id },
+			data: {
+				sessionId: `builder-input-priority-${suffix}`,
+				continuationToken: `crm:builder:${conversation.id}`,
+				pendingInputRequests: [
+					{
+						kind: "question",
+						requestId: "question-after-gates",
+						prompt: "Which stage?",
+						action: {
+							kind: "tool-call",
+							callId: "call-question-after-gates",
+							toolName: "ask_question",
+							input: { prompt: "Which stage?" },
+						},
+						display: "text",
+					},
+					{
+						kind: "tool-approval",
+						requestId: "approval-after-limit",
+						prompt: "Save the draft?",
+						action: {
+							kind: "tool-call",
+							callId: "call-approval-after-limit",
+							toolName: "save_agent_draft",
+							input: { name: "Deal review" },
+						},
+						options: [
+							{ id: "approve", label: "Approve" },
+							{ id: "cancel", label: "Decline" },
+						],
+					},
+					{
+						kind: "session-limit",
+						requestId: "limit-before-approval",
+						prompt: "Continue this builder session?",
+						action: {
+							kind: "tool-call",
+							callId: "call-limit-before-approval",
+							toolName: "session_limit_continuation",
+							input: { kind: "output", limit: 40_000 },
+						},
+						options: [
+							{ id: "continue", label: "Continue" },
+							{ id: "stop", label: "Stop" },
+						],
+					},
+				],
+			},
+		});
+
+		const first = await service.builderById(conversation.id, userId);
+		expect(first.pendingSessionLimit?.requestId).toBe("limit-before-approval");
+		expect(first.pendingApproval).toBeNull();
+		expect(first.pendingQuestion).toBeNull();
+
+		await service.answerBuilderSessionLimit(
+			{
+				id: conversation.id,
+				clientRequestId: crypto.randomUUID(),
+				requestId: "limit-before-approval",
+				decision: "continue",
+			},
+			userId,
+		);
+		const second = await service.builderById(conversation.id, userId);
+		expect(second.pendingSessionLimit).toBeNull();
+		expect(second.pendingApproval?.requestId).toBe("approval-after-limit");
+
+		await service.answerBuilderApproval(
+			{
+				id: conversation.id,
+				clientRequestId: crypto.randomUUID(),
+				requestId: "approval-after-limit",
+				decision: "approve",
+			},
+			userId,
+		);
+		const third = await service.builderById(conversation.id, userId);
+		expect(third.pendingApproval).toBeNull();
+		expect(third.pendingQuestion?.requestId).toBe("question-after-gates");
 	});
 
 	it("rejects an answer when the conversation has no durable question", async () => {
@@ -803,16 +1061,24 @@ describe("ConversationsService", () => {
 			data: {
 				sessionId,
 				continuationToken: `crm:builder:${conversation.id}`,
-				pendingInputRequest: {
-					kind: "question",
-					requestId: "question-concurrent",
-					prompt: "Which output?",
-					display: "select",
-					options: [
-						{ id: "note", label: "Create a note" },
-						{ id: "task", label: "Create a task" },
-					],
-				},
+				pendingInputRequests: [
+					{
+						kind: "question",
+						requestId: "question-concurrent",
+						prompt: "Which output?",
+						action: {
+							kind: "tool-call",
+							callId: "call-question-concurrent",
+							toolName: "ask_question",
+							input: { prompt: "Which output?" },
+						},
+						display: "select",
+						options: [
+							{ id: "note", label: "Create a note" },
+							{ id: "task", label: "Create a task" },
+						],
+					},
+				],
 			},
 		});
 

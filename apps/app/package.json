@@ -12,10 +12,10 @@
 		"lint": "biome check ."
 	},
 	"dependencies": {
-		"@carbon/icons-react": "^11.82.0",
 		"@crm/auth": "workspace:*",
 		"@crm/db": "workspace:*",
 		"@crm/env": "workspace:*",
+		"@crm/mcp-integrations": "workspace:*",
 		"@crm/telemetry": "workspace:*",
 		"@crm/ui": "workspace:*",
 		"@crm/validation": "workspace:*",
@@ -26,14 +26,18 @@
 		"@trpc/server": "^11.18.0",
 		"@trpc/tanstack-react-query": "^11.18.0",
 		"api": "workspace:*",
-		"better-auth": "^1.6.25",
-		"eve": "^0.29.4",
-		"next": "16.3.0",
+		"better-auth": "1.7.7",
+		"eve": "^0.69.0",
+		"graphql": "^17.0.2",
+		"lucide-react": "1.48.0",
+		"next": "16.4.2",
 		"next-themes": "^0.4.6",
 		"nuqs": "^2.8.9",
-		"posthog-js": "^1.413.2",
+		"posthog-js": "^1.438.17",
 		"react": "19.2.4",
 		"react-dom": "19.2.4",
+		"server-only": "^0.0.1",
+		"shiki": "^4.4.2",
 		"sonner": "^2.0.7",
 		"zod": "^4.4.3"
 	},
@@ -45,7 +49,6 @@
 		"@types/node": "^20",
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
-		"tailwindcss": "^4",
 		"typescript": "^5"
 	},
 	"ignoreScripts": [

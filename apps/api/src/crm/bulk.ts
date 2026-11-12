@@ -2,13 +2,13 @@ import type { Db } from "@crm/db";
 import { BadRequestException } from "@nestjs/common";
 import { z } from "zod";
 
-export const MAX_BULK_IDS = 100;
+const MAX_BULK_IDS = 100;
 
 export const bulkIdsInput = z.object({
 	ids: z
 		.array(z.string())
 		.min(1, "Nothing was selected.")
-		.max(MAX_BULK_IDS, "Too many records at once — select a page at a time."),
+		.max(MAX_BULK_IDS, "Too many records at once. Select a page at a time."),
 });
 
 export type BulkResult = {

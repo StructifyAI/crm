@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { canManageConnections, WORKSPACE_ID } from "@crm/auth";
+import { canManageConnections, WORKSPACE_ID } from "@crm/auth/organization";
 import type { Db } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
 import {

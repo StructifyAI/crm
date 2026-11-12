@@ -22,20 +22,7 @@ const ROW = cn(PROPERTY_ROW, "items-center");
 const LABEL = PROPERTY_LABEL;
 const CONTROL =
 	"h-8 w-full justify-start px-2 font-normal hover:border-input hover:bg-muted/40 border border-transparent";
-const BLOCK_CONTROL = cn(
-	CONTROL,
-	"h-auto min-h-16 items-start whitespace-pre-wrap py-2 text-left leading-5",
-);
-
-export function savingField(update: {
-	isPending: boolean;
-	variables?: { data?: object } | undefined;
-}): (field: string) => boolean {
-	const fields = update.isPending
-		? Object.keys(update.variables?.data ?? {})
-		: [];
-	return (field) => fields.includes(field);
-}
+const BLOCK_CONTROL = "hover:border-input hover:bg-muted/40";
 
 export function savingValue(update: {
 	isPending: boolean;
@@ -250,6 +237,7 @@ export function InlineTextArea({
 	if (editing) {
 		return (
 			<Textarea
+				variant="flush"
 				aria-label={label}
 				autoFocus
 				value={draft}
@@ -275,7 +263,7 @@ export function InlineTextArea({
 	return (
 		<Button
 			variant="ghost"
-			size="sm"
+			size="block-flush"
 			aria-label={label}
 			className={BLOCK_CONTROL}
 			disabled={saving}
@@ -301,7 +289,7 @@ export function InlineDateField({
 	value,
 	onSave,
 	saving = false,
-	placeholder = "—",
+	placeholder = "Add value",
 }: {
 	label: string;
 	value: string | null;

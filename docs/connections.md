@@ -1,7 +1,7 @@
 # Connections — rules for AI agents
 
 Covers `/settings/connections` and everything under it: the index, per-connection
-pages, the intake endpoint, the add-connection picker, and identity matching.
+pages, the add-connection picker, and identity matching.
 
 Read `docs/design.md` first. Read `docs/api.md` before touching `apps/api`, and
 `docs/agent.md` before touching `apps/agent`. The Paper file is
@@ -45,17 +45,20 @@ undo it.
 Connecting is the same decision as disconnecting, because `replaceSlackConnection`
 deletes every other Slack account row: a second person connecting *replaces* the
 workspace's Slack, and every deployed agent then reads from and posts to whichever
-Slack they installed. Hiding the button is not enough — `authClient.oauth2.link`
+Slack they installed. Hiding the button is not enough — `authClient.linkSocial`
 is one POST.
 
 `slackConnectGuard` (`packages/auth/src/slack-connect.ts`) is Better Auth's
 `hooks.before`, and it asks the same `canManageConnections` the API does. It
-covers all three doors: `/oauth2/link`, `/sign-in/oauth2` (Slack is a connection,
+covers all three doors: `/link-social`, `/sign-in/social` (Slack is a connection,
 never a sign-in method, and that endpoint needs no session) and
-`/oauth2/callback/slack`. The callback is the one that matters — refusing there
+`/callback/slack`. The callback is the one that matters — refusing there
 happens **before the code is exchanged**, so a refused attempt writes no
 `SlackWorkspaceGrant` user token and deletes no bot token. Google and Microsoft
 sign in on different paths and never reach the guard.
+
+`slackOAuthCallback` redirects the registered `/oauth2/callback/slack` URL to the guarded callback.
+It preserves the code and state query parameters. Existing Slack app registrations keep their redirect URL.
 
 A workspace with no owner and no admin lets any member connect. There is nobody
 left to ask, and a fresh install must not be locked out of its first connection.
@@ -120,6 +123,12 @@ the same background task rather than waiting on a round trip
 (`apps/agent/agent/lib/slack-people.ts`). A builder chat that blocks on Slack is
 a builder chat that is as slow as Slack is.
 
+The connections page also recovers a missing channel inventory. When Slack is
+connected and an unfiltered channel read returns no rows, the API queues the
+same durable agent task. It never calls Slack itself. A completed empty fill is
+valid for `SLACK_INVENTORY.throttleMs`. A fill from before the current Slack
+connection does not count, because a reconnect can select another workspace.
+
 ## Permissions are shown in groups, not one line each
 
 Sixteen scopes read as noise. Group them by what they touch — people, channels it
@@ -180,39 +189,31 @@ needs its guardrails legible to whoever turns it on.
 
 ## Layout
 
-Page metrics are tokens. Never a literal.
+Every connection page renders through `ConnectionPage`, which is `PageShell`
+with `width="narrow"`. The shell owns the gutters, the top and bottom padding
+and the column width, so connection pages line up with every other settings
+page. Do not add a page wrapper of your own.
+
+Metrics inside the column are tokens. Never a literal.
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--spacing-page-top` | 40px | Top bar to first line of content |
-| `--spacing-page-bottom` | 40px | Below the last block |
-| `--spacing-page-inline` | 24px | Viewport gutters |
-| `--spacing-page-gap` | 24px | Between top-level blocks |
-| `--spacing-block-inline` | 20px | Inset on every block, **including the page title** |
-| `--container-page` | 820px | Content column |
+| `--spacing-page-gap` | 24px | Gap within flat sections |
+| `--spacing-block-inline` | 20px | Inset within legacy content blocks |
 | `--container-page-wide` | 1120px | Two-column or table pages |
 | `--container-narrow` | 560px | Empty states, dialogs |
 | `--container-sheet` | 640px | Edit sheet over a page |
+| `--height-tool-panel` | 400–640px | Scrollable tool inventories |
 
-`--spacing-block-inline` is the one doing real work: a card sits flush at the
-column edge and carries 20px of its own padding, so card text lands in the same
-lane as the title on a flat page. The two page types stay aligned without
-matching each other's chrome.
+Page headers and section headers align with the column edge.
+Shared `SettingsCard` components own their content padding and footer spacing.
+Shared component sizes take precedence over the legacy content tokens above.
+Use `SettingsColumn` between settings cards and `PageSection` for flat tool inventories.
+Do not add an inset to page headers to match card content.
 
-Short single-decision pages (empty state, pre-connect, match people) centre
-vertically. List pages top-align so nothing jumps when a row is added.
-
-## Cards versus flat
-
-Cards are for **discrete, independently-actionable objects** — an agent you can
-pause on its own, a connection row with its own Manage button, a choice in a
-picker, a Questionnaire.
-
-Flat sections separated by a 1px `--color-dark-border` rule are for **a page
-describing one thing** — the intake page, the pre-connect page.
-
-The split is by what the block *is*, not by page. Do not card a section; do not
-flatten a list of separately-actionable objects.
+Connection status, synchronization choices, revocation, and deletion use separate settings cards.
+Tool access, permissions, and agent usage use flat page sections.
+Connection pickers retain cards for independent connection choices.
 
 ## Brand marks
 
@@ -305,3 +306,32 @@ icon marks are used at these sizes; the wordmarks stay unused.
 
 Docusign is spelled with a lowercase s since its 2024 rebrand. The note-taker is
 **Ergo**.
+
+## MCP connections
+
+Clerk, Cloudflare, Linear, Neon, PlanetScale, Prisma, Supabase, and Vercel use the shared MCP connection flow.
+An owner or admin chooses read-only or read-and-write access.
+The API stores OAuth tokens in encrypted form.
+The API never returns tokens to the browser.
+
+The agent builder lists only connected platforms.
+Each deployed version stores exact tool names and fingerprints.
+The deployment review shows each tool and its call kind.
+Changed tools stop until a new version receives review.
+Disconnecting a platform blocks the next tool call.
+The agent resolves MCP tools from the deployed version at session start.
+The model never receives disconnected, changed, unreviewed, or undeployed tools.
+Model-facing results stop at 16 KiB.
+Archived results stop below 32 KiB.
+
+The chat compiles every connected provider result into the shared provider card.
+The compiler handles arrays, common collection objects, records, and short scalar results.
+The compiler removes secret fields, large text fields, unsafe links, and raw JSON walls.
+Known marks render automatically. Unknown marks use the approved initials fallback.
+Provider-specific result components are not required for new catalog entries.
+
+Supabase read-only access also uses the hosted server's `read_only=true` mode.
+Treat SQL execution, logs, keys, deployments, secrets, billing, and branch changes as risky.
+
+Vercel accepts only reviewed MCP clients.
+Keep the Vercel connection unavailable in production until Comp AI CRM receives approval.

@@ -1,6 +1,5 @@
 "use client";
 
-import TrashCan from "@carbon/icons-react/es/TrashCan";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -21,6 +20,7 @@ import {
 } from "@crm/ui/components/select";
 import { StatusIndicator } from "@crm/ui/components/status-indicator";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Trash2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -387,7 +387,7 @@ export function ExtrovertConnection({
 										aria-label={`Remove ${member.name}`}
 										onClick={() => removeMember.mutate({ id: member.id })}
 									>
-										<Icon icon={TrashCan} />
+										<Icon icon={Trash2Icon} />
 									</Button>
 								</div>
 							))}
