@@ -1,6 +1,5 @@
 "use client";
 
-import Settings from "@carbon/icons-react/es/Settings";
 import type { FieldValueJson } from "@crm/db/fields";
 import { Button } from "@crm/ui/components/button";
 import { Checkbox } from "@crm/ui/components/checkbox";
@@ -11,6 +10,7 @@ import {
 	TooltipTrigger,
 } from "@crm/ui/components/tooltip";
 import { useQuery } from "@tanstack/react-query";
+import { SettingsIcon } from "lucide-react";
 import { InlineMultiSelectField } from "@/components/crm/fields/multi-select-field";
 import {
 	InlineDateField,
@@ -50,7 +50,7 @@ export function FieldsCog({ kind }: { kind: RecordKind }) {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<Button variant="ghost" size="icon-sm" onClick={() => open(kind)}>
-					<Icon icon={Settings} />
+					<Icon icon={SettingsIcon} />
 					<span className="sr-only">Fields</span>
 				</Button>
 			</TooltipTrigger>

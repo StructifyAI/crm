@@ -16,7 +16,7 @@ import {
 	workDomain,
 } from "./participants";
 
-export type SyncRecordSource =
+type SyncRecordSource =
 	| typeof RecordSource.EMAIL
 	| typeof RecordSource.CALENDAR;
 

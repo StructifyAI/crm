@@ -1,34 +1,36 @@
-import ArrowRight from "@carbon/icons-react/es/ArrowRight";
-import Chat from "@carbon/icons-react/es/Chat";
-import Email from "@carbon/icons-react/es/Email";
-import Events from "@carbon/icons-react/es/Events";
-import LogoLinkedin from "@carbon/icons-react/es/LogoLinkedin";
-import MagicWand from "@carbon/icons-react/es/MagicWand";
-import Phone from "@carbon/icons-react/es/Phone";
-import Task from "@carbon/icons-react/es/Task";
 import type { ActivityType } from "@crm/db/enums";
-import type { CarbonIcon } from "@crm/ui/components/icon";
+import LinkedInLogo from "@crm/ui/components/brand-logos/linkedin";
+import type { IconComponent } from "@crm/ui/components/icon";
+import {
+	ArrowRightIcon,
+	CalendarDaysIcon,
+	MailIcon,
+	MessageSquareIcon,
+	PhoneIcon,
+	SquareCheckIcon,
+	WandSparklesIcon,
+} from "lucide-react";
 
 type ActivityPresentation = Record<
 	ActivityType,
-	{ icon: CarbonIcon; label: string }
+	{ icon: IconComponent; label: string }
 >;
 
 const PRESENTATION: ActivityPresentation = {
-	NOTE: { icon: Chat, label: "Note" },
-	CALL: { icon: Phone, label: "Call" },
-	EMAIL: { icon: Email, label: "Email" },
-	MEETING: { icon: Events, label: "Meeting" },
-	TASK: { icon: Task, label: "Task" },
-	STAGE_CHANGE: { icon: ArrowRight, label: "Stage change" },
-	ENRICHMENT: { icon: MagicWand, label: "Enrichment" },
-	LINKEDIN_POST: { icon: LogoLinkedin, label: "LinkedIn post" },
+	NOTE: { icon: MessageSquareIcon, label: "Note" },
+	CALL: { icon: PhoneIcon, label: "Call" },
+	EMAIL: { icon: MailIcon, label: "Email" },
+	MEETING: { icon: CalendarDaysIcon, label: "Meeting" },
+	TASK: { icon: SquareCheckIcon, label: "Task" },
+	STAGE_CHANGE: { icon: ArrowRightIcon, label: "Stage change" },
+	ENRICHMENT: { icon: WandSparklesIcon, label: "Enrichment" },
+	LINKEDIN_POST: { icon: LinkedInLogo, label: "LinkedIn post" },
 };
 
 export function activityLabel(type: ActivityType): string {
 	return PRESENTATION[type].label;
 }
 
-export function activityIcon(type: ActivityType): CarbonIcon {
+export function activityIcon(type: ActivityType): IconComponent {
 	return PRESENTATION[type].icon;
 }

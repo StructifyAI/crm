@@ -104,7 +104,10 @@ Node module that cannot exist in a browser.
 
 ```tsx
 "use client";
-import { describeSlackScopes, SLACK_SCOPE_GROUPS } from "@crm/auth";
+import {
+  describeSlackScopes,
+  SLACK_SCOPE_GROUPS,
+} from "@crm/auth/slack-scopes";
 
 export function SlackScopeGroups({ scopes }: { scopes: string[] }) {
   const groups = SLACK_SCOPE_GROUPS.map(...)
@@ -115,7 +118,10 @@ export function SlackScopeGroups({ scopes }: { scopes: string[] }) {
 
 ```tsx
 // page.tsx — server
-import { describeSlackScopes, SLACK_SCOPE_GROUPS } from "@crm/auth";
+import {
+  describeSlackScopes,
+  SLACK_SCOPE_GROUPS,
+} from "@crm/auth/slack-scopes";
 
 const groups = groupScopes(status.scopes);
 return <SlackScopeGroups groups={groups} />;
@@ -251,53 +257,14 @@ it:
 
 @docs/design.md
 
-## Median Tasks
-
-Median can use a project-local workspace binding. If this repository has
-`.median/config.json`, run `mdn` commands from inside this repository so the
-correct Median workspace profile is selected. The local config stores only a
-profile name; API keys stay in your user config.
-
-To bind this repository to a workspace:
-
-```
-mdn setup --local
-```
-
-Before starting work, check your assigned tasks:
-
-```
-mdn tasks --agent <your-agent-name>
-```
-
-When picking up a task:
-
-```
-mdn status <TASK-CODE> in_progress --agent <your-agent-name>
-```
-
-When completing a task:
-
-```
-mdn status <TASK-CODE> ready --agent <your-agent-name>
-```
-
-To create a new task:
-
-```
-mdn create --title "Description" --status todo --priority medium --agent <your-agent-name>
-```
-
 ## Commit Messages & Pull Requests
 
-Always include the Median task ID in commit messages and PR titles so tasks get marked automatically.
+**Branch from `main`, never from `release`.** `release` is the default branch so
+that a plain clone runs the last tagged release, and the only things that merge
+into it are release pull requests. A branch cut from `release` carries release
+merge commits that do not belong in a feature pull request.
 
-```
-git commit -m "MDN-42 fix: resolve auth token expiry"
-```
-
-For pull requests, include the task ID in the title:
-
-```
-MDN-42 fix: resolve auth token expiry
-```
+**You do not write the pull request title.** `.github/scripts/pr-title.sh` reads
+the diff and writes one. Retitle it yourself and the automation stops.
+`CONTRIBUTING.md` is the whole account of how a change reaches `release`; read it
+before shipping.

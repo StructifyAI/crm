@@ -101,16 +101,16 @@ describe("builder persistence", () => {
 		expect(
 			await db.agentConversation.findUnique({
 				where: { id: conversationId },
-				select: { continuationToken: true, pendingInputRequest: true },
+				select: { continuationToken: true, pendingInputRequests: true },
 			}),
 		).toEqual({
 			continuationToken: builderToken(conversationId),
-			pendingInputRequest: request,
+			pendingInputRequests: [request],
 		});
 		expect(
 			await db.agentEvent.findUnique({
 				where: {
-					id: `builder-input:${conversationId}:${request.requestId}`,
+					id: `builder-input:${conversationId}:${event.turnId}:${event.sequence}:${event.stepIndex}`,
 				},
 				select: { conversationId: true, type: true, data: true },
 			}),
@@ -153,16 +153,88 @@ describe("builder persistence", () => {
 		expect(
 			await db.agentConversation.findUnique({
 				where: { id: conversationId },
-				select: { pendingInputRequest: true },
+				select: { pendingInputRequests: true },
 			}),
-		).toEqual({ pendingInputRequest: newer.requests[0] });
+		).toEqual({ pendingInputRequests: newer.requests });
 		expect(
 			await db.agentEvent.count({
 				where: {
-					id: `builder-input:${conversationId}:stale-question-from-child`,
+					id: `builder-input:${conversationId}:${event.turnId}:2:${event.stepIndex}`,
 				},
 			}),
 		).toBe(0);
+	});
+
+	it("persists every request from the same event", async () => {
+		const conversation = await db.agentConversation.create({
+			data: {
+				kind: "BUILDER",
+				userId,
+				sessionId: `builder-approval-session-${suffix}`,
+			},
+			select: { id: true },
+		});
+		conversationIds.push(conversation.id);
+		const approval = {
+			kind: "tool-approval" as const,
+			requestId: "approval-from-child",
+			prompt: "Archive the field?",
+			action: {
+				kind: "tool-call" as const,
+				callId: "approval-call",
+				toolName: "archive_field",
+				input: { fieldId: "field-1" },
+			},
+			options: [
+				{ id: "approve", label: "Approve" },
+				{ id: "cancel", label: "Decline" },
+			],
+		};
+		const question = {
+			kind: "question" as const,
+			requestId: "question-after-approval",
+			prompt: "Which field?",
+			action: {
+				kind: "tool-call" as const,
+				callId: "question-call",
+				toolName: "ask_question",
+				input: { prompt: "Which field?" },
+			},
+		};
+		const sessionLimit = {
+			kind: "session-limit" as const,
+			requestId: "session-limit-from-child",
+			prompt: "This session reached its usage limit. Continue?",
+			action: {
+				kind: "tool-call" as const,
+				callId: "session-limit-call",
+				toolName: "session_limit",
+				input: {},
+			},
+			options: [
+				{ id: "continue", label: "Continue" },
+				{ id: "stop", label: "Stop" },
+			],
+		};
+
+		expect(
+			await persistBuilderInputRequest(
+				{
+					requests: [question, approval, sessionLimit],
+					sequence: 1,
+					stepIndex: 1,
+					turnId: "approval-turn",
+				},
+				undefined,
+				conversation.id,
+			),
+		).toBe(true);
+		expect(
+			await db.agentConversation.findUnique({
+				where: { id: conversation.id },
+				select: { pendingInputRequests: true },
+			}),
+		).toEqual({ pendingInputRequests: [question, approval, sessionLimit] });
 	});
 
 	it("ignores a delayed question from a turn the session has already left", async () => {
@@ -219,13 +291,13 @@ describe("builder persistence", () => {
 		expect(
 			await db.agentConversation.findUnique({
 				where: { id: conversation.id },
-				select: { pendingInputRequest: true },
+				select: { pendingInputRequests: true },
 			}),
-		).toEqual({ pendingInputRequest: current });
+		).toEqual({ pendingInputRequests: [current] });
 		expect(
 			await db.agentEvent.count({
 				where: {
-					id: `builder-input:${conversation.id}:earlier-turn-question`,
+					id: `builder-input:${conversation.id}:turn_3:3:7`,
 				},
 			}),
 		).toBe(0);

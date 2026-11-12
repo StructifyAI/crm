@@ -1,10 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import { type Deadline, deadlineIn } from "../mailbox/deadline";
+import {
+	GOOGLE_SYNC_SOURCES,
+	type GoogleSyncSource,
+} from "../mailbox/mailbox.constants";
 import { SYNC_TICK } from "../mailbox/mailbox-config";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import { CalendarSyncService } from "./calendar-sync.service";
 import { GmailSyncService } from "./gmail-sync.service";
-import { GOOGLE_SYNC_SOURCES, type GoogleSyncSource } from "./google.constants";
 
 @Injectable()
 export class GoogleSyncService {

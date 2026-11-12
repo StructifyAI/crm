@@ -7,7 +7,9 @@
 		".": "./src/index.ts",
 		"./activity-meta": "./src/activity-meta.ts",
 		"./agent-events": "./src/agent-events.ts",
+		"./agent-connection-request": "./src/agent-connection-request.ts",
 		"./agent-manifest": "./src/agent-manifest.ts",
+		"./agent-permission": "./src/agent-permission.ts",
 		"./calendar-sync-resume": "./src/calendar-sync-resume.ts",
 		"./company-size": "./src/company-size.ts",
 		"./contact-events": "./src/contact-events.ts",
@@ -16,8 +18,11 @@
 		"./email-recipients": "./src/email-recipients.ts",
 		"./email-triage": "./src/email-triage.ts",
 		"./builder-question": "./src/builder-question.ts",
+		"./builder-session-limit": "./src/builder-session-limit.ts",
+		"./company-import": "./src/company-import.ts",
 		"./enrichment-queue": "./src/enrichment-queue.ts",
 		"./eve-stream": "./src/eve-stream.ts",
+		"./eve-public-event": "./src/eve-public-event.ts",
 		"./eve-tool": "./src/eve-tool.ts",
 		"./field-backfill": "./src/field-backfill.ts",
 		"./field-templates": "./src/field-templates.ts",
@@ -34,7 +39,8 @@
 		"./extrovert-webhook": "./src/extrovert-webhook.ts",
 		"./linkedin-url": "./src/linkedin-url.ts",
 		"./unipile-api": "./src/unipile-api.ts",
-		"./unipile-dm-state": "./src/unipile-dm-state.ts"
+		"./unipile-dm-state": "./src/unipile-dm-state.ts",
+		"./search-config": "./src/search-config.ts"
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",

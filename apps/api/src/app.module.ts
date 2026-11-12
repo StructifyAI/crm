@@ -1,4 +1,4 @@
-import { auth } from "@crm/auth";
+import { auth } from "@crm/auth/auth";
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { AuthModule as BetterAuthModule } from "@thallesp/nestjs-better-auth";
@@ -29,6 +29,7 @@ import { InstantlyModule } from "./instantly/instantly.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
 import { MailboxModule } from "./mailbox/mailbox.module";
+import { McpModule } from "./mcp/mcp.module";
 import { MicrosoftModule } from "./microsoft/microsoft.module";
 import { SavedViewsModule } from "./saved-views/saved-views.module";
 import { SearchModule } from "./search/search.module";
@@ -77,6 +78,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		MicrosoftModule,
 		InstantlyModule,
 		ExtrovertModule,
+		McpModule,
 		SyncModule,
 		SettingsModule,
 		WorkspaceModule,

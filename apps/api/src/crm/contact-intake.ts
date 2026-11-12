@@ -1,4 +1,4 @@
-import { workspaceDomains } from "@crm/auth";
+import { workspaceDomains } from "@crm/auth/workspace";
 import {
 	ContactEmailStatus,
 	type Db,
