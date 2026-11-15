@@ -243,12 +243,14 @@ export class CalendarSyncService {
 		let written = 0;
 		let removed = 0;
 		let pages = 0;
+		let frontier: Date | null = null;
 
 		while (pages < MAILBOX_RECONCILE.calendarMaxPages) {
 			const result = await this.calendar.listEvents(token.accessToken, {
 				timeMin,
 				timeMax,
 				pageToken,
+				orderBy: "startTime",
 			});
 
 			pages += 1;
@@ -258,6 +260,12 @@ export class CalendarSyncService {
 			}
 
 			for (const event of result.data.items ?? []) {
+				const startedAt =
+					eventTime(event.start)?.at ?? eventTime(event.originalStartTime)?.at;
+				if (startedAt && (!frontier || startedAt > frontier)) {
+					frontier = startedAt;
+				}
+
 				const applied = await this.apply(event, row, context);
 				if (applied === "written") written += 1;
 				if (applied === "removed") removed += 1;
@@ -275,7 +283,16 @@ export class CalendarSyncService {
 			pages,
 		});
 
-		if (!pageToken && !cycleComplete) {
+		let continuedFrom: Date | null = null;
+		if (pageToken) {
+			continuedFrom =
+				frontier && frontier.getTime() > windowStart.getTime()
+					? frontier
+					: null;
+			if (continuedFrom) {
+				await this.state.advanceReconcileCursor(row.id, continuedFrom);
+			}
+		} else if (!cycleComplete) {
 			await this.state.advanceReconcileCursor(row.id, windowEnd);
 		}
 
@@ -287,7 +304,9 @@ export class CalendarSyncService {
 			eventsRemoved: removed,
 			reconcileComplete: !pageToken && cycleComplete,
 			reason: pageToken
-				? "Page budget reached; continuing next reconcile."
+				? continuedFrom
+					? "Page budget reached; continuing from last event."
+					: "Page budget reached; continuing next reconcile."
 				: cycleComplete
 					? undefined
 					: "Reconciliation window continues next run.",
