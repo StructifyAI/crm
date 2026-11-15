@@ -12,10 +12,7 @@ import {
 	stripQuotedHistory,
 } from "../mailbox/message-text";
 import { parseAddress, parseAddressList } from "../mailbox/participants";
-import {
-	GMAIL_RECONCILE_MAX_MESSAGES,
-	RECONCILE_PAST_MS,
-} from "../mailbox/reconciliation-config";
+import { MAILBOX_RECONCILE } from "../mailbox/reconciliation-config";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import {
 	type IncomingMessage,
@@ -138,16 +135,19 @@ export class GmailSyncService {
 		}
 
 		const before = new Date();
-		const after = new Date(before.getTime() - RECONCILE_PAST_MS);
+		const after = new Date(before.getTime() - MAILBOX_RECONCILE.pastMs);
 		const ids: string[] = [];
 		let pageToken: string | undefined;
 
-		while (ids.length < GMAIL_RECONCILE_MAX_MESSAGES) {
+		while (ids.length < MAILBOX_RECONCILE.gmailMaxMessages) {
 			const page = await this.gmail.listMessages(token.accessToken, {
 				after,
 				before,
 				pageToken,
-				maxResults: Math.min(100, GMAIL_RECONCILE_MAX_MESSAGES - ids.length),
+				maxResults: Math.min(
+					100,
+					MAILBOX_RECONCILE.gmailMaxMessages - ids.length,
+				),
 			});
 
 			if (page.outcome !== "ok") {
@@ -157,7 +157,7 @@ export class GmailSyncService {
 			for (const message of page.data.messages ?? []) {
 				if (!message.id) continue;
 				ids.push(message.id);
-				if (ids.length >= GMAIL_RECONCILE_MAX_MESSAGES) break;
+				if (ids.length >= MAILBOX_RECONCILE.gmailMaxMessages) break;
 			}
 
 			pageToken = page.data.nextPageToken;
@@ -170,6 +170,7 @@ export class GmailSyncService {
 			mailbox,
 			ids,
 			ids.length,
+			true,
 		);
 
 		this.logger.log({
@@ -291,15 +292,33 @@ export class GmailSyncService {
 		mailbox: string,
 		ids: readonly string[],
 		limit = MAX_MESSAGES_PER_TICK,
+		rematchExisting = false,
 	): Promise<{ written: number; remaining: number }> {
 		if (ids.length === 0) return { written: 0, remaining: 0 };
 
 		const alreadyHave = await this.db.emailMessage.findMany({
 			where: { gmailMessageId: { in: [...ids] } },
-			select: { gmailMessageId: true },
+			select: {
+				gmailMessageId: true,
+				thread: {
+					select: {
+						companyId: true,
+						contactId: true,
+						activity: { select: { id: true } },
+					},
+				},
+			},
 		});
 		const seen = new Set(
-			alreadyHave.map((existing) => existing.gmailMessageId),
+			alreadyHave
+				.filter(
+					(existing) =>
+						!rematchExisting ||
+						(existing.thread.companyId !== null &&
+							existing.thread.contactId !== null &&
+							existing.thread.activity !== null),
+				)
+				.map((existing) => existing.gmailMessageId),
 		);
 
 		const pending = ids.filter((id) => !seen.has(id));

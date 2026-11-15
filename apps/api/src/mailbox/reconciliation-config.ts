@@ -1,9 +1,13 @@
-const MINUTE_MS = 60_000;
+const SECOND_MS = 1_000;
+const MINUTE_MS = 60 * SECOND_MS;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
-export const RECONCILE_INTERVAL_MS = 20 * HOUR_MS;
-export const RECONCILE_BUDGET_MS = 3 * MINUTE_MS;
-export const RECONCILE_PAST_MS = 14 * DAY_MS;
-export const GMAIL_RECONCILE_MAX_MESSAGES = 240;
-export const CALENDAR_RECONCILE_MAX_PAGES = 3;
+export const MAILBOX_RECONCILE = {
+	intervalMs: 20 * HOUR_MS,
+	budgetMs: 45 * SECOND_MS,
+	pastMs: 14 * DAY_MS,
+	futureMs: 14 * DAY_MS,
+	gmailMaxMessages: 120,
+	calendarMaxPages: 2,
+} as const;

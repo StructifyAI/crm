@@ -7,10 +7,7 @@ import {
 	isGoogleSyncSource,
 	isMicrosoftSyncSource,
 } from "../mailbox/mailbox.constants";
-import {
-	RECONCILE_BUDGET_MS,
-	RECONCILE_INTERVAL_MS,
-} from "../mailbox/reconciliation-config";
+import { MAILBOX_RECONCILE } from "../mailbox/reconciliation-config";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import { MicrosoftConnectionService } from "../microsoft/microsoft-connection.service";
 import { MicrosoftSyncService } from "../microsoft/microsoft-sync.service";
@@ -131,11 +128,11 @@ export class MailboxSyncService {
 		const due = await this.state.dueForReconciliation(
 			new Date(),
 			GOOGLE_SYNC_SOURCES,
-			RECONCILE_INTERVAL_MS,
+			MAILBOX_RECONCILE.intervalMs,
 		);
 
 		for (const [index, row] of due.entries()) {
-			if (Date.now() - startedAt > RECONCILE_BUDGET_MS) {
+			if (Date.now() - startedAt > MAILBOX_RECONCILE.budgetMs) {
 				this.logger.log({
 					message: "Reconciliation budget reached",
 					remaining: due.length - index,

@@ -15,10 +15,7 @@ import {
 } from "../mailbox/mailbox-match.service";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import { isMachineAddress, type Participant } from "../mailbox/participants";
-import {
-	CALENDAR_RECONCILE_MAX_PAGES,
-	RECONCILE_PAST_MS,
-} from "../mailbox/reconciliation-config";
+import { MAILBOX_RECONCILE } from "../mailbox/reconciliation-config";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import {
 	CalendarClient,
@@ -227,14 +224,18 @@ export class CalendarSyncService {
 			suppressedEmails,
 		};
 
-		const timeMin = new Date(Date.now() - RECONCILE_PAST_MS).toISOString();
-		const timeMax = this.horizon().toISOString();
+		const timeMin = new Date(
+			Date.now() - MAILBOX_RECONCILE.pastMs,
+		).toISOString();
+		const timeMax = new Date(
+			Date.now() + MAILBOX_RECONCILE.futureMs,
+		).toISOString();
 		let pageToken: string | undefined;
 		let written = 0;
 		let removed = 0;
 		let pages = 0;
 
-		while (pages < CALENDAR_RECONCILE_MAX_PAGES) {
+		while (pages < MAILBOX_RECONCILE.calendarMaxPages) {
 			const result = await this.calendar.listEvents(token.accessToken, {
 				timeMin,
 				timeMax,
