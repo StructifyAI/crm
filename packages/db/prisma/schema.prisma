@@ -1500,8 +1500,9 @@ model MailboxSync {
   status       GoogleSyncStatus @default(IDLE)
   cursor       String?
   resume       Json?
-  lastSyncedAt DateTime?
-  lastError    String?
+  lastSyncedAt      DateTime?
+  lastReconciledAt DateTime?
+  lastError         String?
   retryAfter   DateTime?
   autoCreate   Boolean          @default(false)
 

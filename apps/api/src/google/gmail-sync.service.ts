@@ -6,7 +6,7 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { type Deadline, overdue } from "../mailbox/deadline";
-import { GMAIL_BACKFILL } from "../mailbox/mailbox-config";
+import { GMAIL_BACKFILL, MAILBOX_RECONCILE } from "../mailbox/mailbox-config";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import {
 	normaliseMessageId,
@@ -184,6 +184,128 @@ export class GmailSyncService {
 		}
 
 		return this.backfill(row, session, mailbox, backfill, deadline);
+	}
+
+	async reconcile(
+		row: MailboxSync,
+		deadline: Deadline,
+	): Promise<GmailSyncOutcome> {
+		const token = await this.tokens.accessTokenFor(row.userId, "gmail");
+
+		if (token.outcome === "not-connected") {
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "skipped",
+				reason: token.reason,
+			};
+		}
+
+		if (token.outcome === "needs-reconnect") {
+			await this.state.markNeedsReconnect(row.id, token.reason);
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "reconnect",
+				reason: token.reason,
+			};
+		}
+
+		if (!row.cursor || row.cursor.startsWith(BACKFILL_CURSOR_PREFIX)) {
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "skipped",
+				reason: "Gmail is not on the incremental cursor.",
+			};
+		}
+
+		const session = new TokenSession(
+			this.tokens,
+			row.userId,
+			"gmail",
+			token.accessToken,
+		);
+		const profile = await session.call((accessToken) =>
+			this.gmail.profile(accessToken),
+		);
+		if (profile.outcome !== "ok") {
+			return this.handleFailure(row, profile);
+		}
+
+		const mailbox = profile.data.emailAddress?.toLowerCase() ?? null;
+		if (!mailbox) {
+			await this.state.markFailed(row.id, "Gmail returned no mailbox address.");
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "failed",
+				reason: "No mailbox address.",
+			};
+		}
+
+		const now = new Date();
+		const after = new Date(now.getTime() - MAILBOX_RECONCILE.windowMs);
+		const ids: string[] = [];
+		let pageToken: string | undefined;
+
+		while (ids.length < MAILBOX_RECONCILE.maxMessages) {
+			const page = await session.call((accessToken) =>
+				this.gmail.listMessages(accessToken, {
+					after,
+					before: now,
+					pageToken,
+					maxResults: Math.min(
+						GMAIL_BACKFILL.pageSize,
+						MAILBOX_RECONCILE.maxMessages - ids.length,
+					),
+				}),
+			);
+
+			if (page.outcome !== "ok") {
+				return this.handleFailure(row, page);
+			}
+
+			for (const message of page.data.messages ?? []) {
+				if (!message.id) continue;
+				ids.push(message.id);
+				if (ids.length >= MAILBOX_RECONCILE.maxMessages) break;
+			}
+
+			pageToken = page.data.nextPageToken;
+			if (!pageToken || overdue(deadline)) break;
+		}
+
+		const { written, unauthorized } = await this.ingest(
+			row,
+			session,
+			mailbox,
+			ids,
+			deadline,
+		);
+
+		if (unauthorized) {
+			return this.handleFailure(row, {
+				outcome: "unauthorized",
+				reason: unauthorized,
+			});
+		}
+
+		await this.state.markReconciled(row.id);
+
+		this.logger.log({
+			message: "Gmail reconciliation",
+			userId: row.userId,
+			listed: ids.length,
+			messagesWritten: written,
+		});
+
+		return {
+			source: "gmail",
+			userId: row.userId,
+			status: "synced",
+			messagesWritten: written,
+		};
 	}
 
 	private async start(

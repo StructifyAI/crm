@@ -8,6 +8,7 @@ import type { CalendarSyncResume } from "@crm/validation/calendar-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import type { SyncSource } from "./mailbox.constants";
+import { MAILBOX_RECONCILE } from "./mailbox-config";
 
 export const SYNC_LEASE_MS = 300_000;
 
@@ -37,6 +38,28 @@ export class SyncStateService {
 		return this.db.mailboxSync.findMany({
 			where: dueWhere(now),
 			orderBy: [{ lastSyncedAt: { sort: "asc", nulls: "first" } }],
+		});
+	}
+
+	async dueForReconciliation(now: Date): Promise<MailboxSync[]> {
+		const cutoff = new Date(now.getTime() - MAILBOX_RECONCILE.intervalMs);
+
+		return this.db.mailboxSync.findMany({
+			where: {
+				AND: [
+					dueWhere(now),
+					{
+						OR: [
+							{ lastReconciledAt: null },
+							{ lastReconciledAt: { lt: cutoff } },
+						],
+					},
+				],
+			},
+			orderBy: [
+				{ lastReconciledAt: { sort: "asc", nulls: "first" } },
+				{ lastSyncedAt: { sort: "asc", nulls: "first" } },
+			],
 		});
 	}
 
@@ -109,6 +132,18 @@ export class SyncStateService {
 		await this.db.mailboxSync.update({
 			where: { id },
 			data,
+		});
+	}
+
+	async markReconciled(id: string): Promise<void> {
+		await this.db.mailboxSync.update({
+			where: { id },
+			data: {
+				lastReconciledAt: new Date(),
+				status: GoogleSyncStatus.IDLE,
+				lastError: null,
+				retryAfter: null,
+			},
 		});
 	}
 
