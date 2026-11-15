@@ -73,7 +73,34 @@ export class SyncController {
 		return this.run(authorization);
 	}
 
+	@Get("reconcile")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "Reconcile recent Gmail and calendar windows" })
+	@ApiOkResponse({
+		description: "The reconciliation ran; per-mailbox results.",
+	})
+	async reconcileViaGet(@Headers("authorization") authorization?: string) {
+		return this.reconcile(authorization);
+	}
+
+	@Post("reconcile")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async reconcileViaPost(@Headers("authorization") authorization?: string) {
+		return this.reconcile(authorization);
+	}
+
 	private async run(authorization?: string) {
+		await this.authorize(authorization);
+		return this.sync.runDue();
+	}
+
+	private async reconcile(authorization?: string) {
+		await this.authorize(authorization);
+		return this.sync.runReconciliation();
+	}
+
+	private async authorize(authorization?: string) {
 		if (!this.secret) {
 			this.logger.error({
 				message: "CRON_SECRET is not set — refusing to run the sync route.",
@@ -84,8 +111,6 @@ export class SyncController {
 		if (!timingSafeEquals(authorization ?? "", `Bearer ${this.secret}`)) {
 			throw new ForbiddenException();
 		}
-
-		return this.sync.runDue();
 	}
 }
 

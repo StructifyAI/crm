@@ -6,6 +6,10 @@
 			"schedule": "*/5 * * * *"
 		},
 		{
+			"path": "/internal/sync/reconcile",
+			"schedule": "17 5 * * *"
+		},
+		{
 			"path": "/internal/sync/rates",
 			"schedule": "0 6 * * *"
 		},

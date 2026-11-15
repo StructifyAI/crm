@@ -1,0 +1,9 @@
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+export const RECONCILE_INTERVAL_MS = 20 * HOUR_MS;
+export const RECONCILE_BUDGET_MS = 3 * MINUTE_MS;
+export const RECONCILE_PAST_MS = 14 * DAY_MS;
+export const GMAIL_RECONCILE_MAX_MESSAGES = 240;
+export const CALENDAR_RECONCILE_MAX_PAGES = 3;

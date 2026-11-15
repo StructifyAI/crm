@@ -1295,12 +1295,13 @@ model MailboxSync {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   source String
 
-  status       GoogleSyncStatus @default(IDLE)
-  cursor       String?
-  lastSyncedAt DateTime?
-  lastError    String?
-  retryAfter   DateTime?
-  autoCreate   Boolean          @default(false)
+  status           GoogleSyncStatus @default(IDLE)
+  cursor           String?
+  lastSyncedAt     DateTime?
+  lastReconciledAt DateTime?
+  lastError        String?
+  retryAfter       DateTime?
+  autoCreate       Boolean          @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

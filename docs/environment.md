@@ -176,14 +176,17 @@ is not asked for Outlook; `mailboxGrantsNeeded` names the ones still outstanding
 canonicaliser and strips that prefix, so the comparison is against the bare permission
 everywhere.
 
-**Sync is forward-only** — Gmail records the current `historyId` on its first pass and
-imports nothing, Calendar reads from `now`, and Outlook records `now` as its cursor.
+**Sync is forward-only between reconciliations** — Gmail records the current
+`historyId` on its first pass and imports nothing, Calendar reads from `now`, and
+Outlook records `now` as its cursor. A daily reconciliation re-reads the last 14
+days of Gmail and Calendar, so records created after ingest still match.
 
-**`CRON_SECRET`** (min 16 chars) guards `POST /internal/sync/mailboxes` and
-`/internal/sync/rates`; both **fail closed when unset**. `/internal/sync/google` is
-kept as an alias of the first, so an existing deployment's cron does not break on
-deploy. **Crons live in `apps/api/vercel.json`** — mailboxes `*/5 * * * *`, rates
-daily. Minute-level schedules need a Pro plan; on Hobby it silently becomes daily.
+**`CRON_SECRET`** (min 16 chars) guards `POST /internal/sync/mailboxes`,
+`/internal/sync/reconcile` and `/internal/sync/rates`; all **fail closed when
+unset**. `/internal/sync/google` is kept as an alias of the first, so an existing
+deployment's cron does not break on deploy. **Crons live in `apps/api/vercel.json`**
+— mailboxes `*/5 * * * *`, reconcile daily, rates daily. Minute-level schedules
+need a Pro plan; on Hobby it silently becomes daily.
 
 Deliberate absences: **no `GOOGLE_SYNC_ENABLED`** (a switch that can disable a mandatory
 feature is only ever wrong), **no `GOOGLE_WORKSPACE_DOMAIN`** (`ALLOWED_SIGN_IN` already
