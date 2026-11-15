@@ -4,6 +4,7 @@ import {
 	type MailboxSyncModel as MailboxSync,
 } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
+import { z } from "zod";
 import { InjectDatabase } from "../database/database.constants";
 import { type Deadline, overdue } from "../mailbox/deadline";
 import { GMAIL_BACKFILL, MAILBOX_RECONCILE } from "../mailbox/mailbox-config";
@@ -89,45 +90,27 @@ export function decodeBackfillCursor(
 	return { historyId, before: at, pageToken: pageToken || null };
 }
 
-type ReconcileCursor = {
-	after: Date;
-	before: Date;
-	pageToken: string | null;
-};
+const reconcileCursorSchema = z.object({
+	after: z.string().datetime(),
+	before: z.string().datetime(),
+	pageToken: z.string().nullable(),
+	skip: z.array(z.string()).default([]),
+});
 
-const RECONCILE_CURSOR_PREFIX = "reconcile:";
+type ReconcileCursor = z.infer<typeof reconcileCursorSchema>;
 
 function encodeReconcileCursor(cursor: ReconcileCursor): string {
-	return [
-		RECONCILE_CURSOR_PREFIX + cursor.after.getTime(),
-		cursor.before.getTime(),
-		cursor.pageToken ?? "",
-	].join(":");
+	return JSON.stringify(cursor);
 }
 
-function decodeReconcileCursor(cursor: string | null): ReconcileCursor | null {
-	if (!cursor?.startsWith(RECONCILE_CURSOR_PREFIX)) return null;
+function decodeReconcileCursor(value: string | null): ReconcileCursor | null {
+	if (!value) return null;
 
-	const [after, before, ...rest] = cursor
-		.slice(RECONCILE_CURSOR_PREFIX.length)
-		.split(":");
-	const afterAt = new Date(Number(after));
-	const beforeAt = new Date(Number(before));
-	if (
-		!after ||
-		!before ||
-		Number.isNaN(afterAt.getTime()) ||
-		Number.isNaN(beforeAt.getTime())
-	) {
+	try {
+		return reconcileCursorSchema.parse(JSON.parse(value));
+	} catch {
 		return null;
 	}
-
-	const pageToken = rest.join(":");
-	return {
-		after: afterAt,
-		before: beforeAt,
-		pageToken: pageToken || null,
-	};
 }
 
 export type GmailSyncOutcome = {
@@ -288,9 +271,10 @@ export class GmailSyncService {
 		const resumed = decodeReconcileCursor(row.reconcileCursor);
 		const now = new Date();
 		let cursor: ReconcileCursor = resumed ?? {
-			after: new Date(now.getTime() - MAILBOX_RECONCILE.windowMs),
-			before: now,
+			after: new Date(now.getTime() - MAILBOX_RECONCILE.windowMs).toISOString(),
+			before: now.toISOString(),
 			pageToken: null,
+			skip: [],
 		};
 
 		if (!resumed) {
@@ -306,8 +290,8 @@ export class GmailSyncService {
 		while (!overdue(deadline)) {
 			const page = await session.call((accessToken) =>
 				this.gmail.listMessages(accessToken, {
-					after: cursor.after,
-					before: cursor.before,
+					after: new Date(cursor.after),
+					before: new Date(cursor.before),
 					pageToken: cursor.pageToken ?? undefined,
 					maxResults: GMAIL_BACKFILL.pageSize,
 				}),
@@ -322,7 +306,14 @@ export class GmailSyncService {
 				.filter((id): id is string => Boolean(id));
 			listed += ids.length;
 
-			const batch = await this.ingest(row, session, mailbox, ids, deadline);
+			const batch = await this.ingest(
+				row,
+				session,
+				mailbox,
+				ids,
+				deadline,
+				new Set(cursor.skip),
+			);
 			written += batch.written;
 
 			if (batch.unauthorized) {
@@ -336,6 +327,7 @@ export class GmailSyncService {
 			const nextPageToken = page.data.nextPageToken ?? null;
 
 			if (!pageComplete || batch.remaining > 0) {
+				cursor = { ...cursor, skip: [...batch.finished] };
 				await this.state.saveReconcileCursor(
 					row.id,
 					encodeReconcileCursor(cursor),
@@ -372,7 +364,7 @@ export class GmailSyncService {
 				};
 			}
 
-			cursor = { ...cursor, pageToken: nextPageToken };
+			cursor = { ...cursor, pageToken: nextPageToken, skip: [] };
 			await this.state.saveReconcileCursor(
 				row.id,
 				encodeReconcileCursor(cursor),
@@ -588,6 +580,7 @@ export class GmailSyncService {
 		mailbox: string,
 		ids: readonly string[],
 		deadline: Deadline,
+		skip: ReadonlySet<string> = new Set(),
 	): Promise<{
 		written: number;
 		remaining: number;
@@ -606,6 +599,7 @@ export class GmailSyncService {
 				.map((existing) => existing.gmailMessageId)
 				.filter((id): id is string => id !== null),
 		);
+		for (const id of skip) seen.add(id);
 		const finished = new Set(seen);
 
 		const pending = ids.filter((id) => !seen.has(id));
