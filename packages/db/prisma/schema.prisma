@@ -1299,6 +1299,7 @@ model MailboxSync {
   cursor           String?
   lastSyncedAt     DateTime?
   lastReconciledAt DateTime?
+  reconcileCursor   DateTime?
   lastError        String?
   retryAfter       DateTime?
   autoCreate       Boolean          @default(false)

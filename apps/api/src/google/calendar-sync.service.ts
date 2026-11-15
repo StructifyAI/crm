@@ -34,6 +34,7 @@ export type SyncOutcome = {
 	status: "synced" | "skipped" | "reconnect" | "rate-limited" | "failed";
 	eventsWritten?: number;
 	eventsRemoved?: number;
+	reconcileComplete?: boolean;
 	reason?: string;
 };
 
@@ -224,12 +225,20 @@ export class CalendarSyncService {
 			suppressedEmails,
 		};
 
-		const timeMin = new Date(
-			Date.now() - MAILBOX_RECONCILE.pastMs,
-		).toISOString();
-		const timeMax = new Date(
-			Date.now() + MAILBOX_RECONCILE.futureMs,
-		).toISOString();
+		const now = Date.now();
+		const horizonEnd = new Date(now + MAILBOX_RECONCILE.futureMs);
+		const windowStart = row.reconcileCursor
+			? new Date(row.reconcileCursor)
+			: new Date(now - MAILBOX_RECONCILE.pastMs);
+		const windowEnd = new Date(
+			Math.min(
+				windowStart.getTime() + MAILBOX_RECONCILE.calendarChunkMs,
+				horizonEnd.getTime(),
+			),
+		);
+		const cycleComplete = windowEnd.getTime() >= horizonEnd.getTime();
+		const timeMin = windowStart.toISOString();
+		const timeMax = windowEnd.toISOString();
 		let pageToken: string | undefined;
 		let written = 0;
 		let removed = 0;
@@ -266,15 +275,22 @@ export class CalendarSyncService {
 			pages,
 		});
 
+		if (!pageToken && !cycleComplete) {
+			await this.state.advanceReconcileCursor(row.id, windowEnd);
+		}
+
 		return {
 			source: "calendar",
 			userId: row.userId,
 			status: "synced",
 			eventsWritten: written,
 			eventsRemoved: removed,
+			reconcileComplete: !pageToken && cycleComplete,
 			reason: pageToken
 				? "Page budget reached; continuing next reconcile."
-				: undefined,
+				: cycleComplete
+					? undefined
+					: "Reconciliation window continues next run.",
 		};
 	}
 

@@ -159,7 +159,9 @@ export class MailboxSyncService {
 					summary.failed += 1;
 				} else {
 					summary.synced += 1;
-					await this.state.markReconciled(row.id);
+					if (outcome.reconcileComplete !== false) {
+						await this.state.markReconciled(row.id);
+					}
 				}
 			} catch (error) {
 				summary.failed += 1;

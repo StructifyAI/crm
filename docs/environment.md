@@ -179,7 +179,8 @@ everywhere.
 **Sync is forward-only between reconciliations** — Gmail records the current
 `historyId` on its first pass and imports nothing, Calendar reads from `now`, and
 Outlook records `now` as its cursor. A daily reconciliation re-reads the last 14
-days of Gmail and Calendar, so records created after ingest still match.
+days of Gmail and walks Calendar's 180-day horizon in bounded chunks, so records
+created after ingest still match.
 
 **`CRON_SECRET`** (min 16 chars) guards `POST /internal/sync/mailboxes`,
 `/internal/sync/reconcile` and `/internal/sync/rates`; all **fail closed when

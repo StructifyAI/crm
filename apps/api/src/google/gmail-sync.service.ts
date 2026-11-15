@@ -34,6 +34,7 @@ export type GmailSyncOutcome = {
 	status: "synced" | "skipped" | "reconnect" | "rate-limited" | "failed";
 	messagesWritten?: number;
 	threadsTouched?: number;
+	reconcileComplete?: boolean;
 	reason?: string;
 };
 

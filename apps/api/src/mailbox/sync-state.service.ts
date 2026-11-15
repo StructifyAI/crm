@@ -184,9 +184,17 @@ export class SyncStateService {
 			where: { id },
 			data: {
 				lastReconciledAt: new Date(),
+				reconcileCursor: null,
 				lastError: null,
 				retryAfter: null,
 			},
+		});
+	}
+
+	async advanceReconcileCursor(id: string, cursor: Date): Promise<void> {
+		await this.db.mailboxSync.update({
+			where: { id },
+			data: { reconcileCursor: cursor },
 		});
 	}
 

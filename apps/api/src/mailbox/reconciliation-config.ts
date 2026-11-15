@@ -8,6 +8,7 @@ export const MAILBOX_RECONCILE = {
 	budgetMs: 45 * SECOND_MS,
 	pastMs: 14 * DAY_MS,
 	futureMs: 180 * DAY_MS,
+	calendarChunkMs: 14 * DAY_MS,
 	gmailMaxMessages: 120,
 	calendarMaxPages: 2,
 } as const;
