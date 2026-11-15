@@ -84,6 +84,25 @@ export class SyncController {
 		return this.run(authorization);
 	}
 
+	@Get("reconcile")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary: "Re-read recent Gmail windows and rematch stored mail",
+	})
+	@ApiOkResponse({
+		description: "The reconciliation ran; per-mailbox results.",
+	})
+	async reconcileViaGet(@Headers("authorization") authorization?: string) {
+		return this.runReconcile(authorization);
+	}
+
+	@Post("reconcile")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async reconcileViaPost(@Headers("authorization") authorization?: string) {
+		return this.runReconcile(authorization);
+	}
+
 	@Get("google")
 	@AllowAnonymous()
 	@ApiOperation({
@@ -439,6 +458,11 @@ export class SyncController {
 	private async runExtrovertIcpList(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.extrovertIcpList.run();
+	}
+
+	private async runReconcile(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.sync.runReconciliation();
 	}
 
 	private async runDealLinks(authorization?: string, cursor?: string) {

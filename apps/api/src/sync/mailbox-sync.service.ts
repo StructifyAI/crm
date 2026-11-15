@@ -70,6 +70,86 @@ export class MailboxSyncService {
 		return summary;
 	}
 
+	async runReconciliation(): Promise<TickSummary> {
+		const startedAt = Date.now();
+		const deadline = deadlineIn(SYNC_TICK.budgetMs);
+		const summary: TickSummary = {
+			attempted: 0,
+			synced: 0,
+			skipped: 0,
+			rateLimited: 0,
+			failed: 0,
+			durationMs: 0,
+		};
+
+		const due = await this.state.dueForReconciliation(new Date());
+
+		await Promise.all(
+			due
+				.filter((row) => row.source === "gmail")
+				.map((row) => this.runReconcileClaimed(row, deadline, summary)),
+		);
+
+		summary.durationMs = Date.now() - startedAt;
+
+		this.logger.log({
+			message: "Mailbox reconciliation",
+			attempted: summary.attempted,
+			synced: summary.synced,
+			skipped: summary.skipped,
+			rateLimited: summary.rateLimited,
+			failed: summary.failed,
+			durationMs: summary.durationMs,
+		});
+
+		return summary;
+	}
+
+	private async runReconcileClaimed(
+		row: MailboxSync,
+		deadline: Deadline,
+		summary: TickSummary,
+	): Promise<void> {
+		if (overdue(deadline)) return;
+		if (!(await this.state.claim(row, new Date()))) return;
+
+		summary.attempted += 1;
+
+		try {
+			const outcome = await this.google.reconcile(row, deadline);
+
+			if (outcome === null || outcome.status === "skipped") {
+				summary.skipped += 1;
+				await this.state.release(row.id);
+			} else if (outcome.status === "rate-limited") {
+				summary.rateLimited += 1;
+			} else if (
+				outcome.status === "failed" ||
+				outcome.status === "reconnect"
+			) {
+				summary.failed += 1;
+			} else {
+				summary.synced += 1;
+			}
+		} catch (error) {
+			summary.failed += 1;
+			await this.state.markFailed(
+				row.id,
+				error instanceof Error ? error.message : String(error),
+			);
+			this.logger.error(
+				{
+					message: "Reconciliation threw",
+					userId: row.userId,
+					source: row.source,
+				},
+				error instanceof Error ? error.stack : String(error),
+			);
+
+			syncError({ error, source: row.source });
+		}
+	}
+
 	private async runClaimed(
 		row: MailboxSync,
 		deadline: Deadline,
