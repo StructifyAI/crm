@@ -260,8 +260,7 @@ export class CalendarSyncService {
 			}
 
 			for (const event of result.data.items ?? []) {
-				const startedAt =
-					eventTime(event.start)?.at ?? eventTime(event.originalStartTime)?.at;
+				const startedAt = this.frontierStart(event);
 				if (startedAt && (!frontier || startedAt > frontier)) {
 					frontier = startedAt;
 				}
@@ -348,6 +347,16 @@ export class CalendarSyncService {
 			eventsWritten: written,
 			eventsRemoved: removed,
 		};
+	}
+
+	private frontierStart(event: GoogleEvent): Date | null {
+		const start = eventTime(event.start) ?? eventTime(event.originalStartTime);
+		if (!start) return null;
+
+		const at = start.at;
+		if (start.isAllDay) at.setUTCDate(at.getUTCDate() - 1);
+
+		return at;
 	}
 
 	private async apply(
