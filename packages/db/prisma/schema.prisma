@@ -1502,6 +1502,7 @@ model MailboxSync {
   resume       Json?
   lastSyncedAt      DateTime?
   lastReconciledAt DateTime?
+  reconcileCursor   String?
   lastError         String?
   retryAfter   DateTime?
   autoCreate   Boolean          @default(false)

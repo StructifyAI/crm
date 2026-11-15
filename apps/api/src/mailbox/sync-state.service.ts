@@ -52,6 +52,7 @@ export class SyncStateService {
 						OR: [
 							{ lastReconciledAt: null },
 							{ lastReconciledAt: { lt: cutoff } },
+							{ reconcileCursor: { not: null } },
 						],
 					},
 				],
@@ -140,10 +141,18 @@ export class SyncStateService {
 			where: { id },
 			data: {
 				lastReconciledAt: new Date(),
+				reconcileCursor: null,
 				status: GoogleSyncStatus.IDLE,
 				lastError: null,
 				retryAfter: null,
 			},
+		});
+	}
+
+	async saveReconcileCursor(id: string, cursor: string): Promise<void> {
+		await this.db.mailboxSync.update({
+			where: { id },
+			data: { reconcileCursor: cursor },
 		});
 	}
 

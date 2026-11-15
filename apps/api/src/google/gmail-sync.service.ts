@@ -89,6 +89,47 @@ export function decodeBackfillCursor(
 	return { historyId, before: at, pageToken: pageToken || null };
 }
 
+type ReconcileCursor = {
+	after: Date;
+	before: Date;
+	pageToken: string | null;
+};
+
+const RECONCILE_CURSOR_PREFIX = "reconcile:";
+
+function encodeReconcileCursor(cursor: ReconcileCursor): string {
+	return [
+		RECONCILE_CURSOR_PREFIX + cursor.after.getTime(),
+		cursor.before.getTime(),
+		cursor.pageToken ?? "",
+	].join(":");
+}
+
+function decodeReconcileCursor(cursor: string | null): ReconcileCursor | null {
+	if (!cursor?.startsWith(RECONCILE_CURSOR_PREFIX)) return null;
+
+	const [after, before, ...rest] = cursor
+		.slice(RECONCILE_CURSOR_PREFIX.length)
+		.split(":");
+	const afterAt = new Date(Number(after));
+	const beforeAt = new Date(Number(before));
+	if (
+		!after ||
+		!before ||
+		Number.isNaN(afterAt.getTime()) ||
+		Number.isNaN(beforeAt.getTime())
+	) {
+		return null;
+	}
+
+	const pageToken = rest.join(":");
+	return {
+		after: afterAt,
+		before: beforeAt,
+		pageToken: pageToken || null,
+	};
+}
+
 export type GmailSyncOutcome = {
 	source: "gmail";
 	userId: string;
@@ -244,21 +285,31 @@ export class GmailSyncService {
 			};
 		}
 
+		const resumed = decodeReconcileCursor(row.reconcileCursor);
 		const now = new Date();
-		const after = new Date(now.getTime() - MAILBOX_RECONCILE.windowMs);
-		const ids: string[] = [];
-		let pageToken: string | undefined;
+		let cursor: ReconcileCursor = resumed ?? {
+			after: new Date(now.getTime() - MAILBOX_RECONCILE.windowMs),
+			before: now,
+			pageToken: null,
+		};
 
-		while (ids.length < MAILBOX_RECONCILE.maxMessages) {
+		if (!resumed) {
+			await this.state.saveReconcileCursor(
+				row.id,
+				encodeReconcileCursor(cursor),
+			);
+		}
+
+		let written = 0;
+		let listed = 0;
+
+		while (!overdue(deadline)) {
 			const page = await session.call((accessToken) =>
 				this.gmail.listMessages(accessToken, {
-					after,
-					before: now,
-					pageToken,
-					maxResults: Math.min(
-						GMAIL_BACKFILL.pageSize,
-						MAILBOX_RECONCILE.maxMessages - ids.length,
-					),
+					after: cursor.after,
+					before: cursor.before,
+					pageToken: cursor.pageToken ?? undefined,
+					maxResults: GMAIL_BACKFILL.pageSize,
 				}),
 			);
 
@@ -266,37 +317,75 @@ export class GmailSyncService {
 				return this.handleFailure(row, page);
 			}
 
-			for (const message of page.data.messages ?? []) {
-				if (!message.id) continue;
-				ids.push(message.id);
-				if (ids.length >= MAILBOX_RECONCILE.maxMessages) break;
+			const ids = (page.data.messages ?? [])
+				.map((message) => message.id)
+				.filter((id): id is string => Boolean(id));
+			listed += ids.length;
+
+			const batch = await this.ingest(row, session, mailbox, ids, deadline);
+			written += batch.written;
+
+			if (batch.unauthorized) {
+				return this.handleFailure(row, {
+					outcome: "unauthorized",
+					reason: batch.unauthorized,
+				});
 			}
 
-			pageToken = page.data.nextPageToken;
-			if (!pageToken || overdue(deadline)) break;
+			const pageComplete = ids.every((id) => batch.finished.has(id));
+			const nextPageToken = page.data.nextPageToken ?? null;
+
+			if (!pageComplete || batch.remaining > 0) {
+				await this.state.saveReconcileCursor(
+					row.id,
+					encodeReconcileCursor(cursor),
+				);
+				await this.state.release(row.id);
+				this.logger.log({
+					message: "Gmail reconciliation in progress",
+					userId: row.userId,
+					listed,
+					messagesWritten: written,
+				});
+				return {
+					source: "gmail",
+					userId: row.userId,
+					status: "synced",
+					messagesWritten: written,
+					reason: "Reconciliation in progress.",
+				};
+			}
+
+			if (!nextPageToken) {
+				await this.state.markReconciled(row.id);
+				this.logger.log({
+					message: "Gmail reconciliation",
+					userId: row.userId,
+					listed,
+					messagesWritten: written,
+				});
+				return {
+					source: "gmail",
+					userId: row.userId,
+					status: "synced",
+					messagesWritten: written,
+				};
+			}
+
+			cursor = { ...cursor, pageToken: nextPageToken };
+			await this.state.saveReconcileCursor(
+				row.id,
+				encodeReconcileCursor(cursor),
+			);
 		}
 
-		const { written, unauthorized } = await this.ingest(
-			row,
-			session,
-			mailbox,
-			ids,
-			deadline,
-		);
-
-		if (unauthorized) {
-			return this.handleFailure(row, {
-				outcome: "unauthorized",
-				reason: unauthorized,
-			});
-		}
-
-		await this.state.markReconciled(row.id);
+		await this.state.saveReconcileCursor(row.id, encodeReconcileCursor(cursor));
+		await this.state.release(row.id);
 
 		this.logger.log({
-			message: "Gmail reconciliation",
+			message: "Gmail reconciliation in progress",
 			userId: row.userId,
-			listed: ids.length,
+			listed,
 			messagesWritten: written,
 		});
 
@@ -305,6 +394,7 @@ export class GmailSyncService {
 			userId: row.userId,
 			status: "synced",
 			messagesWritten: written,
+			reason: "Reconciliation in progress.",
 		};
 	}
 
