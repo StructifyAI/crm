@@ -12,6 +12,7 @@ import {
 	stripQuotedHistory,
 } from "../mailbox/message-text";
 import { parseAddress, parseAddressList } from "../mailbox/participants";
+import { MAILBOX_RECONCILE } from "../mailbox/reconciliation-config";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import {
 	type IncomingMessage,
@@ -33,6 +34,7 @@ export type GmailSyncOutcome = {
 	status: "synced" | "skipped" | "reconnect" | "rate-limited" | "failed";
 	messagesWritten?: number;
 	threadsTouched?: number;
+	reconcileComplete?: boolean;
 	reason?: string;
 };
 
@@ -95,6 +97,98 @@ export class GmailSyncService {
 		return this.incremental(row, token.accessToken, mailbox, row.cursor);
 	}
 
+	async reconcile(row: MailboxSync): Promise<GmailSyncOutcome> {
+		const token = await this.tokens.accessTokenFor(row.userId, "gmail");
+
+		if (token.outcome === "not-connected") {
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "skipped",
+				reason: token.reason,
+			};
+		}
+
+		if (token.outcome === "needs-reconnect") {
+			await this.state.markNeedsReconnect(row.id, token.reason);
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "reconnect",
+				reason: token.reason,
+			};
+		}
+
+		const profile = await this.gmail.profile(token.accessToken);
+		if (profile.outcome !== "ok") {
+			return this.handleFailure(row, profile);
+		}
+
+		const mailbox = profile.data.emailAddress?.toLowerCase() ?? null;
+		if (!mailbox) {
+			await this.state.markFailed(row.id, "Gmail returned no mailbox address.");
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "failed",
+				reason: "No mailbox address.",
+			};
+		}
+
+		const before = new Date();
+		const after = new Date(before.getTime() - MAILBOX_RECONCILE.pastMs);
+		const ids: string[] = [];
+		let pageToken: string | undefined;
+
+		while (ids.length < MAILBOX_RECONCILE.gmailMaxMessages) {
+			const page = await this.gmail.listMessages(token.accessToken, {
+				after,
+				before,
+				pageToken,
+				maxResults: Math.min(
+					100,
+					MAILBOX_RECONCILE.gmailMaxMessages - ids.length,
+				),
+			});
+
+			if (page.outcome !== "ok") {
+				return this.handleFailure(row, page);
+			}
+
+			for (const message of page.data.messages ?? []) {
+				if (!message.id) continue;
+				ids.push(message.id);
+				if (ids.length >= MAILBOX_RECONCILE.gmailMaxMessages) break;
+			}
+
+			pageToken = page.data.nextPageToken;
+			if (!pageToken) break;
+		}
+
+		const { written } = await this.ingest(
+			row,
+			token.accessToken,
+			mailbox,
+			ids,
+			ids.length,
+			true,
+		);
+
+		this.logger.log({
+			message: "Gmail reconciliation",
+			userId: row.userId,
+			listed: ids.length,
+			messagesWritten: written,
+		});
+
+		return {
+			source: "gmail",
+			userId: row.userId,
+			status: "synced",
+			messagesWritten: written,
+		};
+	}
+
 	private async start(
 		row: MailboxSync,
 		historyId: string | null,
@@ -128,30 +222,40 @@ export class GmailSyncService {
 		mailbox: string,
 		startHistoryId: string,
 	): Promise<GmailSyncOutcome> {
-		const history = await this.gmail.listHistory(accessToken, {
-			startHistoryId,
-		});
-
-		if (history.outcome === "cursor-invalid") {
-			await this.state.clearCursor(row.id, history.reason);
-
-			return {
-				source: "gmail",
-				userId: row.userId,
-				status: "synced",
-				reason: "History expired; resuming from now.",
-			};
-		}
-
-		if (history.outcome !== "ok") {
-			return this.handleFailure(row, history);
-		}
-
 		const ids = new Set<string>();
-		for (const entry of history.data.history ?? []) {
-			for (const added of entry.messagesAdded ?? []) {
-				if (added.message?.id) ids.add(added.message.id);
+		let historyId: string | null = null;
+		let pageToken: string | undefined;
+
+		while (true) {
+			const history = await this.gmail.listHistory(accessToken, {
+				startHistoryId,
+				pageToken,
+			});
+
+			if (history.outcome === "cursor-invalid") {
+				await this.state.clearCursor(row.id, history.reason);
+
+				return {
+					source: "gmail",
+					userId: row.userId,
+					status: "synced",
+					reason: "History expired; resuming from now.",
+				};
 			}
+
+			if (history.outcome !== "ok") {
+				return this.handleFailure(row, history);
+			}
+
+			for (const entry of history.data.history ?? []) {
+				for (const added of entry.messagesAdded ?? []) {
+					if (added.message?.id) ids.add(added.message.id);
+				}
+			}
+
+			historyId = history.data.historyId ?? historyId;
+			pageToken = history.data.nextPageToken;
+			if (!pageToken) break;
 		}
 
 		const { written, remaining } = await this.ingest(
@@ -162,10 +266,7 @@ export class GmailSyncService {
 		);
 
 		await this.state.settle(row.id, {
-			cursor:
-				remaining > 0
-					? startHistoryId
-					: (history.data.historyId ?? startHistoryId),
+			cursor: remaining > 0 ? startHistoryId : (historyId ?? startHistoryId),
 			status: GoogleSyncStatus.RUNNING,
 		});
 
@@ -191,19 +292,38 @@ export class GmailSyncService {
 		accessToken: string,
 		mailbox: string,
 		ids: readonly string[],
+		limit = MAX_MESSAGES_PER_TICK,
+		rematchExisting = false,
 	): Promise<{ written: number; remaining: number }> {
 		if (ids.length === 0) return { written: 0, remaining: 0 };
 
 		const alreadyHave = await this.db.emailMessage.findMany({
 			where: { gmailMessageId: { in: [...ids] } },
-			select: { gmailMessageId: true },
+			select: {
+				gmailMessageId: true,
+				thread: {
+					select: {
+						companyId: true,
+						contactId: true,
+						activity: { select: { id: true } },
+					},
+				},
+			},
 		});
 		const seen = new Set(
-			alreadyHave.map((existing) => existing.gmailMessageId),
+			alreadyHave
+				.filter(
+					(existing) =>
+						!rematchExisting ||
+						(existing.thread.companyId !== null &&
+							existing.thread.contactId !== null &&
+							existing.thread.activity !== null),
+				)
+				.map((existing) => existing.gmailMessageId),
 		);
 
 		const pending = ids.filter((id) => !seen.has(id));
-		const batch = pending.slice(0, MAX_MESSAGES_PER_TICK);
+		const batch = pending.slice(0, limit);
 		const remaining = pending.length - batch.length;
 
 		if (batch.length === 0) return { written: 0, remaining };

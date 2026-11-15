@@ -154,6 +154,50 @@ export class SyncStateService {
 		});
 	}
 
+	async dueForReconciliation(
+		now: Date,
+		sources: readonly SyncSource[],
+		intervalMs: number,
+	): Promise<MailboxSync[]> {
+		const cutoff = new Date(now.getTime() - intervalMs);
+
+		return this.db.mailboxSync.findMany({
+			where: {
+				source: { in: [...sources] },
+				status: { not: GoogleSyncStatus.NEEDS_RECONNECT },
+				AND: [
+					{
+						OR: [
+							{ lastReconciledAt: null },
+							{ lastReconciledAt: { lt: cutoff } },
+						],
+					},
+					{ OR: [{ retryAfter: null }, { retryAfter: { lte: now } }] },
+				],
+			},
+			orderBy: [{ lastReconciledAt: { sort: "asc", nulls: "first" } }],
+		});
+	}
+
+	async markReconciled(id: string): Promise<void> {
+		await this.db.mailboxSync.update({
+			where: { id },
+			data: {
+				lastReconciledAt: new Date(),
+				reconcileCursor: null,
+				lastError: null,
+				retryAfter: null,
+			},
+		});
+	}
+
+	async advanceReconcileCursor(id: string, cursor: Date): Promise<void> {
+		await this.db.mailboxSync.update({
+			where: { id },
+			data: { reconcileCursor: cursor },
+		});
+	}
+
 	async setAutoCreate(
 		userId: string,
 		source: SyncSource,

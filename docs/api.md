@@ -186,11 +186,14 @@ Two rules follow for the serverless build:
   provider's module only ever sees its own, and `sync/mailbox-sync.service.ts` is the
   one place that dispatches. One cron, one budget:
   `POST /internal/sync/mailboxes` (`/google` is kept as an alias so an existing
-  deployment's cron keeps working).
+  deployment's cron keeps working). `POST /internal/sync/reconcile` runs daily and
+  stamps `lastReconciledAt`.
 - **Gmail is forward-only from a `historyId`, Outlook from a timestamp.** Graph has no
   mailbox-wide delta, so the Outlook cursor is the last `receivedDateTime` seen,
   re-read with a one-second overlap; `rfcMessageId` is unique, so the overlap costs a
-  duplicate fetch and never a duplicate row.
+  duplicate fetch and never a duplicate row. Reconciliation re-reads the last 14 days
+  of Gmail and walks Calendar's 180-day horizon in bounded chunks, so contacts and
+  companies created later still match.
 - **Microsoft has no token-revocation endpoint.** `revoke` clears the columns and the
   UI says the consent itself is removed in the user's Microsoft account. Google's still
   posts to `oauth2.googleapis.com/revoke` and refuses to clear if that fails.

@@ -53,6 +53,7 @@ export type EventsQuery = {
 	timeMax?: string;
 	pageToken?: string;
 	maxResults?: number;
+	orderBy?: "startTime" | "updated";
 };
 
 @Injectable()
@@ -73,6 +74,7 @@ export class CalendarClient {
 			maxResults: query.maxResults ?? 250,
 			syncToken: query.syncToken,
 			pageToken: query.pageToken,
+			orderBy: query.orderBy,
 			...window,
 		});
 	}

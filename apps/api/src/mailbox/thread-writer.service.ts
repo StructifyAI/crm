@@ -75,7 +75,6 @@ export class ThreadWriterService {
 				},
 			},
 		});
-		if (existing?.thread.activity) return false;
 
 		const repair = existing !== null;
 		const participants = [parsed.from, ...parsed.recipients];
@@ -95,7 +94,9 @@ export class ThreadWriterService {
 		let companyId = thread?.companyId ?? null;
 		let contactId = thread?.contactId ?? null;
 
-		if (!thread) {
+		if (existing?.thread.activity && companyId && contactId) return false;
+
+		if (!thread || !companyId || !contactId) {
 			const repliedTo =
 				outbound ||
 				(await this.hasOutboundInThread(parsed.rootId, options.mailbox));
@@ -110,11 +111,20 @@ export class ThreadWriterService {
 				context,
 			);
 
-			companyId = match.companyId;
-			contactId = match.contactId;
+			if (!thread) {
+				companyId = match.companyId;
+				contactId = match.contactId;
 
-			if (!companyId && !contactId) {
-				return false;
+				if (!companyId && !contactId) {
+					return false;
+				}
+			} else if (!companyId) {
+				if (contactId === null || match.contactId === contactId) {
+					companyId = match.companyId;
+					contactId = contactId ?? match.contactId;
+				}
+			} else if (!contactId && match.companyId === companyId) {
+				contactId = match.contactId;
 			}
 		}
 
@@ -169,22 +179,31 @@ export class ThreadWriterService {
 					_max: { sentAt: true },
 				});
 
-				const firstMessageAt = stats._min.sentAt ?? parsed.sentAt;
-				const lastMessageAt = stats._max.sentAt ?? parsed.sentAt;
+				const latest = await tx.emailMessage.findFirst({
+					where: { threadId: record.id },
+					orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }],
+					select: { snippet: true, sentAt: true },
+				});
 
-				const data: Prisma.EmailThreadUpdateInput = {
+				const firstMessageAt = stats._min.sentAt ?? parsed.sentAt;
+				const lastMessageAt =
+					latest?.sentAt ?? stats._max.sentAt ?? parsed.sentAt;
+
+				const data: Prisma.EmailThreadUncheckedUpdateInput = {
 					messageCount: stats._count._all,
 					firstMessageAt,
 					lastMessageAt,
 				};
 
+				if (companyId) data.companyId = companyId;
+				if (contactId) data.contactId = contactId;
 				if (parsed.sentAt <= firstMessageAt) data.subject = parsed.subject;
 
 				await tx.emailThread.update({ where: { id: record.id }, data });
 
 				return this.project(tx, record.id, row.userId, {
 					subject: parsed.subject ?? "(no subject)",
-					snippet: snippetOf(parsed.body),
+					snippet: latest?.snippet ?? snippetOf(parsed.body),
 					lastMessageAt,
 					companyId,
 					contactId,
@@ -281,6 +300,8 @@ export class ThreadWriterService {
 			update: {
 				body: summary.snippet,
 				occurredAt: summary.lastMessageAt,
+				companyId: summary.companyId,
+				contactId: summary.contactId,
 			},
 			select: { createdAt: true },
 		});

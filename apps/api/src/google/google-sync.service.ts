@@ -24,6 +24,15 @@ export class GoogleSyncService {
 			: this.gmail.sync(row);
 	}
 
+	async reconcileOne(userId: string, source: GoogleSyncSource) {
+		const row = await this.state.get(userId, source);
+		if (!row) return null;
+
+		return source === "calendar"
+			? this.calendar.reconcile(row)
+			: this.gmail.reconcile(row);
+	}
+
 	async runForUser(userId: string): Promise<void> {
 		for (const source of GOOGLE_SYNC_SOURCES) {
 			await this.runOne(userId, source);

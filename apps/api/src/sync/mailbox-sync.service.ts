@@ -3,9 +3,11 @@ import { Injectable, Logger } from "@nestjs/common";
 import { GoogleConnectionService } from "../google/google-connection.service";
 import { GoogleSyncService } from "../google/google-sync.service";
 import {
+	GOOGLE_SYNC_SOURCES,
 	isGoogleSyncSource,
 	isMicrosoftSyncSource,
 } from "../mailbox/mailbox.constants";
+import { MAILBOX_RECONCILE } from "../mailbox/reconciliation-config";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import { MicrosoftConnectionService } from "../microsoft/microsoft-connection.service";
 import { MicrosoftSyncService } from "../microsoft/microsoft-sync.service";
@@ -112,11 +114,102 @@ export class MailboxSyncService {
 		return summary;
 	}
 
+	async runReconciliation(): Promise<TickSummary> {
+		const startedAt = Date.now();
+		const summary: TickSummary = {
+			attempted: 0,
+			synced: 0,
+			skipped: 0,
+			rateLimited: 0,
+			failed: 0,
+			durationMs: 0,
+		};
+
+		const due = await this.state.dueForReconciliation(
+			new Date(),
+			GOOGLE_SYNC_SOURCES,
+			MAILBOX_RECONCILE.intervalMs,
+		);
+
+		for (const [index, row] of due.entries()) {
+			if (Date.now() - startedAt > MAILBOX_RECONCILE.budgetMs) {
+				this.logger.log({
+					message: "Reconciliation budget reached",
+					remaining: due.length - index,
+				});
+				break;
+			}
+
+			if (!(await this.state.claim(row, new Date()))) continue;
+
+			summary.attempted += 1;
+
+			try {
+				const outcome = await this.reconcileOne(row.userId, row.source);
+
+				if (outcome === null || outcome.status === "skipped") {
+					summary.skipped += 1;
+					await this.state.release(row.id);
+				} else if (outcome.status === "rate-limited") {
+					summary.rateLimited += 1;
+				} else if (
+					outcome.status === "failed" ||
+					outcome.status === "reconnect"
+				) {
+					summary.failed += 1;
+				} else {
+					summary.synced += 1;
+					if (outcome.reconcileComplete !== false) {
+						await this.state.markReconciled(row.id);
+					}
+				}
+			} catch (error) {
+				summary.failed += 1;
+				await this.state.markFailed(
+					row.id,
+					error instanceof Error ? error.message : String(error),
+				);
+				this.logger.error(
+					{
+						message: "Reconciliation threw",
+						userId: row.userId,
+						source: row.source,
+					},
+					error instanceof Error ? error.stack : String(error),
+				);
+
+				syncError({ error, source: row.source });
+			}
+		}
+
+		summary.durationMs = Date.now() - startedAt;
+
+		this.logger.log({
+			message: "Mailbox reconciliation",
+			attempted: summary.attempted,
+			synced: summary.synced,
+			skipped: summary.skipped,
+			rateLimited: summary.rateLimited,
+			failed: summary.failed,
+			durationMs: summary.durationMs,
+		});
+
+		return summary;
+	}
+
 	private async runOne(userId: string, source: string) {
 		if (isGoogleSyncSource(source)) return this.google.runOne(userId, source);
 
 		if (isMicrosoftSyncSource(source)) {
 			return this.microsoft.runOne(userId, source);
+		}
+
+		return null;
+	}
+
+	private async reconcileOne(userId: string, source: string) {
+		if (isGoogleSyncSource(source)) {
+			return this.google.reconcileOne(userId, source);
 		}
 
 		return null;

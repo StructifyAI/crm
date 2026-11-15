@@ -15,6 +15,7 @@ import {
 } from "../mailbox/mailbox-match.service";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import { isMachineAddress, type Participant } from "../mailbox/participants";
+import { MAILBOX_RECONCILE } from "../mailbox/reconciliation-config";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import {
 	CalendarClient,
@@ -33,6 +34,7 @@ export type SyncOutcome = {
 	status: "synced" | "skipped" | "reconnect" | "rate-limited" | "failed";
 	eventsWritten?: number;
 	eventsRemoved?: number;
+	reconcileComplete?: boolean;
 	reason?: string;
 };
 
@@ -186,6 +188,175 @@ export class CalendarSyncService {
 			eventsRemoved: removed,
 			reason: "Page budget reached; continuing next tick.",
 		};
+	}
+
+	async reconcile(row: MailboxSync): Promise<SyncOutcome> {
+		const token = await this.tokens.accessTokenFor(row.userId, "calendar");
+
+		if (token.outcome === "not-connected") {
+			return {
+				source: "calendar",
+				userId: row.userId,
+				status: "skipped",
+				reason: token.reason,
+			};
+		}
+
+		if (token.outcome === "needs-reconnect") {
+			await this.state.markNeedsReconnect(row.id, token.reason);
+			return {
+				source: "calendar",
+				userId: row.userId,
+				status: "reconnect",
+				reason: token.reason,
+			};
+		}
+
+		const [internal, suppressedDomains, suppressedEmails] = await Promise.all([
+			this.match.internalIdentity(),
+			this.match.suppressedDomains(),
+			this.match.suppressedEmails(),
+		]);
+
+		const context = {
+			ourAddresses: internal.addresses,
+			ourDomains: internal.domains,
+			suppressedDomains,
+			suppressedEmails,
+		};
+
+		const now = Date.now();
+		const horizonEnd = new Date(now + MAILBOX_RECONCILE.futureMs);
+		const windowStart = row.reconcileCursor
+			? new Date(row.reconcileCursor)
+			: new Date(now - MAILBOX_RECONCILE.pastMs);
+		const windowEnd = new Date(
+			Math.min(
+				windowStart.getTime() + MAILBOX_RECONCILE.calendarChunkMs,
+				horizonEnd.getTime(),
+			),
+		);
+		const cycleComplete = windowEnd.getTime() >= horizonEnd.getTime();
+		const timeMin = windowStart.toISOString();
+		const timeMax = windowEnd.toISOString();
+		let pageToken: string | undefined;
+		let written = 0;
+		let removed = 0;
+		let pages = 0;
+		let frontier: Date | null = null;
+
+		while (pages < MAILBOX_RECONCILE.calendarMaxPages) {
+			const result = await this.calendar.listEvents(token.accessToken, {
+				timeMin,
+				timeMax,
+				pageToken,
+				orderBy: "startTime",
+			});
+
+			pages += 1;
+
+			if (result.outcome !== "ok") {
+				return this.reconcileFailure(row, result, written, removed);
+			}
+
+			for (const event of result.data.items ?? []) {
+				const startedAt = this.frontierStart(event);
+				if (startedAt && (!frontier || startedAt > frontier)) {
+					frontier = startedAt;
+				}
+
+				const applied = await this.apply(event, row, context);
+				if (applied === "written") written += 1;
+				if (applied === "removed") removed += 1;
+			}
+
+			pageToken = result.data.nextPageToken;
+			if (!pageToken) break;
+		}
+
+		this.logger.log({
+			message: "Calendar reconciliation",
+			userId: row.userId,
+			eventsWritten: written,
+			eventsRemoved: removed,
+			pages,
+		});
+
+		let continuedFrom: Date | null = null;
+		if (pageToken) {
+			continuedFrom =
+				frontier && frontier.getTime() > windowStart.getTime()
+					? frontier
+					: null;
+			if (continuedFrom) {
+				await this.state.advanceReconcileCursor(row.id, continuedFrom);
+			}
+		} else if (!cycleComplete) {
+			await this.state.advanceReconcileCursor(row.id, windowEnd);
+		}
+
+		return {
+			source: "calendar",
+			userId: row.userId,
+			status: "synced",
+			eventsWritten: written,
+			eventsRemoved: removed,
+			reconcileComplete: !pageToken && cycleComplete,
+			reason: pageToken
+				? continuedFrom
+					? "Page budget reached; continuing from last event."
+					: "Page budget reached; continuing next reconcile."
+				: cycleComplete
+					? undefined
+					: "Reconciliation window continues next run.",
+		};
+	}
+
+	private async reconcileFailure(
+		row: MailboxSync,
+		result: { outcome: string; reason: string; retryAfterMs?: number },
+		written: number,
+		removed: number,
+	): Promise<SyncOutcome> {
+		if (result.outcome === "unauthorized") {
+			await this.state.markNeedsReconnect(row.id, result.reason);
+			return {
+				source: "calendar",
+				userId: row.userId,
+				status: "reconnect",
+				reason: result.reason,
+			};
+		}
+
+		if (result.outcome === "rate-limited") {
+			await this.state.markRateLimited(row.id, result.retryAfterMs ?? 60_000);
+			return {
+				source: "calendar",
+				userId: row.userId,
+				status: "rate-limited",
+				reason: result.reason,
+			};
+		}
+
+		await this.state.markFailed(row.id, result.reason);
+		return {
+			source: "calendar",
+			userId: row.userId,
+			status: "failed",
+			reason: result.reason,
+			eventsWritten: written,
+			eventsRemoved: removed,
+		};
+	}
+
+	private frontierStart(event: GoogleEvent): Date | null {
+		const start = eventTime(event.start) ?? eventTime(event.originalStartTime);
+		if (!start) return null;
+
+		const at = start.at;
+		if (start.isAllDay) at.setUTCDate(at.getUTCDate() - 1);
+
+		return at;
 	}
 
 	private async apply(
