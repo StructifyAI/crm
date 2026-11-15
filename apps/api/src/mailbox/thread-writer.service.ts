@@ -119,8 +119,10 @@ export class ThreadWriterService {
 					return false;
 				}
 			} else if (!companyId) {
-				companyId = match.companyId;
-				contactId = contactId ?? match.contactId;
+				if (contactId === null || match.contactId === contactId) {
+					companyId = match.companyId;
+					contactId = contactId ?? match.contactId;
+				}
 			} else if (!contactId && match.companyId === companyId) {
 				contactId = match.contactId;
 			}
