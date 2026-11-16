@@ -44,5 +44,6 @@ const GMAIL_RECONCILE_WINDOW_DAYS = 14;
 export const MAILBOX_RECONCILE = {
 	intervalMs: 20 * HOUR_MS,
 	windowMs: GMAIL_RECONCILE_WINDOW_DAYS * DAY_MS,
+	gmailWindowMs: GMAIL_BACKFILL.windowMs,
 	maxMessages: 120,
 } as const;

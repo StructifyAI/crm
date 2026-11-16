@@ -271,7 +271,9 @@ export class GmailSyncService {
 		const resumed = decodeReconcileCursor(row.reconcileCursor);
 		const now = new Date();
 		let cursor: ReconcileCursor = resumed ?? {
-			after: new Date(now.getTime() - MAILBOX_RECONCILE.windowMs).toISOString(),
+			after: new Date(
+				now.getTime() - MAILBOX_RECONCILE.gmailWindowMs,
+			).toISOString(),
 			before: now.toISOString(),
 			pageToken: null,
 			skip: [],

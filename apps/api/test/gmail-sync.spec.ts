@@ -304,6 +304,11 @@ describe("GmailSyncService first sync", () => {
 		await kit.service.reconcile(row("h-100"), deadline());
 
 		expect(kit.fetched).toEqual(["b"]);
+		const [call] = kit.listCalls;
+		if (!call) throw new Error("expected a list call");
+		expect(call.before.getTime() - call.after.getTime()).toBe(
+			GMAIL_BACKFILL.windowMs,
+		);
 	});
 
 	it("stays on the same page when a tick cannot drain it", async () => {
