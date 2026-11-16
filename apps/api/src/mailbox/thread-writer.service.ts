@@ -151,14 +151,16 @@ export class ThreadWriterService {
 		let companyDomain = thread?.company?.domain ?? null;
 
 		if (!thread || !companyId || !contactId) {
-			const repliedTo =
-				outbound ||
-				(await this.hasOutboundInThread(parsed.rootId, options.mailbox));
+			const allowCreate =
+				!thread &&
+				row.autoCreate &&
+				(outbound ||
+					(await this.hasOutboundInThread(parsed.rootId, options.mailbox)));
 
 			const match = await this.resolve(
 				{
 					participants,
-					allowCreate: row.autoCreate && repliedTo,
+					allowCreate,
 					source: RecordSource.EMAIL,
 					ownerId: row.userId,
 				},
@@ -531,12 +533,18 @@ export class ThreadWriterService {
 			origin: SyncSource;
 		},
 	): Promise<Date> {
+		const existing = await tx.activity.findUnique({
+			where: { emailThreadId },
+			select: { companyId: true, contactId: true },
+		});
 		const update: Prisma.ActivityUncheckedUpdateInput = {
 			body: summary.snippet,
 			occurredAt: summary.lastMessageAt,
 		};
-		if (summary.companyId) update.companyId = summary.companyId;
-		if (summary.contactId) update.contactId = summary.contactId;
+		if (summary.companyId && !existing?.companyId)
+			update.companyId = summary.companyId;
+		if (summary.contactId && !existing?.contactId)
+			update.contactId = summary.contactId;
 
 		const activity = await tx.activity.upsert({
 			where: { emailThreadId },
