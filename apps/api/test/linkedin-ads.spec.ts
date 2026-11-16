@@ -159,6 +159,38 @@ describe("LinkedIn Ads client", () => {
 		});
 	});
 
+	it("lists every campaign page", async () => {
+		const calls: Call[] = [];
+		const pages = new Map([
+			[
+				"",
+				{
+					metadata: { nextPageToken: "next" },
+					elements: [{ id: 1, name: "One", status: "ACTIVE" }],
+				},
+			],
+			["next", { elements: [{ id: 2, name: "Two", status: "PAUSED" }] }],
+		]);
+		const fetcher = (async (input: string | URL | Request) => {
+			const url = String(input);
+			calls.push({ url, init: {} });
+			return Response.json(
+				pages.get(new URL(url).searchParams.get("pageToken") ?? "") ?? {
+					elements: [],
+				},
+			);
+		}) as typeof fetch;
+		const campaigns = await new LinkedinAdsClient(
+			{ accessToken: "token", clientId: "client" },
+			fetcher,
+		).listCampaigns();
+
+		expect(campaigns.map((campaign) => campaign.name)).toEqual(["One", "Two"]);
+		expect(calls[0]?.url).toContain("search=");
+		expect(calls[0]?.url).toContain("pageSize=1000");
+		expect(calls[1]?.url).toContain("pageToken=next");
+	});
+
 	it("rejects a daily budget above $25", () => {
 		expect(() =>
 			parseLinkedinCampaignSpec({

@@ -33,6 +33,9 @@ export const linkedinCampaignSummary = z.looseObject({
 
 export const linkedinCampaignPage = z.looseObject({
 	elements: z.array(linkedinCampaignSummary),
+	metadata: z
+		.object({ nextPageToken: z.string().nullable().optional() })
+		.optional(),
 });
 
 export const linkedinImageUpload = z.looseObject({

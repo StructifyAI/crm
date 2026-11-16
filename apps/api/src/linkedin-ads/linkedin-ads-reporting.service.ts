@@ -57,16 +57,17 @@ export class LinkedinAdsReportingService {
 
 		try {
 			const token = await client.introspectToken();
-			if (token.expires_at) {
-				const expiresAt = new Date(token.expires_at * 1_000);
-				result.tokenExpiresAt = expiresAt.toISOString();
-				if (
-					!token.active ||
+			const expiresAt = token.expires_at
+				? new Date(token.expires_at * 1_000)
+				: null;
+			if (expiresAt) result.tokenExpiresAt = expiresAt.toISOString();
+			if (
+				!token.active ||
+				(expiresAt !== null &&
 					expiresAt.getTime() - now.getTime() <=
-						LINKEDIN_ADS.token.warnBeforeExpiryMs
-				) {
-					result.expiryAlerted = await this.alertExpiry(expiresAt);
-				}
+						LINKEDIN_ADS.token.warnBeforeExpiryMs)
+			) {
+				result.expiryAlerted = await this.alertExpiry(expiresAt);
 			}
 		} catch (error) {
 			this.logger.error(
@@ -123,14 +124,16 @@ export class LinkedinAdsReportingService {
 		return days.length;
 	}
 
-	private async alertExpiry(expiresAt: Date): Promise<boolean> {
+	private async alertExpiry(expiresAt: Date | null): Promise<boolean> {
 		const account = await this.db.account.findFirst({
 			where: { providerId: "slack", accessToken: { not: null } },
 			orderBy: { updatedAt: "desc" },
 			select: { accessToken: true },
 		});
 		if (!account?.accessToken) return false;
-		const text = `The LinkedIn Ads access token expires on ${expiresAt.toISOString().slice(0, 10)}. Generate a new one in the LinkedIn developer portal and update LINKEDIN_ACCESS_TOKEN.`;
+		const text = expiresAt
+			? `The LinkedIn Ads access token expires on ${expiresAt.toISOString().slice(0, 10)}. Generate a new one in the LinkedIn developer portal and update LINKEDIN_ACCESS_TOKEN.`
+			: "The LinkedIn Ads access token is inactive. Generate a new one in the LinkedIn developer portal and update LINKEDIN_ACCESS_TOKEN.";
 		try {
 			const user = await this.slack(
 				account.accessToken,

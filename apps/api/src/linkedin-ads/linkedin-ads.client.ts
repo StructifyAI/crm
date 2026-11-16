@@ -63,10 +63,25 @@ export class LinkedinAdsClient {
 	}
 
 	async listCampaigns(): Promise<LinkedinCampaignSummary[]> {
-		const page = linkedinCampaignPage.parse(
-			await this.request("GET", `${ACCOUNT_PATH}/adCampaigns?q=search`),
-		);
-		return page.elements;
+		const campaigns: LinkedinCampaignSummary[] = [];
+		const search = `(status:(values:List(${LINKEDIN_ADS.campaign.searchStatuses.join(
+			",",
+		)})))`;
+		let pageToken: string | undefined;
+		do {
+			const token = pageToken
+				? `&pageToken=${encodeURIComponent(pageToken)}`
+				: "";
+			const page = linkedinCampaignPage.parse(
+				await this.request(
+					"GET",
+					`${ACCOUNT_PATH}/adCampaigns?q=search&search=${search}&pageSize=${LINKEDIN_ADS.campaign.pageSize}${token}`,
+				),
+			);
+			campaigns.push(...page.elements);
+			pageToken = page.metadata?.nextPageToken ?? undefined;
+		} while (pageToken);
+		return campaigns;
 	}
 
 	async campaignAnalytics(

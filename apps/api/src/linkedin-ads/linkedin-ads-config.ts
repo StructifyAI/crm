@@ -16,6 +16,17 @@ export const LINKEDIN_ADS = {
 	campaign: {
 		status: "DRAFT",
 		currency: "USD",
+		pageSize: 1000,
+		searchStatuses: [
+			"ACTIVE",
+			"PAUSED",
+			"ARCHIVED",
+			"COMPLETED",
+			"CANCELED",
+			"DRAFT",
+			"PENDING_DELETION",
+			"REMOVED",
+		],
 	},
 	image: { pollAttempts: 20, pollMs: 3 * SECOND_MS },
 	reporting: {
