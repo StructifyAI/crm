@@ -1,5 +1,6 @@
 import { DealStage } from "@crm/db/enums";
 import type { StatusTone } from "@crm/ui/components/status-indicator";
+import { type ChartColor, stageChartColor } from "@crm/ui/lib/chart-config";
 
 const ORDER = [
 	DealStage.ENGAGED,
@@ -42,23 +43,12 @@ export const DEAL_STAGE_OPTIONS = ORDER.map((value) => ({
 	label: PRESENTATION[value].label,
 }));
 
-const OPEN_STAGE_COLORS = [
-	"var(--chart-1)",
-	"var(--chart-2)",
-	"var(--chart-3)",
-	"var(--chart-4)",
-	"var(--chart-5)",
-	"var(--chart-6)",
-] as const;
-
 export function isClosedStage(stage: DealStage): boolean {
 	return !OPEN_STAGES.includes(stage);
 }
 
-export function dealStageColor(stage: DealStage): string {
-	return (
-		OPEN_STAGE_COLORS[OPEN_STAGES.indexOf(stage)] ?? "var(--muted-foreground)"
-	);
+export function dealStageChartColor(stage: DealStage): ChartColor {
+	return stageChartColor(OPEN_STAGES.indexOf(stage));
 }
 
 export function dealStageLabel(stage: DealStage): string {

@@ -132,6 +132,7 @@ function build(pages: GoogleEvent[][]) {
 			},
 		},
 		activity: {
+			findUnique: async () => null,
 			upsert: async ({
 				where,
 				create,

@@ -1,10 +1,14 @@
+import type { MailboxSyncModel as MailboxSync } from "@crm/db";
 import { Injectable } from "@nestjs/common";
 import { type Deadline, deadlineIn } from "../mailbox/deadline";
+import {
+	GOOGLE_SYNC_SOURCES,
+	type GoogleSyncSource,
+} from "../mailbox/mailbox.constants";
 import { SYNC_TICK } from "../mailbox/mailbox-config";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import { CalendarSyncService } from "./calendar-sync.service";
 import { GmailSyncService } from "./gmail-sync.service";
-import { GOOGLE_SYNC_SOURCES, type GoogleSyncSource } from "./google.constants";
 
 @Injectable()
 export class GoogleSyncService {
@@ -21,6 +25,13 @@ export class GoogleSyncService {
 		return source === "calendar"
 			? this.calendar.sync(row, deadline)
 			: this.gmail.sync(row, deadline);
+	}
+
+	async reconcile(row: MailboxSync, deadline: Deadline) {
+		if (row.source === "gmail") return this.gmail.reconcile(row, deadline);
+		if (row.source === "calendar")
+			return this.calendar.reconcile(row, deadline);
+		return null;
 	}
 
 	async runForUser(userId: string): Promise<void> {

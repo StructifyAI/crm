@@ -33,6 +33,7 @@ import { InstantlySyncService } from "../instantly/instantly-sync.service";
 import { LinkedinAdsReportingService } from "../linkedin-ads/linkedin-ads-reporting.service";
 import { CorrespondenceBackfillService } from "../mailbox/correspondence-backfill.service";
 import { DealLinkService } from "../mailbox/deal-link.service";
+import { UnipileDmSyncService } from "../unipile/unipile-dm-sync.service";
 import { ActivityDirectionBackfillService } from "./activity-direction-backfill.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
 import { backfillCursor } from "./sync.contracts";
@@ -58,6 +59,7 @@ export class SyncController {
 		private readonly extrovertEngagement: ExtrovertEngagementSyncService,
 		private readonly extrovertIcpList: ExtrovertListSyncService,
 		private readonly linkedinAds: LinkedinAdsReportingService,
+		private readonly unipileDms: UnipileDmSyncService,
 		private readonly dealLinks: DealLinkService,
 		private readonly correspondence: CorrespondenceBackfillService,
 		private readonly activityDirections: ActivityDirectionBackfillService,
@@ -82,6 +84,25 @@ export class SyncController {
 	@ApiExcludeEndpoint()
 	async mailboxesViaPost(@Headers("authorization") authorization?: string) {
 		return this.run(authorization);
+	}
+
+	@Get("reconcile")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary: "Re-read recent Gmail windows and rematch stored mail",
+	})
+	@ApiOkResponse({
+		description: "The reconciliation ran; per-mailbox results.",
+	})
+	async reconcileViaGet(@Headers("authorization") authorization?: string) {
+		return this.runReconcile(authorization);
+	}
+
+	@Post("reconcile")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async reconcileViaPost(@Headers("authorization") authorization?: string) {
+		return this.runReconcile(authorization);
 	}
 
 	@Get("google")
@@ -182,6 +203,20 @@ export class SyncController {
 		@Headers("authorization") authorization?: string,
 	) {
 		return this.runExtrovertEngagement(authorization);
+	}
+
+	@Get("unipile-dms")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "Sync LinkedIn DMs from the Unipile seats" })
+	async unipileDmsViaGet(@Headers("authorization") authorization?: string) {
+		return this.runUnipileDms(authorization);
+	}
+
+	@Post("unipile-dms")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async unipileDmsViaPost(@Headers("authorization") authorization?: string) {
+		return this.runUnipileDms(authorization);
 	}
 
 	@Get("extrovert-icp-list")
@@ -439,9 +474,19 @@ export class SyncController {
 		return this.extrovertEngagement.run();
 	}
 
+	private async runUnipileDms(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.unipileDms.run();
+	}
+
 	private async runExtrovertIcpList(authorization?: string) {
 		this.assertSecret(authorization);
 		return this.extrovertIcpList.run();
+	}
+
+	private async runReconcile(authorization?: string) {
+		this.assertSecret(authorization);
+		return this.sync.runReconciliation();
 	}
 
 	private async runDealLinks(authorization?: string, cursor?: string) {

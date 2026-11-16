@@ -42,6 +42,7 @@ type Harness = {
 function harness(options: {
 	pages?: string[][];
 	existing?: string[];
+	unlinked?: string[];
 	history?: MailboxResult<HistoryList>;
 	list?: MailboxResult<MessageList>;
 	messages?: Record<string, GmailMessage>;
@@ -99,6 +100,9 @@ function harness(options: {
 		async clearCursor(_id: string, reason: string) {
 			cleared.push(reason);
 		},
+		async saveReconcileCursor() {},
+		async markReconciled() {},
+		async release() {},
 		async markNeedsReconnect() {},
 		async markRateLimited() {},
 		async markFailed(_id: string, reason: string) {
@@ -124,12 +128,18 @@ function harness(options: {
 	} as unknown as ThreadWriterService;
 
 	const existing = new Set(options.existing ?? []);
+	const unlinked = new Set(options.unlinked ?? []);
 	const db = {
 		emailMessage: {
 			async findMany(args: { where: { gmailMessageId: { in: string[] } } }) {
 				return args.where.gmailMessageId.in
-					.filter((id) => existing.has(id))
-					.map((gmailMessageId) => ({ gmailMessageId }));
+					.filter((id) => existing.has(id) || unlinked.has(id))
+					.map((gmailMessageId) => ({
+						gmailMessageId,
+						thread: existing.has(gmailMessageId)
+							? { companyId: "company-1", contactId: "contact-1" }
+							: { companyId: null, contactId: null },
+					}));
 			},
 		},
 	} as unknown as ConstructorParameters<typeof GmailSyncService>[0];
@@ -269,6 +279,36 @@ describe("GmailSyncService first sync", () => {
 
 		expect(kit.fetched).toEqual(["b"]);
 		expect(kit.settled.at(-1)?.cursor).toBe("h-100");
+	});
+
+	it("keeps stored unlinked mail out of backfill", async () => {
+		const kit = harness({
+			pages: [["a", "b"]],
+			existing: ["a"],
+			unlinked: ["b"],
+		});
+
+		await kit.service.sync(row(null), deadline());
+
+		expect(kit.fetched).toEqual([]);
+		expect(kit.settled.at(-1)?.cursor).toBe("h-100");
+	});
+
+	it("refetches stored unlinked mail during reconciliation", async () => {
+		const kit = harness({
+			pages: [["a", "b"]],
+			existing: ["a"],
+			unlinked: ["b"],
+		});
+
+		await kit.service.reconcile(row("h-100"), deadline());
+
+		expect(kit.fetched).toEqual(["b"]);
+		const [call] = kit.listCalls;
+		if (!call) throw new Error("expected a list call");
+		expect(call.before.getTime() - call.after.getTime()).toBe(
+			GMAIL_BACKFILL.windowMs,
+		);
 	});
 
 	it("stays on the same page when a tick cannot drain it", async () => {

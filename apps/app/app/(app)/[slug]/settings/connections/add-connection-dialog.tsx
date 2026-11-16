@@ -1,6 +1,5 @@
 "use client";
 
-import Plug from "@carbon/icons-react/es/Plug";
 import DocusignLogo from "@crm/ui/components/brand-logos/docusign";
 import ExtrovertLogo from "@crm/ui/components/brand-logos/extrovert";
 import GoogleLogo from "@crm/ui/components/brand-logos/google";
@@ -15,6 +14,8 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@crm/ui/components/dialog";
+import { ProviderMark } from "@crm/ui/components/provider-mark";
+import type { ProviderBrand } from "@crm/ui/lib/provider-brand";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -22,10 +23,21 @@ export function AddConnectionDialog({
 	slug,
 	open,
 	connected,
+	mcpConfigured,
+	canManageMcp,
+	mcpProviders,
 }: {
 	slug: string;
 	open: boolean;
 	connected: string[];
+	mcpConfigured: boolean;
+	canManageMcp: boolean;
+	mcpProviders: ReadonlyArray<{
+		slug: string;
+		name: string;
+		description: string;
+		brand: ProviderBrand | null;
+	}>;
 }) {
 	const router = useRouter();
 	return (
@@ -42,7 +54,7 @@ export function AddConnectionDialog({
 						Nothing moves until you finish setting one up.
 					</DialogDescription>
 				</DialogHeader>
-				<div className="flex flex-col border-y px-2 py-2">
+				<div className="flex max-h-[min(60vh,32rem)] flex-col overflow-y-auto border-y px-2 py-2">
 					{!connected.includes("Google Workspace") ? (
 						<CatalogRow
 							logo={GoogleLogo}
@@ -83,6 +95,28 @@ export function AddConnectionDialog({
 							href={`/${slug}/settings/connections/extrovert`}
 						/>
 					) : null}
+					{mcpProviders.map((provider) =>
+						connected.includes(provider.name) ? null : (
+							<CatalogRow
+								key={provider.slug}
+								mark={
+									<ProviderMark
+										slug={provider.slug}
+										name={provider.name}
+										brand={provider.brand}
+										className="size-5"
+									/>
+								}
+								name={provider.name}
+								description={mcpDescription(
+									provider.description,
+									mcpConfigured,
+									canManageMcp,
+								)}
+								href={mcpHref(slug, provider.slug, mcpConfigured, canManageMcp)}
+							/>
+						),
+					)}
 					<CatalogRow
 						logo={StripeLogo}
 						name="Stripe"
@@ -92,12 +126,6 @@ export function AddConnectionDialog({
 						logo={DocusignLogo}
 						name="Docusign"
 						description="Coming soon"
-					/>
-					<CatalogRow
-						logo={Plug}
-						name="Anything else"
-						description="The intake API is not available yet"
-						href={`/${slug}/settings/connections/intake`}
 					/>
 				</div>
 				<p className="px-(--spacing-block-inline) py-4 text-muted-foreground text-xs">
@@ -110,20 +138,43 @@ export function AddConnectionDialog({
 	);
 }
 
+function mcpDescription(
+	description: string,
+	configured: boolean,
+	canManage: boolean,
+) {
+	if (!configured) return "Set MCP_ENCRYPTION_KEY to enable";
+	if (!canManage) return "An owner or admin can connect this service";
+	return description;
+}
+
+function mcpHref(
+	slug: string,
+	vendor: string,
+	configured: boolean,
+	canManage: boolean,
+) {
+	return configured && canManage
+		? `/${slug}/settings/connections/${vendor}`
+		: undefined;
+}
+
 function CatalogRow({
 	logo: Logo,
+	mark,
 	name,
 	description,
 	href,
 }: {
-	logo: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+	logo?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+	mark?: React.ReactNode;
 	name: string;
 	description: string;
 	href?: string;
 }) {
 	const content = (
 		<>
-			<Logo className="size-5 shrink-0" />
+			{mark ?? (Logo ? <Logo className="size-5 shrink-0" /> : null)}
 			<div>
 				<p className="font-medium text-sm">{name}</p>
 				<p className="text-muted-foreground text-xs">{description}</p>

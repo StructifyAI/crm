@@ -266,7 +266,7 @@ export function replyFromEmail(
 	internal: InternalIdentity,
 ): InstantlyReply | null {
 	const from = email.from_address_email?.trim().toLowerCase();
-	if (!from || email.is_auto_reply) return null;
+	if (!from) return null;
 	const mailbox = email.eaccount?.trim().toLowerCase() ?? null;
 	if (isInternal(from, mailbox, internal)) return null;
 	const lead = email.lead?.trim().toLowerCase() || null;

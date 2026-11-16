@@ -1,10 +1,13 @@
 "use client";
 
 import { cn } from "@crm/ui/lib/utils";
+import { UI_MOTION } from "@crm/ui/lib/motion";
 import { cva, type VariantProps } from "class-variance-authority";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
+import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import { Accordion as AccordionPrimitive } from "radix-ui";
 import type * as React from "react";
+import { forwardRef } from "react";
 
 function Accordion({
 	className,
@@ -33,16 +36,16 @@ function AccordionItem({
 }
 
 const accordionTriggerVariants = cva(
-	"group/accordion-trigger relative flex items-start rounded-md border border-transparent text-left outline-none transition-all focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:after:border-ring disabled:pointer-events-none disabled:opacity-50 **:data-[slot=accordion-trigger-icon]:text-muted-foreground",
+	"group/accordion-trigger relative flex items-start rounded-md border border-transparent text-left outline-none transition-[color,box-shadow,text-decoration-color] focus-visible:shadow-focus disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 **:data-[slot=accordion-trigger-icon]:text-muted-foreground",
 	{
 		variants: {
 			variant: {
 				default:
-					"flex-1 justify-between py-2.5 font-medium text-sm hover:underline **:data-[slot=accordion-trigger-icon]:ml-auto **:data-[slot=accordion-trigger-icon]:size-4",
+					"flex-1 justify-between py-4 font-medium text-sm hover:underline **:data-[slot=accordion-trigger-icon]:ml-auto **:data-[slot=accordion-trigger-icon]:size-4",
 				plain:
 					"flex-1 justify-between py-2.5 text-left **:data-[slot=accordion-trigger-icon]:ml-auto **:data-[slot=accordion-trigger-icon]:size-4",
 				subtle:
-					"w-fit max-w-full items-center gap-1 py-1 text-muted-foreground text-xs hover:text-foreground **:data-[slot=accordion-trigger-icon]:size-3",
+					"w-fit max-w-full items-center gap-1 py-1 text-muted-foreground text-13 hover:text-foreground **:data-[slot=accordion-trigger-icon]:size-3",
 			},
 		},
 		defaultVariants: { variant: "default" },
@@ -77,28 +80,70 @@ function AccordionTrigger({
 	);
 }
 
+const accordionContentVariants = cva(
+	"pt-0 pb-4 [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground [&_p:not(:last-child)]:mb-4",
+	{
+		variants: {
+			layout: {
+				default: "",
+				stack: "flex flex-col items-start gap-3",
+			},
+		},
+		defaultVariants: { layout: "default" },
+	},
+);
+
 function AccordionContent({
 	className,
 	children,
+	layout,
 	...props
-}: React.ComponentProps<typeof AccordionPrimitive.Content>) {
+}: React.ComponentProps<typeof AccordionPrimitive.Content> &
+	VariantProps<typeof accordionContentVariants>) {
 	return (
-		<AccordionPrimitive.Content
-			data-slot="accordion-content"
-			className="overflow-hidden text-xs data-closed:animate-accordion-up data-open:animate-accordion-down"
-			{...props}
-		>
-			<div
-				className={cn(
-					"pt-0 pb-2.5 [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground [&_p:not(:last-child)]:mb-4",
-					className,
-				)}
-			>
-				{children}
-			</div>
+		<AccordionPrimitive.Content forceMount asChild {...props}>
+			<MotionAccordionContent>
+				<div
+					className={cn(accordionContentVariants({ layout }), className)}
+				>
+					{children}
+				</div>
+			</MotionAccordionContent>
 		</AccordionPrimitive.Content>
 	);
 }
+
+type MotionAccordionContentProps = React.ComponentProps<typeof m.div> & {
+	"data-state"?: "open" | "closed";
+};
+
+const MotionAccordionContent = forwardRef<
+	HTMLDivElement,
+	MotionAccordionContentProps
+>(function MotionAccordionContent(
+	{ "data-state": dataState, className, ...props },
+	ref,
+) {
+	const reducedMotion = useReducedMotion();
+	const open = dataState === "open";
+
+	return (
+		<LazyMotion features={domAnimation}>
+			<m.div
+				{...props}
+				ref={ref}
+				data-slot="accordion-content"
+				data-state={dataState}
+				initial={false}
+				animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
+				transition={reducedMotion ? UI_MOTION.instant : UI_MOTION.accordion}
+				aria-hidden={!open}
+				inert={open ? undefined : true}
+				className={cn("overflow-hidden text-sm", className)}
+			/>
+		</LazyMotion>
+	);
+});
 
 export {
 	Accordion,

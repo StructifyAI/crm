@@ -29,6 +29,21 @@ export const granolaNote = z.object({
 	summary_markdown: z.string().nullable().optional(),
 });
 
+export const granolaTranscriptEntry = z.object({
+	speaker: z
+		.object({
+			source: z.string().nullable().optional(),
+			diarization_label: z.string().nullable().optional(),
+		})
+		.nullable()
+		.optional(),
+	text: z.string(),
+});
+
+export const granolaNoteWithTranscript = granolaNote.extend({
+	transcript: z.array(granolaTranscriptEntry).nullable().optional(),
+});
+
 export const granolaNoteSummary = z.object({
 	id: z.string(),
 	title: z.string().nullable(),
@@ -46,6 +61,10 @@ export const granolaNotesPage = z.object({
 export type GranolaUser = z.infer<typeof granolaUser>;
 export type GranolaCalendarEvent = z.infer<typeof granolaCalendarEvent>;
 export type GranolaNote = z.infer<typeof granolaNote>;
+export type GranolaTranscriptEntry = z.infer<typeof granolaTranscriptEntry>;
+export type GranolaNoteWithTranscript = z.infer<
+	typeof granolaNoteWithTranscript
+>;
 export type GranolaNoteSummary = z.infer<typeof granolaNoteSummary>;
 export type GranolaNotesPage = z.infer<typeof granolaNotesPage>;
 
@@ -55,4 +74,10 @@ export function parseGranolaNotesPage(value: unknown): GranolaNotesPage {
 
 export function parseGranolaNote(value: unknown): GranolaNote {
 	return granolaNote.parse(value);
+}
+
+export function parseGranolaNoteWithTranscript(
+	value: unknown,
+): GranolaNoteWithTranscript {
+	return granolaNoteWithTranscript.parse(value);
 }

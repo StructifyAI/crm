@@ -1,7 +1,5 @@
 "use client";
 
-import Add from "@carbon/icons-react/es/Add";
-import TrashCan from "@carbon/icons-react/es/TrashCan";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -23,6 +21,7 @@ import {
 } from "@crm/ui/components/select";
 import { StatusIndicator } from "@crm/ui/components/status-indicator";
 import { useMutation } from "@tanstack/react-query";
+import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -339,7 +338,7 @@ export function InstantlyConnection({
 							size="sm"
 							disabled={!emailAccount || addMailbox.isPending}
 						>
-							<Icon icon={Add} />
+							<Icon icon={PlusIcon} />
 							Add mailbox
 						</Button>
 					</form>
@@ -396,7 +395,7 @@ export function InstantlyConnection({
 										aria-label={`Remove ${mailbox.emailAccount}`}
 										onClick={() => removeMailbox.mutate({ id: mailbox.id })}
 									>
-										<Icon icon={TrashCan} />
+										<Icon icon={Trash2Icon} />
 									</Button>
 								</div>
 							))}

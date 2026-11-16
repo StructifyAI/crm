@@ -6,6 +6,7 @@ import { InstantlyModule } from "../instantly/instantly.module";
 import { LinkedinAdsModule } from "../linkedin-ads/linkedin-ads.module";
 import { MailboxModule } from "../mailbox/mailbox.module";
 import { MicrosoftModule } from "../microsoft/microsoft.module";
+import { UnipileModule } from "../unipile/unipile.module";
 import { ActivityDirectionBackfillService } from "./activity-direction-backfill.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
 import { SyncController } from "./sync.controller";
@@ -19,6 +20,7 @@ import { SyncController } from "./sync.controller";
 		InstantlyModule,
 		ExtrovertModule,
 		LinkedinAdsModule,
+		UnipileModule,
 	],
 	controllers: [SyncController],
 	providers: [ActivityDirectionBackfillService, MailboxSyncService],

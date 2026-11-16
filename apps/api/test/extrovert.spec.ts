@@ -32,7 +32,6 @@ import {
 import { ExtrovertSyncService } from "../src/extrovert/extrovert-sync.service";
 import { FieldsService } from "../src/fields/fields.service";
 import { withDiscardedCrmEvents } from "./agent-trigger.stub";
-import { noContactEvents } from "./contact-events.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "extrovert-spec";
 const ownerId = `extrovert-owner-${suffix}`;
@@ -821,38 +820,6 @@ describe("Extrovert client", () => {
 					offset: 0,
 				}),
 			).resolves.toEqual({ comments: [], total: 0 });
-		} finally {
-			globalThis.fetch = originalFetch;
-		}
-	});
-
-	it("treats forbidden conversation feeds as empty pages", async () => {
-		const originalFetch = globalThis.fetch;
-		globalThis.fetch = (async () =>
-			new Response("forbidden", { status: 403 })) as unknown as typeof fetch;
-		try {
-			await expect(
-				new ExtrovertClient().listConversationsPage("valid-key", {
-					ownerId: "owner-1",
-					offset: 0,
-				}),
-			).resolves.toEqual({ conversations: [], total: 0 });
-		} finally {
-			globalThis.fetch = originalFetch;
-		}
-	});
-
-	it("keeps unauthorized conversation feeds as invalid-key errors", async () => {
-		const originalFetch = globalThis.fetch;
-		globalThis.fetch = (async () =>
-			new Response("unauthorized", { status: 401 })) as unknown as typeof fetch;
-		try {
-			await expect(
-				new ExtrovertClient().listConversationsPage("bad-key", {
-					ownerId: "owner-1",
-					offset: 0,
-				}),
-			).rejects.toThrow("Extrovert API key is invalid.");
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
@@ -1841,12 +1808,6 @@ describe("Extrovert engagement sync", () => {
 		key: string,
 		input: {
 			icp?: string;
-			messages?: Array<{
-				dmId: string;
-				text: string;
-				author: "Owner" | "Prospect";
-				sentAt: string;
-			}>;
 			includeComment?: boolean;
 		} = {},
 	) {
@@ -1889,14 +1850,6 @@ describe("Extrovert engagement sync", () => {
 			},
 		});
 
-		const messages = input.messages ?? [
-			{
-				dmId: `dm-${key}`,
-				text: "Interested in learning more",
-				author: "Prospect" as const,
-				sentAt: "2026-09-12T02:00:00.000Z",
-			},
-		];
 		const comments = input.includeComment
 			? [
 					{
@@ -1932,36 +1885,6 @@ describe("Extrovert engagement sync", () => {
 				page.ownerId === testMemberId
 					? { comments, total: comments.length }
 					: { comments: [], total: 0 },
-			listConversationsPage: async (
-				_apiKey: string,
-				page: { ownerId: string },
-			) => {
-				if (page.ownerId !== testMemberId) {
-					return { conversations: [], total: 0 };
-				}
-				const lastMessage = messages.at(-1);
-				if (!lastMessage) return { conversations: [], total: 0 };
-				return {
-					conversations: [
-						{
-							connectionId: `connection-${key}-${suffix}`,
-							prospect: { name: "Taylor Prospect", linkedInUrl: profileUrl },
-							lastMessage: {
-								text: lastMessage.text,
-								author: lastMessage.author,
-								sentAt: lastMessage.sentAt,
-							},
-						},
-					],
-					total: 1,
-				};
-			},
-			getConversation: async () => ({
-				connectionId: `connection-${key}-${suffix}`,
-				prospect: { name: "Taylor Prospect", linkedInUrl: profileUrl },
-				messages,
-				messagePagination: { limit: 30, offset: 0, total: messages.length },
-			}),
 		} as unknown as ExtrovertClient;
 		const memberLoader = {
 			loadMembers: async () =>
@@ -1975,7 +1898,6 @@ describe("Extrovert engagement sync", () => {
 			memberLoader,
 			filing,
 			stamp,
-			noContactEvents,
 		);
 
 		return {
@@ -1985,7 +1907,7 @@ describe("Extrovert engagement sync", () => {
 		};
 	}
 
-	it("files and deduplicates comments, and updates DM activities in place", async () => {
+	it("files and deduplicates comments", async () => {
 		const engagementMemberId = `${memberId}-engagement`;
 		const engagementUrl = `https://www.linkedin.com/in/engagement-${suffix}-engagement`;
 		const postText = `${"a".repeat(279)}😀\uD83D\u0000`;
@@ -2058,21 +1980,6 @@ describe("Extrovert engagement sync", () => {
 				},
 			},
 		];
-		let lastMessageAt = "2026-09-12T02:00:00.000Z";
-		let messages: Array<{
-			dmId: string;
-			text: string;
-			author: "Owner" | "Prospect";
-			sentAt: string;
-		}> = [
-			{
-				dmId: "dm-1",
-				text: "Hello",
-				author: "Owner" as const,
-				sentAt: lastMessageAt,
-			},
-		];
-		let detailCalls = 0;
 		const client = {
 			listCampaigns: async () => [
 				{
@@ -2089,38 +1996,6 @@ describe("Extrovert engagement sync", () => {
 				input.ownerId === engagementMemberId
 					? { comments: [comment, ...skippedComments], total: 3 }
 					: { comments: [], total: 0 },
-			listConversationsPage: async (
-				_key: string,
-				input: { ownerId: string },
-			) =>
-				input.ownerId === engagementMemberId
-					? {
-							conversations: [
-								{
-									connectionId: `connection-${suffix}-engagement`,
-									ownerId: engagementMemberId,
-									prospect: comment.prospect,
-									context: { campaign: comment.campaign },
-									connectedAt: "2026-09-10T00:00:00.000Z",
-									lastMessage: {
-										text: messages[messages.length - 1]?.text ?? "",
-										author: "Owner" as const,
-										sentAt: lastMessageAt,
-									},
-								},
-							],
-							total: 1,
-						}
-					: { conversations: [], total: 0 },
-			getConversation: async () => {
-				detailCalls += 1;
-				return {
-					connectionId: `connection-${suffix}-engagement`,
-					prospect: comment.prospect,
-					messages,
-					messagePagination: { limit: 30, offset: 0, total: messages.length },
-				};
-			},
 		} as unknown as ExtrovertClient;
 		const memberLoader = {
 			loadMembers: async () =>
@@ -2137,24 +2012,14 @@ describe("Extrovert engagement sync", () => {
 			memberLoader,
 			filing,
 			stamp,
-			noContactEvents,
 		);
 
 		await expect(run.run()).resolves.toMatchObject({
 			complete: true,
 			comments: 1,
-			dms: 1,
 			skipped: 2,
 		});
 		expect(queued).toHaveLength(0);
-		const firstDm = await db.activity.findFirstOrThrow({
-			where: {
-				contactId: contact.id,
-				subject: "LinkedIn messages with Mapped Member",
-			},
-			select: { id: true, body: true },
-		});
-		expect(firstDm.body).toContain("Mapped Member");
 		const commentActivity = await db.activity.findFirstOrThrow({
 			where: {
 				contactId: contact.id,
@@ -2173,25 +2038,6 @@ describe("Extrovert engagement sync", () => {
 		expect(commentActivity.body).not.toContain("\u0000");
 		expect(commentActivity.body).toEndWith(`> ${"a".repeat(279)}😀`);
 		await run.run();
-		expect(detailCalls).toBe(1);
-		lastMessageAt = "2026-09-12T03:00:00.000Z";
-		messages = [
-			...messages,
-			{
-				dmId: "dm-2",
-				text: "Follow up",
-				author: "Prospect" as const,
-				sentAt: lastMessageAt,
-			},
-		];
-		await run.run();
-		expect(detailCalls).toBe(2);
-		expect(
-			await db.activity.findUnique({
-				where: { id: firstDm.id },
-				select: { body: true },
-			}),
-		).toMatchObject({ body: expect.stringContaining("Follow up") });
 		expect(
 			await db.activity.count({
 				where: {
@@ -2202,7 +2048,7 @@ describe("Extrovert engagement sync", () => {
 		).toBe(1);
 	});
 
-	it("does not link LinkedIn activities when the company has no open deal", async () => {
+	it("does not link LinkedIn comments when the company has no open deal", async () => {
 		const fixture = await syncFixture("no-open-deal", {
 			includeComment: true,
 		});
@@ -2212,10 +2058,7 @@ describe("Extrovert engagement sync", () => {
 		expect(
 			await db.deal.count({ where: { companyId: fixture.company.id } }),
 		).toBe(0);
-		for (const subject of [
-			"LinkedIn messages with Mapped Member",
-			"LinkedIn comment by Mapped Member",
-		]) {
+		for (const subject of ["LinkedIn comment by Mapped Member"]) {
 			expect(
 				await db.activity.findFirstOrThrow({
 					where: { contactId: fixture.contact.id, subject },
@@ -2225,7 +2068,7 @@ describe("Extrovert engagement sync", () => {
 		}
 	});
 
-	it("links LinkedIn DMs and comments to the company's single open deal", async () => {
+	it("links LinkedIn comments to the company's single open deal", async () => {
 		const fixture = await syncFixture("reply-existing-open", {
 			includeComment: true,
 		});
@@ -2244,110 +2087,13 @@ describe("Extrovert engagement sync", () => {
 		expect(
 			await db.deal.count({ where: { companyId: fixture.company.id } }),
 		).toBe(1);
-		for (const subject of [
-			"LinkedIn messages with Mapped Member",
-			"LinkedIn comment by Mapped Member",
-		]) {
+		for (const subject of ["LinkedIn comment by Mapped Member"]) {
 			expect(
 				await db.activity.findFirstOrThrow({
 					where: { contactId: fixture.contact.id, subject },
 					select: { dealId: true },
 				}),
 			).toMatchObject({ dealId: deal.id });
-		}
-	});
-
-	it("skips forbidden conversation owners and continues to the next owner", async () => {
-		const forbiddenOwnerId = `${memberId}-forbidden`;
-		const allowedOwnerId = `${memberId}-allowed`;
-		await db.extrovertMember.deleteMany({
-			where: { id: { startsWith: `extrovert-member-${suffix}` } },
-		});
-		await db.appSetting.upsert({
-			where: { id: SETTINGS_ID },
-			create: { id: SETTINGS_ID, extrovertApiKey: "test-key" },
-			update: {
-				extrovertApiKey: "test-key",
-				extrovertEngagementResume: Prisma.JsonNull,
-				extrovertEngagementSyncAt: null,
-			},
-		});
-		const requestedOwners: string[] = [];
-		const originalFetch = globalThis.fetch;
-		globalThis.fetch = (async (input: string | URL) => {
-			const url = new URL(String(input));
-			if (url.pathname === EXTROVERT.api.campaignsPath) {
-				return new Response(
-					JSON.stringify({
-						status: "success",
-						data: [
-							{
-								id: `campaign-${suffix}-forbidden`,
-								name: "Forbidden Campaign",
-								isActive: true,
-								isDeleted: false,
-							},
-						],
-					}),
-				);
-			}
-			const owner = url.searchParams.get("ownerId");
-			if (owner) requestedOwners.push(owner);
-			if (
-				url.pathname === EXTROVERT.api.conversationsPath &&
-				owner === forbiddenOwnerId
-			) {
-				return new Response("forbidden", { status: 403 });
-			}
-			if (
-				url.pathname === EXTROVERT.api.commentsPath ||
-				url.pathname === EXTROVERT.api.conversationsPath
-			) {
-				const data =
-					url.pathname === EXTROVERT.api.commentsPath
-						? {
-								comments: [],
-								pagination: { limit: 50, offset: 0, total: 0 },
-							}
-						: {
-								conversations: [],
-								pagination: { limit: 50, offset: 0, total: 0 },
-							};
-				return new Response(JSON.stringify({ status: "success", data }));
-			}
-			throw new Error(`Unexpected Extrovert URL: ${url}`);
-		}) as unknown as typeof fetch;
-		try {
-			const client = new ExtrovertClient();
-			const memberLoader = {
-				loadMembers: async () =>
-					new Map([
-						[
-							forbiddenOwnerId,
-							{ id: forbiddenOwnerId, name: "Forbidden Owner", ownerId },
-						],
-						[
-							allowedOwnerId,
-							{ id: allowedOwnerId, name: "Allowed Owner", ownerId },
-						],
-					]),
-			} as unknown as ExtrovertSyncService;
-			const run = new ExtrovertEngagementSyncService(
-				db,
-				client,
-				memberLoader,
-				filing,
-				stamp,
-				noContactEvents,
-			);
-			await expect(run.run()).resolves.toMatchObject({
-				complete: true,
-				error: null,
-			});
-			expect(requestedOwners).toContain(forbiddenOwnerId);
-			expect(requestedOwners).toContain(allowedOwnerId);
-		} finally {
-			globalThis.fetch = originalFetch;
 		}
 	});
 
@@ -2382,10 +2128,6 @@ describe("Extrovert engagement sync", () => {
 				},
 			],
 			listPostedCommentsPage: async () => ({ comments: [], total: 0 }),
-			listConversationsPage: async () => ({
-				conversations: [],
-				total: 0,
-			}),
 		} as unknown as ExtrovertClient;
 		const run = new ExtrovertEngagementSyncService(
 			db,
@@ -2393,7 +2135,6 @@ describe("Extrovert engagement sync", () => {
 			{} as ExtrovertSyncService,
 			filing,
 			stamp,
-			noContactEvents,
 		);
 		const budget = EXTROVERT.engagement.tickBudgetMs;
 		Object.defineProperty(EXTROVERT.engagement, "tickBudgetMs", { value: 0 });

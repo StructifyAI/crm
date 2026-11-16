@@ -47,7 +47,12 @@ Microsoft equivalent of `hd`**: `tenantId` is the whole of it.
 with none, the sign-in page says so by name rather than rendering nothing.
 
 **`GRANOLA_API_KEY`** enables the optional Granola meeting-notes sync. Without it,
-the Granola cron exits with a skipped result.
+the Granola cron exits with a skipped result. On the agent it enables
+`read_meeting_notes`, which reads a synced note's full summary and transcript.
+
+**`UNIPILE_DSN`** and **`UNIPILE_API_KEY`** enable the optional LinkedIn DM sync
+for every LinkedIn seat connected to Unipile. Without them, the Unipile cron exits
+with a skipped result.
 
 **`ALLOWED_SIGN_IN`** — comma-separated whole domains or single addresses (bare
 addresses exist for a solo self-hoster, where `gmail.com` would be an open door). **One
@@ -105,6 +110,14 @@ and lists every variable the API reads and nothing else.
 - **Validation runs while `AppModule` is evaluated** — a test must set variables before
   importing it (see the dynamic `import()` in `test/auth.e2e.spec.ts`).
 - **The schema is the API's, not the repo's** — `@crm/auth` and the agent read their own.
+
+## Builder chat encryption
+
+`CHAT_EVENT_ENCRYPTION_KEY` encrypts new builder chat events before database storage.
+Generate 32 bytes with `openssl rand -base64 32`.
+The API and agent must use the same value.
+Without it, builder chat stores the sanitized public event as plaintext.
+Removing it hides encrypted replay data without stopping the agent or API.
 
 ## Optional: what the agent can do
 

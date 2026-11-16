@@ -34,22 +34,17 @@ export class InstantlyClient {
 		}
 	}
 
-	async *listCampaignLeads(
+	async listCampaignLeadPage(
 		key: string,
 		campaignId: string,
-	): AsyncGenerator<InstantlyLead[], void, undefined> {
-		let cursor: string | undefined;
-
-		while (true) {
-			const page = parseInstantlyLeadPage(
-				await this.request(key, "/leads/list", cursor, {
-					campaign: campaignId,
-				}),
-			);
-			if (page.items.length > 0) yield page.items;
-			if (page.items.length === 0 || !page.next_starting_after) return;
-			cursor = page.next_starting_after;
-		}
+		cursor: string | null,
+	): Promise<{ items: InstantlyLead[]; cursor: string | null }> {
+		const page = parseInstantlyLeadPage(
+			await this.request(key, "/leads/list", cursor ?? undefined, {
+				campaign: campaignId,
+			}),
+		);
+		return { items: page.items, cursor: page.next_starting_after ?? null };
 	}
 
 	async listEmails(

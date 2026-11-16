@@ -5,6 +5,7 @@ import {
 	IsOptional,
 	IsString,
 	IsUrl,
+	Matches,
 	Max,
 	Min,
 	MinLength,
@@ -93,6 +94,14 @@ export class EnvironmentVariables {
 	LINKEDIN_ACCESS_TOKEN?: string;
 
 	@IsOptional()
+	@IsString()
+	UNIPILE_DSN?: string;
+
+	@IsOptional()
+	@IsString()
+	UNIPILE_API_KEY?: string;
+
+	@IsOptional()
 	@IsUrl({ require_tld: false })
 	API_URL?: string;
 
@@ -138,6 +147,21 @@ export class EnvironmentVariables {
 	@IsOptional()
 	@IsString()
 	AGENT_BRIDGE_SECRET?: string;
+
+	@IsOptional()
+	@IsString()
+	@Matches(/^[A-Za-z0-9+/]{43}=$/, {
+		message: "MCP_ENCRYPTION_KEY must contain exactly 32 base64-encoded bytes.",
+	})
+	MCP_ENCRYPTION_KEY?: string;
+
+	@IsOptional()
+	@IsString()
+	@Matches(/^[A-Za-z0-9+/]{43}=$/, {
+		message:
+			"CHAT_EVENT_ENCRYPTION_KEY must contain exactly 32 base64-encoded bytes.",
+	})
+	CHAT_EVENT_ENCRYPTION_KEY?: string;
 
 	@IsOptional()
 	@IsString()

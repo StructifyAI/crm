@@ -1,5 +1,9 @@
-import { ActivityType, db } from "@crm/db";
+import { ActivityType, db, Prisma } from "@crm/db";
 import { NAICS_VALUE_SELECT } from "@crm/db/company-icp";
+import {
+	activityMeta,
+	parseGranolaActivityMeta,
+} from "@crm/validation/activity-meta";
 import { z } from "zod";
 import { formatCompanyEmployees } from "./brand-mapping";
 import { isDerivedName } from "./names";
@@ -39,6 +43,8 @@ export type AccountNote = {
 	subject: string | null;
 	body: string | null;
 	occurredAt: string;
+	granolaNoteId: string | null;
+	link: string | null;
 };
 
 export type CompanyPerson = {
@@ -578,20 +584,28 @@ function isOpen(stage: string): boolean {
 	);
 }
 
-async function recentNotes(
-	where: { companyId: string } | { dealId: string },
+export async function recentNotes(
+	where: { companyId: string } | { dealId: string } | { contactId: string },
 ): Promise<AccountNote[]> {
 	const rows = await db.activity.findMany({
 		where: {
 			...where,
-			type: {
-				in: [
-					ActivityType.NOTE,
-					ActivityType.CALL,
-					ActivityType.TASK,
-					ActivityType.ENRICHMENT,
-				],
-			},
+			OR: [
+				{
+					type: {
+						in: [
+							ActivityType.NOTE,
+							ActivityType.CALL,
+							ActivityType.TASK,
+							ActivityType.ENRICHMENT,
+						],
+					},
+				},
+				{
+					type: ActivityType.MEETING,
+					meta: { path: ["granola", "noteId"], not: Prisma.AnyNull },
+				},
+			],
 		},
 		orderBy: { createdAt: "desc" },
 		take: 10,
@@ -601,15 +615,21 @@ async function recentNotes(
 			body: true,
 			occurredAt: true,
 			createdAt: true,
+			meta: true,
 		},
 	});
 
-	return rows.map((row) => ({
-		type: row.type,
-		subject: row.subject,
-		body: row.body ? row.body.slice(0, BODY_LIMIT) : null,
-		occurredAt: (row.occurredAt ?? row.createdAt).toISOString(),
-	}));
+	return rows.map((row) => {
+		const granola = parseGranolaActivityMeta(activityMeta.parse(row.meta));
+		return {
+			type: row.type,
+			subject: row.subject,
+			body: row.body ? row.body.slice(0, BODY_LIMIT) : null,
+			occurredAt: (row.occurredAt ?? row.createdAt).toISOString(),
+			granolaNoteId: granola?.noteId ?? null,
+			link: granola?.url ?? null,
+		};
+	});
 }
 
 function toAccountThread(thread: {

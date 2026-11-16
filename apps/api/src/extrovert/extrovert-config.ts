@@ -16,7 +16,6 @@ export const EXTROVERT = {
 		prospectByIdPath: (id: string) =>
 			`/client/v2/prospects/${encodeURIComponent(id)}`,
 		commentsPath: "/client/v2/comments",
-		conversationsPath: "/client/v2/dm-conversations",
 	},
 	sync: {
 		minRequestGapMs: 120,
@@ -35,7 +34,6 @@ export const EXTROVERT = {
 	},
 	engagement: {
 		pageSize: 50,
-		messageLimit: 30,
 		tickBudgetMs: 40_000,
 		postExcerptChars: 280,
 	},

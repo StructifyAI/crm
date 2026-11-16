@@ -1,11 +1,7 @@
 import type { Prisma } from "@crm/db";
+import { phoneDigits } from "@crm/db/contact-match";
 import { TOLL_FREE_PHONE_PREFIXES } from "./contact-phone-config";
 import { blankToNull } from "./values";
-
-function phoneDigits(value: string | null | undefined): string {
-	const digits = value?.replace(/\D/g, "") ?? "";
-	return digits.startsWith("1") ? digits.slice(1) : digits;
-}
 
 function isTollFree(value: string): boolean {
 	const prefix = phoneDigits(value).slice(0, 3);

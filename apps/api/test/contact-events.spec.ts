@@ -1641,6 +1641,36 @@ describe("contact event ledger", () => {
 		]);
 	});
 
+	it("records Unipile DM transcript lines as LinkedIn events", async () => {
+		const fixture = await createFixture("unipile");
+		const ownerAt = ago(2).toISOString();
+		const buyerAt = ago(1).toISOString();
+		const activity = await createActivity(fixture, {
+			type: ActivityType.NOTE,
+			subject: "LinkedIn messages with Owner",
+			body: `Owner (${ownerAt}): We should talk.\n\nBuyer (${buyerAt}): Yes, let's meet.`,
+			meta: {
+				automated: true,
+				source: "unipile",
+				unipile: {
+					kind: "dm",
+					chatId: "chat",
+					accountId: "account",
+					syncedThrough: buyerAt,
+				},
+			},
+		});
+		expect(await events.recordActivity(activity.id)).toBe(2);
+		const transcript = await db.contactEvent.findMany({
+			where: { sourceActivityId: activity.id },
+			orderBy: { occurredAt: "asc" },
+		});
+		expect(transcript.map(({ direction }) => direction)).toEqual([
+			ContactDirection.OUT,
+			ContactDirection.IN,
+		]);
+	});
+
 	it("records iMessage notes as text events", async () => {
 		const fixture = await createFixture("imessage");
 		const outboundAt = ago(2);

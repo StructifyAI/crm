@@ -1,5 +1,3 @@
-import type { CarbonIcon } from "@crm/ui/components/icon";
-
 export type AgentRecordKind = "contact" | "company" | "deal";
 
 export type AgentRecord = { kind: AgentRecordKind; id: string };
@@ -29,7 +27,7 @@ const COPY: RecordCopyByKind = {
 		field: "contactId",
 		title: "Ask about this person",
 		blurb:
-			"Every step is shown as it happens — including the leads it throws away.",
+			"Every step is shown as it happens, including the leads it throws away.",
 		placeholder: "Are they still there?",
 		suggestions: [
 			"Who is this person?",
@@ -76,5 +74,3 @@ export function recordHeader(record: AgentRecord): AgentRecordHeader {
 export function recordFilter(record: AgentRecord): AgentRecordFilter {
 	return { [COPY[record.kind].field]: record.id };
 }
-
-export type { CarbonIcon };

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import {
 	firstNamesCompatible,
+	matchByPhone,
 	parseName,
+	phoneDigits,
 	profileKey,
 	sameLinkedinProfile,
 	trailingId,
@@ -71,5 +73,88 @@ describe("LinkedIn profile matching", () => {
 				"https://linkedin.com/in/john-smith-2",
 			),
 		).toBe(false);
+	});
+});
+
+function phoneDb(rows: { contacts: unknown[]; companies: unknown[] }) {
+	const queries: { sql: string; values: unknown[] }[] = [];
+	const db = {
+		$queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+			const sql = strings.join("?");
+			queries.push({ sql, values });
+			return sql.includes('FROM "company"') ? rows.companies : rows.contacts;
+		},
+	};
+	return { db: db as unknown as Parameters<typeof matchByPhone>[0], queries };
+}
+
+describe("phone matching", () => {
+	it("compares digits without a leading country code", () => {
+		expect(phoneDigits("+1 (281) 732-0665")).toBe("2817320665");
+		expect(phoneDigits("281.732.0665")).toBe("2817320665");
+		expect(phoneDigits(null)).toBe("");
+	});
+
+	it("matches the one contact with the number", async () => {
+		const { db, queries } = phoneDb({
+			contacts: [{ id: "contact-1", companyId: "company-1" }],
+			companies: [],
+		});
+
+		expect(await matchByPhone(db, "+12817320665")).toEqual({
+			companyId: "company-1",
+			contactId: "contact-1",
+		});
+		expect(queries).toHaveLength(1);
+		expect(queries[0]?.values).toEqual(["2817320665"]);
+	});
+
+	it("matches only the company when its contacts share a line", async () => {
+		const { db } = phoneDb({
+			contacts: [
+				{ id: "contact-1", companyId: "company-1" },
+				{ id: "contact-2", companyId: "company-1" },
+			],
+			companies: [],
+		});
+
+		expect(await matchByPhone(db, "+16024374005")).toEqual({
+			companyId: "company-1",
+			contactId: null,
+		});
+	});
+
+	it("does not pick between contacts at different companies", async () => {
+		const { db } = phoneDb({
+			contacts: [
+				{ id: "contact-1", companyId: "company-1" },
+				{ id: "contact-2", companyId: "company-2" },
+			],
+			companies: [{ id: "company-3" }],
+		});
+
+		expect(await matchByPhone(db, "+16024374005")).toEqual({
+			companyId: null,
+			contactId: null,
+		});
+	});
+
+	it("falls back to the company main line", async () => {
+		const { db } = phoneDb({ contacts: [], companies: [{ id: "company-1" }] });
+
+		expect(await matchByPhone(db, "+16024374005")).toEqual({
+			companyId: "company-1",
+			contactId: null,
+		});
+	});
+
+	it("ignores a short number without querying", async () => {
+		const { db, queries } = phoneDb({ contacts: [], companies: [] });
+
+		expect(await matchByPhone(db, "5551234")).toEqual({
+			companyId: null,
+			contactId: null,
+		});
+		expect(queries).toHaveLength(0);
 	});
 });

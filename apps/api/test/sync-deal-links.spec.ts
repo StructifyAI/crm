@@ -25,6 +25,7 @@ import type {
 import type { ActivityDirectionBackfillService } from "../src/sync/activity-direction-backfill.service";
 import type { MailboxSyncService } from "../src/sync/mailbox-sync.service";
 import { SyncController } from "../src/sync/sync.controller";
+import type { UnipileDmSyncService } from "../src/unipile/unipile-dm-sync.service";
 
 const SECRET = "cron-secret-for-tests";
 
@@ -83,6 +84,7 @@ const unused = {} as unknown as MailboxSyncService &
 	InstantlyEmailSyncService &
 	ExtrovertSyncService &
 	ExtrovertEngagementSyncService &
+	UnipileDmSyncService &
 	ActivityDirectionBackfillService &
 	ContactEventsSyncService &
 	ContactClockService &

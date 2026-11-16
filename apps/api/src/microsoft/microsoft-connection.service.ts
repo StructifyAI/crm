@@ -1,18 +1,18 @@
-import { isMicrosoftConfigured, signsInWithMicrosoft } from "@crm/auth";
+import { isMicrosoftConfigured } from "@crm/auth/env";
+import { MICROSOFT_PROVIDER_ID, signsInWithMicrosoft } from "@crm/auth/scopes";
 import type { Db, Prisma } from "@crm/db";
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { ContactEventsService } from "../contact-events/contact-events.service";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
-import { MailboxTokenService } from "../mailbox/mailbox-token.service";
-import { restoreParkedRows } from "../mailbox/reconnect";
-import { SyncStateService } from "../mailbox/sync-state.service";
 import {
-	MICROSOFT_PROVIDER_ID,
 	MICROSOFT_SYNC_SOURCES,
 	type MicrosoftSyncSource,
 	SCOPE_FOR_SOURCE,
-} from "./microsoft.constants";
+} from "../mailbox/mailbox.constants";
+import { MailboxTokenService } from "../mailbox/mailbox-token.service";
+import { restoreParkedRows } from "../mailbox/reconnect";
+import { SyncStateService } from "../mailbox/sync-state.service";
 import type {
 	MicrosoftConnectionStatus,
 	MicrosoftSourceStatus,

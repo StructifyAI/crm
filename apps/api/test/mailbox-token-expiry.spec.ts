@@ -8,10 +8,10 @@ import type { EventsPage, EventsQuery } from "../src/google/calendar.client";
 import { CalendarSyncService } from "../src/google/calendar-sync.service";
 import type { GmailClient } from "../src/google/gmail.client";
 import { GmailSyncService } from "../src/google/gmail-sync.service";
-import { SCOPE_FOR_SOURCE } from "../src/google/google.constants";
 import { GoogleConnectionService } from "../src/google/google-connection.service";
 import { deadlineIn } from "../src/mailbox/deadline";
 import type { SyncSource } from "../src/mailbox/mailbox.constants";
+import { SCOPE_FOR_SOURCE } from "../src/mailbox/mailbox.constants";
 import type {
 	MailboxTokenService,
 	TokenResult,

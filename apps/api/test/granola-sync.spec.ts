@@ -52,6 +52,7 @@ function build(options: {
 	listRateLimited?: boolean;
 	resume?: unknown;
 	exhaustBudgetAfterFirstDetail?: boolean;
+	phoneContacts?: { id: string; companyId: string | null }[];
 }) {
 	const updates: { id: string; data: Prisma.ActivityUpdateInput }[] = [];
 	const creates: Prisma.ActivityCreateInput[] = [];
@@ -121,6 +122,10 @@ function build(options: {
 		deal: {
 			findMany: async () => options.deals ?? [{ id: "deal-1" }],
 		},
+		$queryRaw: async (strings: TemplateStringsArray) =>
+			strings.join("").includes('FROM "contact"')
+				? (options.phoneContacts ?? [])
+				: [],
 	} as unknown as Db;
 	const api = {
 		listNotes: async (request: { updatedAfter: string; cursor?: string }) => {
@@ -473,5 +478,42 @@ describe("GranolaSyncService", () => {
 		expect(saved).toHaveLength(0);
 		expect(resumes).toHaveLength(1);
 		expect(resumes[0]).toMatchObject({ cursor: null });
+	});
+
+	it("matches a phone call note by the number in its title", async () => {
+		const { service, creates } = build({
+			key: "grn_test",
+			match: { companyId: null, contactId: null },
+			phoneContacts: [{ id: "contact-9", companyId: "company-9" }],
+			details: {
+				"note-1": note({
+					title: "Phone call with +12817320665",
+					attendees: [{ name: "Rep", email: "rep@example.com" }],
+				}),
+			},
+		});
+		const result = await service.run();
+
+		expect(result.created).toBe(1);
+		expect(creates[0]).toMatchObject({
+			companyId: "company-9",
+			contactId: "contact-9",
+			dealId: "deal-1",
+			subject: "Phone call with +12817320665",
+		});
+	});
+
+	it("counts a phone call note with an unknown number as unmatched", async () => {
+		const { service, creates } = build({
+			key: "grn_test",
+			match: { companyId: null, contactId: null },
+			details: {
+				"note-1": note({ title: "Phone call with +19175736203" }),
+			},
+		});
+		const result = await service.run();
+
+		expect(result.unmatched).toBe(1);
+		expect(creates).toHaveLength(0);
 	});
 });

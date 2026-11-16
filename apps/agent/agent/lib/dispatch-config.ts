@@ -8,7 +8,7 @@ export const DISPATCH = {
 	},
 
 	research: {
-		batch: 12,
+		batch: 256,
 		leaseMs: 30 * MINUTE_MS,
 		link: { attempts: 3, retryMs: 250 },
 	},

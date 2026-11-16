@@ -24,6 +24,7 @@ export const CONTACT_EVENTS = {
 		],
 		excludedSources: [
 			"extrovert",
+			"unipile",
 			"calendar",
 			"gmail",
 			"instantly",

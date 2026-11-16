@@ -1,11 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { type Deadline, deadlineIn } from "../mailbox/deadline";
-import { SYNC_TICK } from "../mailbox/mailbox-config";
-import { SyncStateService } from "../mailbox/sync-state.service";
 import {
 	MICROSOFT_SYNC_SOURCES,
 	type MicrosoftSyncSource,
-} from "./microsoft.constants";
+} from "../mailbox/mailbox.constants";
+import { SYNC_TICK } from "../mailbox/mailbox-config";
+import { SyncStateService } from "../mailbox/sync-state.service";
 import { OutlookSyncService } from "./outlook-sync.service";
 
 @Injectable()

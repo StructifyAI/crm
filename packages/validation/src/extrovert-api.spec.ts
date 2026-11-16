@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
 	parseExtrovertCampaignList,
 	parseExtrovertCommentsPage,
-	parseExtrovertConversationDetail,
-	parseExtrovertConversationsPage,
 	parseExtrovertProspectsV2,
 } from "./extrovert-api";
 
@@ -88,47 +86,6 @@ describe("Extrovert API schemas", () => {
 				pagination: { limit: 50, offset: 0, total: 1 },
 			},
 		});
-		const conversations = parseExtrovertConversationsPage({
-			status: "success",
-			data: {
-				conversations: [
-					{
-						connectionId: "connection-1",
-						ownerId: "member-1",
-						prospect: person,
-						context: {
-							campaign: { id: "campaign-1", name: "Campaign" },
-						},
-						connectedAt: "2026-09-05T17:55:40.000Z",
-						lastMessage: {
-							text: "Hello",
-							author: "Owner",
-							sentAt: "2026-09-09T23:18:09.807Z",
-						},
-					},
-				],
-				pagination: { limit: 50, offset: 0, total: 1 },
-			},
-		});
-		const detail = parseExtrovertConversationDetail({
-			status: "success",
-			data: {
-				connectionId: "connection-1",
-				ownerId: "member-1",
-				prospect: person,
-				messages: [
-					{
-						dmId: "message-1",
-						text: "Hello",
-						author: "Owner",
-						sentAt: "2026-09-09T23:18:09.807Z",
-					},
-				],
-				messagePagination: { limit: 30, offset: 0, total: 1 },
-			},
-		});
 		expect(comments.comments[0]?.state).toBe("Posted");
-		expect(conversations.conversations[0]?.connectionId).toBe("connection-1");
-		expect(detail.messages[0]?.dmId).toBe("message-1");
 	});
 });

@@ -1,4 +1,4 @@
-import { canManageCurrency, workspaceRoleOf } from "@crm/auth";
+import { canManageCurrency, workspaceRoleOf } from "@crm/auth/organization";
 import type { Db } from "@crm/db";
 import { Prisma, RateSource } from "@crm/db";
 import { CURRENCIES, currencyName, normalizeCurrency } from "@crm/db/currency";
@@ -150,7 +150,7 @@ export class CurrencyService {
 
 		if (quoteCurrency === baseCurrency) {
 			throw new BadRequestException(
-				`${baseCurrency} is the reporting currency — its rate is always 1.`,
+				`${baseCurrency} is the reporting currency. Its rate is always 1.`,
 			);
 		}
 

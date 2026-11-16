@@ -1,10 +1,14 @@
-import type { Metadata } from "next";
-import { Suspense } from "react";
 import {
 	PageShell,
 	PageShellContent,
+	PageShellDescription,
+	PageShellHeader,
+	PageShellHeading,
 	PageShellLoading,
-} from "@/components/page-shell";
+	PageShellTitle,
+} from "@crm/ui/components/page-shell";
+import type { Metadata } from "next";
+import { Suspense } from "react";
 import { requireSession } from "@/lib/session";
 import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
@@ -16,9 +20,18 @@ export const metadata: Metadata = {
 
 export default function DuplicatesPage() {
 	return (
-		<PageShell>
-			<PageShellContent>
-				<Suspense fallback={<PageShellLoading />}>
+		<PageShell className="min-h-0">
+			<PageShellHeader>
+				<PageShellHeading>
+					<PageShellTitle>Duplicates</PageShellTitle>
+					<PageShellDescription>
+						Possible duplicate records, side by side.
+					</PageShellDescription>
+				</PageShellHeading>
+			</PageShellHeader>
+
+			<PageShellContent className="min-h-0">
+				<Suspense fallback={<PageShellLoading shape="table" />}>
 					<DuplicatesContent />
 				</Suspense>
 			</PageShellContent>

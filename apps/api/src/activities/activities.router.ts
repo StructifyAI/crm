@@ -18,10 +18,13 @@ import {
 	activityDeleteOutput,
 	activityEntryOutput,
 	activityUpdateInput,
+	activityUpdateOutput,
 	completeInput,
 	completeOutput,
 	myTasksInput,
 	myTasksOutput,
+	taskListInput,
+	taskListOutput,
 	timelineCountsInput,
 	timelineCountsOutput,
 	timelineInput,
@@ -66,6 +69,15 @@ export class ActivitiesRouter {
 		return this.activities.myTasks(input, ctx.user.id);
 	}
 
+	@Query({
+		input: taskListInput,
+		output: taskListOutput,
+		meta: restMeta("GET", "/activities/tasks", ["Activities"]),
+	})
+	async tasks(@Input() input: z.infer<typeof taskListInput>) {
+		return this.activities.tasks(input);
+	}
+
 	@Mutation({
 		input: activityCreateInput,
 		output: activityCreateOutput,
@@ -80,7 +92,7 @@ export class ActivitiesRouter {
 
 	@Mutation({
 		input: activityUpdateInput,
-		output: activityEntryOutput,
+		output: activityUpdateOutput,
 		meta: restMeta("PATCH", "/activities/{id}", ["Activities"]),
 	})
 	async update(@Input() input: z.infer<typeof activityUpdateInput>) {

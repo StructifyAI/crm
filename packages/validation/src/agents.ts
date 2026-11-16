@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { agentManifestMcpGrant } from "./agent-manifest";
 
 export const permissions = [
 	{ id: "post", label: "Post a message" },
@@ -62,6 +63,8 @@ export const inputRequested = z.object({
 	turnId: z.string().min(1),
 });
 
+export const inputRequests = z.array(inputRequest).max(100);
+
 export type InputOption = z.infer<typeof inputOption>;
 export type InputRequest = z.infer<typeof inputRequest>;
 export type InputRequested = z.infer<typeof inputRequested>;
@@ -93,6 +96,7 @@ export const capabilityResource = z.object({
 
 export const capabilities = z.object({
 	actions: z.array(capabilityAction),
+	mcp: z.array(agentManifestMcpGrant).default([]),
 	dataScope: z.object({
 		mode: z.enum(["SELECTED", "WORKSPACE"]),
 		summary: z.string().trim().max(400).default(""),

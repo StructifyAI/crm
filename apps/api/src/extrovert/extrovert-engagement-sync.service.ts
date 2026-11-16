@@ -4,7 +4,6 @@ import { parseExtrovertActivityMeta } from "@crm/validation/activity-meta";
 import { parseExtrovertEngagementResume } from "@crm/validation/extrovert-engagement-resume";
 import { normalizeLinkedinUrl } from "@crm/validation/linkedin-url";
 import { Injectable, Logger } from "@nestjs/common";
-import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
 	ActivityStampService,
 	activityTime,
@@ -22,13 +21,11 @@ export type ExtrovertEngagementSyncResult = {
 	complete: boolean;
 	resumed: boolean;
 	comments: number;
-	dms: number;
 	skipped: number;
 	error: string | null;
 };
 
 type Resume = NonNullable<ReturnType<typeof parseExtrovertEngagementResume>>;
-type ExistingDm = { id: string; lastMessageAt: string };
 
 export function safeText(value: string, max?: number): string {
 	const wellFormed = (
@@ -50,7 +47,6 @@ export class ExtrovertEngagementSyncService {
 		private readonly sync: ExtrovertSyncService,
 		private readonly filing: ExtrovertFilingService,
 		private readonly stamp: ActivityStampService,
-		private readonly contactEvents: ContactEventsService,
 	) {}
 
 	async run(): Promise<ExtrovertEngagementSyncResult> {
@@ -70,7 +66,6 @@ export class ExtrovertEngagementSyncService {
 				complete: true,
 				resumed: saved !== null,
 				comments: 0,
-				dms: 0,
 				skipped: 0,
 				error: null,
 			};
@@ -81,7 +76,6 @@ export class ExtrovertEngagementSyncService {
 			complete: false,
 			resumed: saved !== null,
 			comments: 0,
-			dms: 0,
 			skipped: 0,
 			error: null,
 		};
@@ -93,17 +87,10 @@ export class ExtrovertEngagementSyncService {
 			await this.saveResume(resume);
 			const metadata = await this.loadMetadata();
 			const existingComments = new Set<string>();
-			const dmWatermarks = new Map<string, ExistingDm>();
 			for (const row of metadata) {
 				const parsed = parseExtrovertActivityMeta(row.meta);
-				if (!parsed) continue;
-				if (parsed.extrovert.kind === "comment") {
+				if (parsed?.extrovert.kind === "comment") {
 					existingComments.add(parsed.extrovert.key);
-				} else {
-					dmWatermarks.set(parsed.extrovert.key, {
-						id: row.id,
-						lastMessageAt: parsed.extrovert.lastMessageAt,
-					});
 				}
 			}
 
@@ -112,90 +99,30 @@ export class ExtrovertEngagementSyncService {
 					await this.saveResume(resume);
 					return result;
 				}
-				if (resume.phase === "comments") {
-					if (resume.index >= resume.feeds.length) {
-						resume = {
-							...resume,
-							phase: "dms",
-							index: 0,
-							offset: 0,
-						};
-						await this.saveResume(resume);
-						continue;
-					}
-					const feed = resume.feeds[resume.index];
-					if (!feed) {
-						resume = {
-							...resume,
-							phase: "dms",
-							index: 0,
-							offset: 0,
-						};
-						await this.saveResume(resume);
-						continue;
-					}
-					const member = members.get(feed.ownerId);
-					if (!member) {
-						resume = this.advance(resume);
-						await this.saveResume(resume);
-						continue;
-					}
-					const page = await this.api.listPostedCommentsPage(apiKey, {
-						ownerId: feed.ownerId,
-						campaignId: feed.campaignId,
-						offset: resume.offset,
-					});
-					for (const comment of page.comments) {
-						if (this.expired(startedAt)) {
-							await this.saveResume(resume);
-							return result;
-						}
-						const outcome = await this.comment(
-							comment,
-							member,
-							existingComments,
-						);
-						if (outcome === "created") result.comments += 1;
-						if (outcome === "skipped") result.skipped += 1;
-					}
-					resume = this.nextPage(resume, page.total);
-					await this.saveResume(resume);
-					continue;
-				}
-
-				if (resume.index >= resume.owners.length) {
+				const feed = resume.feeds[resume.index];
+				if (!feed) {
 					await this.complete();
 					result.complete = true;
 					return result;
 				}
-				const ownerId = resume.owners[resume.index];
-				if (!ownerId) {
-					await this.complete();
-					result.complete = true;
-					return result;
-				}
-				const member = members.get(ownerId);
+				const member = members.get(feed.ownerId);
 				if (!member) {
 					resume = this.advance(resume);
 					await this.saveResume(resume);
 					continue;
 				}
-				const page = await this.api.listConversationsPage(apiKey, {
-					ownerId,
+				const page = await this.api.listPostedCommentsPage(apiKey, {
+					ownerId: feed.ownerId,
+					campaignId: feed.campaignId,
 					offset: resume.offset,
 				});
-				for (const conversation of page.conversations) {
+				for (const comment of page.comments) {
 					if (this.expired(startedAt)) {
 						await this.saveResume(resume);
 						return result;
 					}
-					const outcome = await this.conversation(
-						apiKey,
-						conversation,
-						member,
-						dmWatermarks,
-					);
-					if (outcome === "filed") result.dms += 1;
+					const outcome = await this.comment(comment, member, existingComments);
+					if (outcome === "created") result.comments += 1;
 					if (outcome === "skipped") result.skipped += 1;
 				}
 				resume = this.nextPage(resume, page.total);
@@ -245,9 +172,7 @@ export class ExtrovertEngagementSyncService {
 			);
 		return {
 			runStartedAt: new Date().toISOString(),
-			phase: "comments",
 			feeds,
-			owners: [...members.keys()],
 			index: 0,
 			offset: 0,
 		};
@@ -338,100 +263,6 @@ export class ExtrovertEngagementSyncService {
 		return "created";
 	}
 
-	private async conversation(
-		apiKey: string,
-		conversation: {
-			connectionId: string;
-			prospect: { name: string; linkedInUrl: string | null };
-			lastMessage: {
-				text: string;
-				author: "Owner" | "Prospect";
-				sentAt: string;
-			} | null;
-		},
-		member: ExtrovertMemberOwner,
-		existing: Map<string, ExistingDm>,
-	): Promise<"filed" | "skipped"> {
-		const lastMessage = conversation.lastMessage;
-		const url = conversation.prospect.linkedInUrl;
-		if (!lastMessage || !url) return "skipped";
-		const previous = existing.get(conversation.connectionId);
-		if (previous?.lastMessageAt === lastMessage.sentAt) return "skipped";
-		const normalized = normalizeLinkedinUrl(url);
-		const match = normalized
-			? (await this.filing.findContactsByLinkedin([normalized])).get(normalized)
-			: null;
-		if (!match) return "skipped";
-		const detail = await this.api.getConversation(
-			apiKey,
-			conversation.connectionId,
-		);
-		const transcript = detail.messages
-			.toSorted(
-				(a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime(),
-			)
-			.map(
-				(message) =>
-					`${safeText(message.author === "Owner" ? member.name : conversation.prospect.name)} (${new Date(message.sentAt).toISOString()}): ${safeText(message.text)}`,
-			)
-			.join("\n\n");
-		const author = await this.filing.authorFor(match.id, member.ownerId);
-		if (!author) return "skipped";
-		const metadata = {
-			automated: true,
-			source: "extrovert",
-			extrovert: {
-				kind: "dm" as const,
-				key: conversation.connectionId,
-				lastMessageAt: lastMessage.sentAt,
-			},
-		};
-		const activity = previous
-			? await this.db.activity.update({
-					where: { id: previous.id },
-					data: {
-						body: transcript,
-						occurredAt: new Date(lastMessage.sentAt),
-						meta: metadata,
-					},
-					select: { id: true, createdAt: true, occurredAt: true },
-				})
-			: await this.db.activity.create({
-					data: {
-						type: ActivityType.NOTE,
-						subject: `LinkedIn messages with ${safeText(member.name)}`,
-						body: transcript,
-						contactId: match.id,
-						occurredAt: new Date(lastMessage.sentAt),
-						createdById: author,
-						meta: metadata,
-					},
-					select: { id: true, createdAt: true, occurredAt: true },
-				});
-
-		const linked = await this.filing.linkDeal({
-			activityId: activity.id,
-			contactId: match.id,
-		});
-		await this.stamp.touch(
-			{
-				contactId: match.id,
-				companyId: linked.companyId,
-				dealId: linked.dealId,
-			},
-			activityTime(activity),
-		);
-		await this.contactEvents.recordActivity(activity.id);
-		if (!previous) {
-			existing.set(conversation.connectionId, {
-				id: activity.id,
-				lastMessageAt: lastMessage.sentAt,
-			});
-		}
-		if (previous) previous.lastMessageAt = lastMessage.sentAt;
-		return "filed";
-	}
-
 	private expired(startedAt: number): boolean {
 		return Date.now() - startedAt >= EXTROVERT.engagement.tickBudgetMs;
 	}
@@ -453,9 +284,7 @@ export class ExtrovertEngagementSyncService {
 	private emptyResume(): Resume {
 		return {
 			runStartedAt: new Date().toISOString(),
-			phase: "comments",
 			feeds: [],
-			owners: [],
 			index: 0,
 			offset: 0,
 		};

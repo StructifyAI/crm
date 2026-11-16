@@ -10,6 +10,7 @@ import {
 	EmailDirection,
 } from "@crm/db";
 import { readCompanyHistory, readDealHistory } from "../agent/lib/accounts";
+import { readCrmHistory } from "../agent/lib/crm";
 
 const suffix = process.env.TEST_RUN_ID ?? "accounts-spec";
 const domain = `fernhill-${suffix}.test`;
@@ -177,6 +178,33 @@ beforeAll(async () => {
 				companyId,
 				dealId,
 				createdById: userId,
+			},
+			{
+				type: ActivityType.MEETING,
+				subject: "Phone call with +15551230000",
+				body: "Paula wants the security review first.",
+				occurredAt: daysAgo(1),
+				createdAt: daysAgo(1),
+				companyId,
+				contactId: paulaId,
+				dealId,
+				createdById: userId,
+				meta: {
+					granola: {
+						noteId: `not_${suffix}`,
+						url: "https://notes.granola.ai/d/fernhill",
+						syncedAt: daysAgo(1).toISOString(),
+					},
+				},
+			},
+			{
+				type: ActivityType.MEETING,
+				subject: "Calendar sync",
+				companyId,
+				contactId: paulaId,
+				dealId,
+				createdById: userId,
+				createdAt: daysAgo(2),
 			},
 		],
 	});
@@ -348,7 +376,22 @@ describe("readCompanyHistory", () => {
 
 		expect(history?.notes.map((note) => note.subject)).toEqual([
 			"Pricing pushback",
+			"Phone call with +15551230000",
 		]);
+	});
+
+	it("hands back recorded call summaries with their Granola link", async () => {
+		const deal = await readDealHistory(dealId);
+		const contact = await readCrmHistory(paulaId);
+		const call = {
+			subject: "Phone call with +15551230000",
+			body: "Paula wants the security review first.",
+			granolaNoteId: `not_${suffix}`,
+			link: "https://notes.granola.ai/d/fernhill",
+		};
+
+		expect(deal?.notes).toContainEqual(expect.objectContaining(call));
+		expect(contact?.notes).toEqual([expect.objectContaining(call)]);
 	});
 
 	it("omits connected history when the caller did not approve those sources", async () => {

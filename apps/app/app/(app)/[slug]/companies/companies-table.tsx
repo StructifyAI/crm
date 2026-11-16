@@ -1,6 +1,5 @@
 "use client";
 
-import Archive from "@carbon/icons-react/es/Archive";
 import { ICP_STATUSES } from "@crm/db/company-icp";
 import { Button } from "@crm/ui/components/button";
 import {
@@ -15,6 +14,7 @@ import {
 } from "@crm/ui/components/entity-logo";
 import { useTableSelection } from "@crm/ui/hooks/use-table-selection";
 import { useQuery } from "@tanstack/react-query";
+import { ArchiveIcon } from "lucide-react";
 import { useMemo } from "react";
 import { EnrichmentIndicator } from "@/components/crm/enrichment-status";
 import { useFieldColumns } from "@/components/crm/fields/field-columns";
@@ -22,6 +22,7 @@ import { useFieldFacets } from "@/components/crm/fields/field-facets";
 import { OwnerCell } from "@/components/crm/owner-cell";
 import { usePrefetchRecord } from "@/components/crm/record-sheet/record-prefetch";
 import { useOpenRecord } from "@/components/crm/record-sheet/record-stack";
+import { ListEmpty } from "@/components/data-table/list-empty";
 import { ListSearch } from "@/components/data-table/list-search";
 import { SavedViewsMenu } from "@/components/data-table/saved-views-menu";
 import { useTableQuery } from "@/components/data-table/use-table-query";
@@ -45,7 +46,6 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		header: "Company",
 		sortable: true,
 		hideable: false,
-		width: "w-[26%]",
 		cell: (row) => (
 			<span className="flex min-w-0 items-center gap-2.5">
 				<EntityLogo
@@ -63,11 +63,13 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		id: "domain",
 		header: "Domain",
 		sortable: true,
-		width: "w-[16%]",
+		width: "40",
 		hideBelow: "md",
 		cell: (row) =>
 			row.domain ? (
-				<span className="truncate text-muted-foreground">{row.domain}</span>
+				<span className="block truncate text-muted-foreground">
+					{row.domain}
+				</span>
 			) : (
 				<EmptyCellValue />
 			),
@@ -77,7 +79,7 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		header: "Employees",
 		sortable: true,
 		align: "right",
-		width: "w-[10%]",
+		width: "28",
 		hideBelow: "lg",
 		cell: (row) => {
 			const employees =
@@ -96,7 +98,7 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		id: "owner",
 		header: "Owner",
 		sortable: true,
-		width: "w-[16%]",
+		width: "40",
 		hideBelow: "md",
 		cell: (row) => <OwnerCell owner={row.owner} />,
 	},
@@ -105,7 +107,7 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		header: "Contacts",
 		sortable: true,
 		align: "right",
-		width: "w-[9%]",
+		width: "28",
 		hideBelow: "lg",
 		cell: (row) => <span className="tabular-nums">{row.contactCount}</span>,
 	},
@@ -114,7 +116,7 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		header: "Open deals",
 		sortable: true,
 		align: "right",
-		width: "w-[9%]",
+		width: "28",
 		cell: (row) => <span className="tabular-nums">{row.openDealCount}</span>,
 	},
 	{
@@ -123,7 +125,7 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		label: "Created date",
 		sortable: true,
 		align: "right",
-		width: "w-[10%]",
+		width: "28",
 		defaultHidden: true,
 		cell: (row) => (
 			<span className="text-muted-foreground">
@@ -134,7 +136,7 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 	{
 		id: "icp",
 		header: "ICP",
-		width: "w-[10%]",
+		width: "28",
 		hideBelow: "lg",
 		cell: (row) => <span>{row.icp}</span>,
 	},
@@ -143,7 +145,7 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		header: "Last activity",
 		sortable: true,
 		align: "right",
-		width: "w-[12%]",
+		width: "32",
 		hideBelow: "sm",
 		cell: (row) => (
 			<span className="text-muted-foreground">
@@ -160,7 +162,7 @@ const COLUMNS: DataTableColumn<CompanyRow>[] = [
 		header: "Enrichment",
 		label: "Enrichment status",
 		defaultHidden: true,
-		width: "w-[14%]",
+		width: "36",
 		cell: (row) => (
 			<EnrichmentIndicator status={row.enrichmentStatus} queued={row.queued} />
 		),
@@ -173,7 +175,7 @@ const ARCHIVED_COLUMN: DataTableColumn<CompanyRow> = {
 	label: "Archived date",
 	sortable: true,
 	align: "right",
-	width: "w-[12%]",
+	width: "32",
 	cell: (row) => (
 		<span className="text-muted-foreground">
 			{row.archivedAt ? (
@@ -259,18 +261,19 @@ export function CompaniesTable() {
 
 	return (
 		<DataTable
+			label="Companies"
 			query={query}
-			search={<ListSearch placeholder="Search companies by name or domain…" />}
+			search={<ListSearch placeholder="Search companies…" />}
 			actions={
 				<>
 					<SavedViewsMenu entity="COMPANY" table={table} />
 					<Button
 						variant={input.archived ? "contrast" : "outline"}
-						size="sm"
+						aria-pressed={input.archived}
 						className="justify-start sm:justify-center"
 						onClick={() => setArchived(!input.archived)}
 					>
-						<Archive data-icon="inline-start" />
+						<ArchiveIcon data-icon="inline-start" />
 						Archived
 					</Button>
 				</>
@@ -294,11 +297,22 @@ export function CompaniesTable() {
 			getRowId={(row) => row.id}
 			loading={companies.isFetching}
 			onRowHover={(row) => prefetchRecord({ kind: "company", id: row.id })}
-			onRowClick={(row) => openRecord({ kind: "company", id: row.id })}
+			onRowClick={(row, orderedRows) =>
+				openRecord(
+					{ kind: "company", id: row.id },
+					orderedRows.map((entry) => ({ kind: "company", id: entry.id })),
+				)
+			}
 			empty={
-				input.archived
-					? "No archived companies."
-					: "No companies match this view."
+				<ListEmpty
+					query={query}
+					noun="companies"
+					archived={input.archived}
+					blank={{
+						title: "No companies yet",
+						description: "Add a company or import a CSV to start the pipeline.",
+					}}
+				/>
 			}
 		/>
 	);

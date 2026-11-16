@@ -6,12 +6,15 @@ import {
 	expect,
 	it,
 } from "bun:test";
-import { db } from "@crm/db";
+import { db, Prisma } from "@crm/db";
 import { SETTINGS_ID } from "@crm/db/settings";
 import type { InstantlyWebhookEvent } from "@crm/validation/instantly-webhook";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
+import { ConversionService } from "../src/currency/conversion.service";
+import { DealsService } from "../src/deals/deals.service";
+import { FieldsService } from "../src/fields/fields.service";
 import {
 	type EmailQuery,
 	InstantlyClient,
@@ -38,17 +41,27 @@ const agent = {
 	},
 	companyCreated: async () => undefined,
 	companyRequested: async () => true,
+	fieldBackfillRecords: async () => undefined,
 	withCrmEvents: withDiscardedCrmEvents,
 } as unknown as AgentTriggerService;
 
 const directory = new CompanyDirectoryService(agent);
 const stamp = new ActivityStampService(db);
+const deals = new DealsService(
+	db,
+	agent,
+	stamp,
+	new ConversionService(db),
+	new FieldsService(db, agent),
+	noContactEvents,
+);
 const filing = new InstantlyFilingService(
 	db,
 	directory,
 	agent,
 	stamp,
 	noContactEvents,
+	deals,
 );
 const ingest = new InstantlyIngestService(db, filing);
 
@@ -70,11 +83,22 @@ async function clean() {
 	await db.activity.deleteMany({
 		where: { contact: { email: { endsWith: `@${domain}` } } },
 	});
+	await db.deal.deleteMany({
+		where: { company: { domain: { in: [domain, `cold-${domain}`] } } },
+	});
 	await db.contact.deleteMany({ where: { email: { endsWith: `@${domain}` } } });
 	await db.instantlyMailbox.deleteMany({
 		where: { emailAccount: { endsWith: `@example.test` } },
 	});
-	await db.company.deleteMany({ where: { domain } });
+	await db.activity.deleteMany({
+		where: { contact: { email: { endsWith: `@cold-${domain}` } } },
+	});
+	await db.contact.deleteMany({
+		where: { email: { endsWith: `@cold-${domain}` } },
+	});
+	await db.company.deleteMany({
+		where: { domain: { in: [domain, `cold-${domain}`] } },
+	});
 	await db.user.deleteMany({
 		where: { id: { in: [existingOwnerId, mappedOwnerId] } },
 	});
@@ -92,6 +116,11 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
 	queued.length = 0;
+	await db.deal.deleteMany({ where: { company: { domain } } });
+	await db.appSetting.updateMany({
+		where: { id: SETTINGS_ID },
+		data: { instantlySyncResume: Prisma.JsonNull },
+	});
 	await db.instantlyMailbox.deleteMany({
 		where: { emailAccount: { endsWith: `@example.test` } },
 	});
@@ -369,7 +398,7 @@ describe("Instantly email polling", () => {
 
 		expect(await sync.run()).toEqual({
 			emails: 3,
-			filed: 2,
+			filed: 1,
 			replies: 0,
 			repliesFiled: 0,
 			complete: true,
@@ -395,16 +424,8 @@ describe("Instantly email polling", () => {
 			{ type: "EMAIL", subject: "Bump", body: "Bump body", dealId: deal.id },
 		]);
 		expect(
-			await db.activity.findFirst({
-				where: { contact: { email: `manual@${domain}` } },
-				select: { type: true, subject: true, body: true, occurredAt: true },
-			}),
-		).toEqual({
-			type: "EMAIL",
-			subject: "Manual note",
-			body: "Hi Chris,\n\nManual note body",
-			occurredAt: new Date("2026-09-25T09:00:00.000Z"),
-		});
+			await db.contact.count({ where: { email: `manual@${domain}` } }),
+		).toBe(0);
 		expect(
 			await db.instantlyCampaignLead.findUnique({
 				where: { leadId: `lead-polled-${suffix}` },
@@ -499,7 +520,7 @@ describe("Instantly email polling", () => {
 			from: string,
 			at: string,
 			text: string,
-			extra: { is_auto_reply?: number; lead?: string } = {},
+			extra: { lead?: string } = {},
 		) => ({
 			id,
 			timestamp_created: at,
@@ -537,7 +558,6 @@ describe("Instantly email polling", () => {
 							`replier@${domain}`,
 							"2026-09-25T15:01:00.000Z",
 							"I am out of office.",
-							{ is_auto_reply: 1 },
 						),
 						received(
 							`reply-second-${suffix}`,
@@ -584,7 +604,7 @@ describe("Instantly email polling", () => {
 			emails: 0,
 			filed: 0,
 			replies: 7,
-			repliesFiled: 2,
+			repliesFiled: 3,
 			complete: true,
 			error: null,
 		});
@@ -611,6 +631,13 @@ describe("Instantly email polling", () => {
 			{
 				type: "EMAIL",
 				subject: "Re: First touch",
+				body: "I am out of office.",
+				dealId: deal.id,
+				occurredAt: new Date("2026-09-25T15:01:00.000Z"),
+			},
+			{
+				type: "EMAIL",
+				subject: "Re: First touch",
 				body: "Sounds good.",
 				dealId: deal.id,
 				occurredAt: new Date("2026-09-25T17:30:00.000Z"),
@@ -621,7 +648,7 @@ describe("Instantly email polling", () => {
 				where: { leadId: `lead-replies-${suffix}` },
 				select: { replyCount: true },
 			}),
-		).toEqual({ replyCount: 2 });
+		).toEqual({ replyCount: 3 });
 		expect(
 			await db.contact.count({
 				where: {
@@ -807,12 +834,21 @@ describe("Instantly campaign leads", () => {
 			status: 3,
 			email_reply_count: 0,
 		};
+		await db.contact.createMany({
+			data: [
+				{ email: firstLead.email, firstName: "First" },
+				{ email: secondLead.email, firstName: "Second" },
+			],
+		});
 		let includeSecond = true;
 		const client = {
 			listCampaigns: async () => [campaign],
 			listLeadSends: async () => [],
-			async *listCampaignLeads() {
-				yield includeSecond ? [firstLead, secondLead] : [firstLead];
+			async listCampaignLeadPage() {
+				return {
+					items: includeSecond ? [firstLead, secondLead] : [firstLead],
+					cursor: null,
+				};
 			},
 		} as unknown as InstantlyClient;
 		const sync = new InstantlySyncService(db, client, filing);
@@ -821,7 +857,7 @@ describe("Instantly campaign leads", () => {
 		expect(firstRun).toMatchObject({
 			campaigns: 1,
 			leads: 2,
-			created: 2,
+			created: 0,
 			error: null,
 		});
 		const stored = await db.instantlyCampaignLead.findUnique({
@@ -842,7 +878,7 @@ describe("Instantly campaign leads", () => {
 				where: { email: secondLead.email },
 				select: { ownerId: true },
 			}),
-		).toEqual({ ownerId: null });
+		).toEqual({ ownerId: mappedOwnerId });
 		expect(instantlyState(1, 0, new Date("2026-01-01T00:00:00.000Z"))).toBe(
 			"active",
 		);
@@ -885,6 +921,9 @@ describe("Instantly campaign leads", () => {
 				},
 			},
 		};
+		await db.contact.create({
+			data: { email: lead.email, firstName: "Lead" },
+		});
 		const asked: string[] = [];
 		const client = {
 			listCampaigns: async () => [campaign],
@@ -904,8 +943,8 @@ describe("Instantly campaign leads", () => {
 					},
 				];
 			},
-			async *listCampaignLeads() {
-				yield [lead];
+			async listCampaignLeadPage() {
+				return { items: [lead], cursor: null };
 			},
 		} as unknown as InstantlyClient;
 		const sync = new InstantlySyncService(db, client, filing);
@@ -968,8 +1007,8 @@ describe("Instantly campaign leads", () => {
 		const client = {
 			listCampaigns: async () => [campaign],
 			listLeadSends: async () => [],
-			async *listCampaignLeads() {
-				yield [survivingLead];
+			async listCampaignLeadPage() {
+				return { items: [survivingLead], cursor: null };
 			},
 		} as unknown as InstantlyClient;
 		const sync = new InstantlySyncService(db, client, filing);
@@ -1059,8 +1098,8 @@ describe("Instantly campaign leads", () => {
 		const client = {
 			listCampaigns: async () => [campaign],
 			listLeadSends: async () => [],
-			async *listCampaignLeads() {
-				yield leads;
+			async listCampaignLeadPage() {
+				return { items: leads, cursor: null };
 			},
 		} as unknown as InstantlyClient;
 		const sync = new InstantlySyncService(db, client, filing);
@@ -1079,6 +1118,267 @@ describe("Instantly campaign leads", () => {
 				select: { ownerId: true },
 			}),
 		).toEqual({ ownerId: existingOwnerId });
+	});
+
+	it("syncs active campaigns before finished ones", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const order: string[] = [];
+		const client = {
+			listCampaigns: async () => [
+				{
+					id: `finished-${suffix}`,
+					name: "Finished",
+					status: 3,
+					email_list: [],
+				},
+				{ id: `active-${suffix}`, name: "Active", status: 1, email_list: [] },
+			],
+			listLeadSends: async () => [],
+			async listCampaignLeadPage(_key: string, campaignId: string) {
+				order.push(campaignId);
+				return { items: [], cursor: null };
+			},
+		} as unknown as InstantlyClient;
+
+		await new InstantlySyncService(db, client, filing).run();
+
+		expect(order).toEqual([`active-${suffix}`, `finished-${suffix}`]);
+	});
+
+	it("resumes a cut-off sync and removes missing leads only after a full pass", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const campaign = {
+			id: `campaign-resume-${suffix}`,
+			name: "Resume",
+			status: 1,
+			email_list: [],
+		};
+		const leadFor = (name: string) => ({
+			id: `lead-${name}-${suffix}`,
+			email: `${name}@${domain}`,
+			campaign: campaign.id,
+			status: 1,
+			email_reply_count: 0,
+		});
+		const stale = leadFor("resume-stale");
+		const first = leadFor("resume-first");
+		const second = leadFor("resume-second");
+		await db.contact.createMany({
+			data: [stale, first, second].map((lead) => ({
+				email: lead.email,
+				firstName: "Resume",
+			})),
+		});
+		const cursors: (string | null)[] = [];
+		let pass: "stale" | "cut-off" | "resumed" = "stale";
+		const client = {
+			listCampaigns: async () => [campaign],
+			listLeadSends: async () => [],
+			async listCampaignLeadPage(
+				_key: string,
+				_campaignId: string,
+				cursor: string | null,
+			) {
+				if (pass === "stale") return { items: [stale], cursor: null };
+				cursors.push(cursor);
+				if (cursor === null) return { items: [first], cursor: "page-2" };
+				if (pass === "cut-off")
+					throw new Error("Instantly request failed with status 429.");
+				return { items: [second], cursor: null };
+			},
+		} as unknown as InstantlyClient;
+		const sync = new InstantlySyncService(db, client, filing);
+		const leadIds = async () =>
+			(
+				await db.instantlyCampaignLead.findMany({
+					where: { campaignId: campaign.id },
+					select: { leadId: true },
+					orderBy: { leadId: "asc" },
+				})
+			).map((row) => row.leadId);
+
+		expect((await sync.run()).complete).toBe(true);
+		pass = "cut-off";
+		expect((await sync.run()).complete).toBe(false);
+		expect(await leadIds()).toEqual([first.id, stale.id]);
+
+		pass = "resumed";
+		expect((await sync.run()).complete).toBe(true);
+		expect(cursors).toEqual([null, "page-2", "page-2"]);
+		expect(await leadIds()).toEqual([first.id, second.id]);
+	});
+
+	it("gives a new campaign mailbox the owner its campaign already has", async () => {
+		const mappedMailbox = `campaign-mapped-${suffix}@example.test`;
+		const newMailbox = `campaign-new-${suffix}@example.test`;
+		await db.instantlyMailbox.create({
+			data: { emailAccount: mappedMailbox, ownerId: mappedOwnerId },
+		});
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const lead = {
+			id: `campaign-new-lead-${suffix}`,
+			email: `campaign-new@${domain}`,
+			status: 1,
+			email_reply_count: 0,
+			status_summary: {
+				lastStep: {
+					from: newMailbox,
+					stepID: "0_0_0",
+					timestamp_executed: "2026-01-01T00:00:00.000Z",
+				},
+			},
+		};
+		await db.contact.create({
+			data: { email: lead.email, firstName: "Lead" },
+		});
+		const client = {
+			listCampaigns: async () => [
+				{
+					id: `campaign-new-${suffix}`,
+					name: "New mailboxes",
+					status: 1,
+					email_list: [mappedMailbox, newMailbox],
+				},
+			],
+			listLeadSends: async () => [],
+			async listCampaignLeadPage() {
+				return {
+					items: [{ ...lead, campaign: `campaign-new-${suffix}` }],
+					cursor: null,
+				};
+			},
+		} as unknown as InstantlyClient;
+
+		await new InstantlySyncService(db, client, filing).run();
+
+		expect(
+			await db.instantlyMailbox.findUnique({
+				where: { emailAccount: newMailbox },
+				select: { ownerId: true },
+			}),
+		).toEqual({ ownerId: mappedOwnerId });
+		expect(
+			await db.contact.findFirst({
+				where: { email: `campaign-new@${domain}` },
+				select: { ownerId: true },
+			}),
+		).toEqual({ ownerId: mappedOwnerId });
+	});
+
+	it("keeps a campaign lead who has not replied out of the CRM", async () => {
+		await db.appSetting.upsert({
+			where: { id: SETTINGS_ID },
+			create: { id: SETTINGS_ID, instantlyApiKey: "test-key" },
+			update: { instantlyApiKey: "test-key" },
+		});
+		const campaign = {
+			id: `campaign-cold-${suffix}`,
+			name: "Cold",
+			status: 1,
+			email_list: [],
+		};
+		const lead = {
+			id: `lead-cold-${suffix}`,
+			email: `cold@cold-${domain}`,
+			campaign: campaign.id,
+			status: 1,
+			email_reply_count: 0,
+		};
+		const client = {
+			listCampaigns: async () => [campaign],
+			listLeadSends: async () => [],
+			async listCampaignLeadPage() {
+				return { items: [lead], cursor: null };
+			},
+		} as unknown as InstantlyClient;
+
+		await new InstantlySyncService(db, client, filing).run();
+		await filing.fileSend({
+			leadEmail: lead.email,
+			firstName: "Cold",
+			lastName: null,
+			mailbox: null,
+			campaignId: campaign.id,
+			campaignName: campaign.name,
+			emailId: `email-cold-${suffix}`,
+			subject: "Hello",
+			text: "Hi there.",
+			occurredAt: new Date("2026-10-01T00:00:00.000Z"),
+		});
+
+		expect(await db.contact.count({ where: { email: lead.email } })).toBe(0);
+		expect(
+			await db.company.count({ where: { domain: `cold-${domain}` } }),
+		).toBe(0);
+		expect(
+			await db.instantlyCampaignLead.count({ where: { leadId: lead.id } }),
+		).toBe(0);
+	});
+	it("opens an Engaged deal owned by the mailbox owner on a cold lead's first reply", async () => {
+		const mailbox = `sender-${suffix}@example.test`;
+		await db.instantlyMailbox.create({
+			data: { emailAccount: mailbox, ownerId: mappedOwnerId },
+		});
+		const lead = `opener@cold-${domain}`;
+
+		await filing.file(
+			event(lead, {
+				email_account: mailbox,
+				reply_subject: "Automatic reply: Hello",
+				reply_text: "I am out of office until Monday.",
+			}),
+		);
+		await filing.file(
+			event(lead, {
+				email_account: mailbox,
+				timestamp: new Date(Date.now() + 60_000).toISOString(),
+				reply_text: "Back now. Send me more.",
+			}),
+		);
+
+		const contact = await db.contact.findUniqueOrThrow({
+			where: { email: lead },
+			select: { id: true, companyId: true },
+		});
+		expect(contact.companyId).not.toBeNull();
+		const opened = await db.deal.findMany({
+			where: { companyId: contact.companyId ?? "" },
+			select: {
+				id: true,
+				stage: true,
+				ownerId: true,
+				contacts: { select: { contactId: true } },
+			},
+		});
+		expect(opened).toEqual([
+			{
+				id: expect.any(String),
+				stage: "ENGAGED",
+				ownerId: mappedOwnerId,
+				contacts: [{ contactId: contact.id }],
+			},
+		]);
+		expect(
+			await db.activity.findMany({
+				where: { contactId: contact.id },
+				select: { dealId: true },
+			}),
+		).toEqual([
+			{ dealId: opened[0]?.id ?? null },
+			{ dealId: opened[0]?.id ?? null },
+		]);
 	});
 });
 

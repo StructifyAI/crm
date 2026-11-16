@@ -67,6 +67,12 @@ export function capabilitiesFrom(
 			enabled: contextDev !== null,
 		},
 		{
+			...fromEnv("GRANOLA_API_KEY"),
+			label: "Meeting transcripts",
+			gives:
+				"the full Granola summary and transcript of a recorded meeting or call, read with read_meeting_notes",
+		},
+		{
 			...fromEnv("BLOB_READ_WRITE_TOKEN"),
 			label: "Picture storage",
 			gives:

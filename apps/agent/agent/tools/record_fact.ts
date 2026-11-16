@@ -1,5 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { changeWrite } from "../lib/approval";
 import type { Evidence, EvidenceKind } from "../lib/evidence";
 import { WEIGHTS } from "../lib/evidence";
 import { FACT_FIELDS, type FactField, recordFact } from "../lib/facts";
@@ -51,6 +52,7 @@ export default defineTool({
 				"For field employer only: the employer's own web domain as the source lists it (e.g. the organisation.domain on a LinkedIn role). Lets the CRM link the contact to the company it already has.",
 			),
 	}),
+	approval: changeWrite(),
 	async execute(input, ctx) {
 		assertResearchPurpose(ctx);
 		focusOn({ contactId: input.contactId });

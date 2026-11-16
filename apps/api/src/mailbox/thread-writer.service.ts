@@ -113,7 +113,12 @@ export class ThreadWriterService {
 				},
 			},
 		});
-		if (existing?.thread.activity) return false;
+		if (
+			existing?.thread.activity &&
+			existing.thread.companyId &&
+			existing.thread.contactId
+		)
+			return false;
 
 		const repair = existing !== null;
 		const participants = [parsed.from, ...parsed.recipients];
@@ -145,15 +150,17 @@ export class ThreadWriterService {
 		const dealId = thread?.activity?.dealId ?? null;
 		let companyDomain = thread?.company?.domain ?? null;
 
-		if (!thread) {
-			const repliedTo =
-				outbound ||
-				(await this.hasOutboundInThread(parsed.rootId, options.mailbox));
+		if (!thread || !companyId || !contactId) {
+			const allowCreate =
+				!thread &&
+				row.autoCreate &&
+				(outbound ||
+					(await this.hasOutboundInThread(parsed.rootId, options.mailbox)));
 
 			const match = await this.resolve(
 				{
 					participants,
-					allowCreate: row.autoCreate && repliedTo,
+					allowCreate,
 					source: RecordSource.EMAIL,
 					ownerId: row.userId,
 				},
@@ -162,12 +169,22 @@ export class ThreadWriterService {
 				outbound,
 			);
 
-			companyId = match.companyId;
-			contactId = match.contactId;
-			companyDomain = match.domain;
+			if (!thread) {
+				companyId = match.companyId;
+				contactId = match.contactId;
+				companyDomain = match.domain;
 
-			if (!companyId && !contactId) {
-				return false;
+				if (!companyId && !contactId) {
+					return false;
+				}
+			} else if (!companyId) {
+				if (contactId === null || match.contactId === contactId) {
+					companyId = match.companyId;
+					contactId = contactId ?? match.contactId;
+					if (companyId) companyDomain = companyDomain ?? match.domain;
+				}
+			} else if (!contactId && match.companyId === companyId) {
+				contactId = match.contactId;
 			}
 		}
 
@@ -309,12 +326,14 @@ export class ThreadWriterService {
 					};
 				}
 
-				const data: Prisma.EmailThreadUpdateInput = {
+				const data: Prisma.EmailThreadUncheckedUpdateInput = {
 					messageCount: span.messageCount,
 					firstMessageAt: span.firstMessageAt,
 					lastMessageAt: span.lastMessageAt,
 				};
 
+				if (companyId) data.companyId = companyId;
+				if (contactId) data.contactId = contactId;
 				if (correspondence && parsed.sentAt <= span.firstMessageAt) {
 					data.subject = parsed.subject;
 				}
@@ -514,6 +533,19 @@ export class ThreadWriterService {
 			origin: SyncSource;
 		},
 	): Promise<Date> {
+		const existing = await tx.activity.findUnique({
+			where: { emailThreadId },
+			select: { companyId: true, contactId: true },
+		});
+		const update: Prisma.ActivityUncheckedUpdateInput = {
+			body: summary.snippet,
+			occurredAt: summary.lastMessageAt,
+		};
+		if (summary.companyId && !existing?.companyId)
+			update.companyId = summary.companyId;
+		if (summary.contactId && !existing?.contactId)
+			update.contactId = summary.contactId;
+
 		const activity = await tx.activity.upsert({
 			where: { emailThreadId },
 			create: {
@@ -527,10 +559,7 @@ export class ThreadWriterService {
 				emailThreadId,
 				meta: { synced: true, source: summary.origin },
 			},
-			update: {
-				body: summary.snippet,
-				occurredAt: summary.lastMessageAt,
-			},
+			update,
 			select: { occurredAt: true, createdAt: true },
 		});
 

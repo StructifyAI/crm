@@ -13,15 +13,18 @@ import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import { ConversationSharingService } from "./conversation-sharing.service";
 import {
+	builderApprovalResponseInput,
 	builderConversationCreateInput,
 	builderConversationDetailOutput,
 	builderConversationSubmitInput,
 	builderListOutput,
+	builderPermissionModeInput,
 	builderQuestionResponseInput,
 	builderResourceSearchInput,
 	builderResourcesOutput,
 	builderResponseRatingInput,
 	builderResponseRatingOutput,
+	builderSessionLimitResponseInput,
 	conversationEventsInput,
 	conversationEventsOutput,
 	conversationIdInput,
@@ -148,6 +151,48 @@ export class ConversationsRouter {
 		@Input() input: z.infer<typeof builderQuestionResponseInput>,
 	) {
 		return this.conversations.answerBuilderQuestion(input, ctx.user.id);
+	}
+
+	@Mutation({
+		input: builderApprovalResponseInput,
+		output: conversationIdOutput,
+		meta: restMeta("POST", "/conversations/{id}/answer-builder-approval", [
+			"Conversations",
+		]),
+	})
+	async answerBuilderApproval(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof builderApprovalResponseInput>,
+	) {
+		return this.conversations.answerBuilderApproval(input, ctx.user.id);
+	}
+
+	@Mutation({
+		input: builderSessionLimitResponseInput,
+		output: conversationIdOutput,
+		meta: restMeta("POST", "/conversations/{id}/answer-builder-session-limit", [
+			"Conversations",
+		]),
+	})
+	async answerBuilderSessionLimit(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof builderSessionLimitResponseInput>,
+	) {
+		return this.conversations.answerBuilderSessionLimit(input, ctx.user.id);
+	}
+
+	@Mutation({
+		input: builderPermissionModeInput,
+		output: conversationIdOutput,
+		meta: restMeta("PATCH", "/conversations/{id}/permission-mode", [
+			"Conversations",
+		]),
+	})
+	async setBuilderPermissionMode(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof builderPermissionModeInput>,
+	) {
+		return this.conversations.setBuilderPermissionMode(input, ctx.user.id);
 	}
 
 	@Mutation({

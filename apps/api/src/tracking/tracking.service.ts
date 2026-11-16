@@ -1,10 +1,10 @@
+import { appUrl } from "@crm/auth/env";
 import {
-	appUrl,
 	canManageTracking,
 	isWorkspaceRole,
 	WORKSPACE_ID,
 	type WorkspaceRole,
-} from "@crm/auth";
+} from "@crm/auth/organization";
 import { type Db, DomainScope, Prisma } from "@crm/db";
 import { describeTouch } from "@crm/db/attribution";
 import { safeFetch } from "@crm/db/safe-fetch";
@@ -37,7 +37,6 @@ import type {
 	TrackedDomainRow,
 	TrackingSettings,
 	VerifyResult,
-	VisitedPage,
 	WebsiteActivity,
 } from "./tracking.contracts";
 import { TrackingConfigService } from "./tracking-config.service";
@@ -232,7 +231,7 @@ export class TrackingService {
 
 		if (!trackingReady(row?.trackingLimitToDomains ?? true, domains)) {
 			throw new BadRequestException(
-				"Add the domain your website runs on first — there is no script to find yet.",
+				"Add the domain your website runs on first. There is no script to find yet.",
 			);
 		}
 

@@ -1,5 +1,7 @@
 const SECOND_MS = 1_000;
-const DAY_MS = 24 * 60 * 60 * SECOND_MS;
+const MINUTE_MS = 60 * SECOND_MS;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
 
 export const SYNC_TICK = {
 	budgetMs: 35 * SECOND_MS,
@@ -35,4 +37,13 @@ export const MAILBOX_DEAL_LINK = {
 
 export const MAILBOX_CORRESPONDENCE = {
 	backfillPage: 50,
+} as const;
+
+const GMAIL_RECONCILE_WINDOW_DAYS = 14;
+
+export const MAILBOX_RECONCILE = {
+	intervalMs: 20 * HOUR_MS,
+	windowMs: GMAIL_RECONCILE_WINDOW_DAYS * DAY_MS,
+	gmailWindowMs: GMAIL_BACKFILL.windowMs,
+	maxMessages: 120,
 } as const;

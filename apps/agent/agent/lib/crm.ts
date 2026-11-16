@@ -1,4 +1,5 @@
 import { db, EnrichmentStatus, type Prisma } from "@crm/db";
+import { type AccountNote, recentNotes } from "./accounts";
 import { domainOf, isDerivedName } from "./names";
 import type { Person } from "./socials";
 
@@ -145,6 +146,7 @@ export type CrmHistory = {
 		attended: boolean;
 		attendees: { email: string; name: string | null }[];
 	}[];
+	notes: AccountNote[];
 	stats: {
 		emails: number;
 		theyReplied: boolean;
@@ -199,7 +201,7 @@ export async function readCrmHistory(
 	const includeEmail = options.includeEmail ?? true;
 	const includeCalendar = options.includeCalendar ?? true;
 
-	const [threads, meetings, colleagues] = await Promise.all([
+	const [threads, meetings, colleagues, notes] = await Promise.all([
 		includeEmail
 			? db.emailThread.findMany({
 					where: { contactId },
@@ -254,6 +256,7 @@ export async function readCrmHistory(
 					orderBy: { lastActivityAt: "desc" },
 				})
 			: Promise.resolve([]),
+		recentNotes({ contactId }),
 	]);
 
 	const inbound = threads
@@ -308,6 +311,7 @@ export async function readCrmHistory(
 				name: attendee.name,
 			})),
 		})),
+		notes,
 		stats: {
 			emails: threads.reduce((total, thread) => total + thread.messageCount, 0),
 			theyReplied: inbound.length > 0,

@@ -4,4 +4,5 @@ export const GRANOLA = {
 	pageSize: 30,
 	bodyMaxChars: 20_000,
 	tickBudgetMs: 40_000,
+	phoneCallTitle: /^phone call with (.+)$/i,
 } as const;

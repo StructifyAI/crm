@@ -4,9 +4,10 @@ import {
 	type MailboxSyncModel as MailboxSync,
 } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
+import { z } from "zod";
 import { InjectDatabase } from "../database/database.constants";
 import { type Deadline, overdue } from "../mailbox/deadline";
-import { GMAIL_BACKFILL } from "../mailbox/mailbox-config";
+import { GMAIL_BACKFILL, MAILBOX_RECONCILE } from "../mailbox/mailbox-config";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import {
 	normaliseMessageId,
@@ -87,6 +88,29 @@ export function decodeBackfillCursor(
 
 	const pageToken = rest.join(":");
 	return { historyId, before: at, pageToken: pageToken || null };
+}
+
+const reconcileCursorSchema = z.object({
+	after: z.string().datetime(),
+	before: z.string().datetime(),
+	pageToken: z.string().nullable(),
+	skip: z.array(z.string()).default([]),
+});
+
+type ReconcileCursor = z.infer<typeof reconcileCursorSchema>;
+
+function encodeReconcileCursor(cursor: ReconcileCursor): string {
+	return JSON.stringify(cursor);
+}
+
+function decodeReconcileCursor(value: string | null): ReconcileCursor | null {
+	if (!value) return null;
+
+	try {
+		return reconcileCursorSchema.parse(JSON.parse(value));
+	} catch {
+		return null;
+	}
 }
 
 export type GmailSyncOutcome = {
@@ -184,6 +208,189 @@ export class GmailSyncService {
 		}
 
 		return this.backfill(row, session, mailbox, backfill, deadline);
+	}
+
+	async reconcile(
+		row: MailboxSync,
+		deadline: Deadline,
+	): Promise<GmailSyncOutcome> {
+		const token = await this.tokens.accessTokenFor(row.userId, "gmail");
+
+		if (token.outcome === "not-connected") {
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "skipped",
+				reason: token.reason,
+			};
+		}
+
+		if (token.outcome === "needs-reconnect") {
+			await this.state.markNeedsReconnect(row.id, token.reason);
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "reconnect",
+				reason: token.reason,
+			};
+		}
+
+		if (!row.cursor || row.cursor.startsWith(BACKFILL_CURSOR_PREFIX)) {
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "skipped",
+				reason: "Gmail is not on the incremental cursor.",
+			};
+		}
+
+		const session = new TokenSession(
+			this.tokens,
+			row.userId,
+			"gmail",
+			token.accessToken,
+		);
+		const profile = await session.call((accessToken) =>
+			this.gmail.profile(accessToken),
+		);
+		if (profile.outcome !== "ok") {
+			return this.handleFailure(row, profile);
+		}
+
+		const mailbox = profile.data.emailAddress?.toLowerCase() ?? null;
+		if (!mailbox) {
+			await this.state.markFailed(row.id, "Gmail returned no mailbox address.");
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "failed",
+				reason: "No mailbox address.",
+			};
+		}
+
+		const resumed = decodeReconcileCursor(row.reconcileCursor);
+		const now = new Date();
+		let cursor: ReconcileCursor = resumed ?? {
+			after: new Date(
+				now.getTime() - MAILBOX_RECONCILE.gmailWindowMs,
+			).toISOString(),
+			before: now.toISOString(),
+			pageToken: null,
+			skip: [],
+		};
+
+		if (!resumed) {
+			await this.state.saveReconcileCursor(
+				row.id,
+				encodeReconcileCursor(cursor),
+			);
+		}
+
+		let written = 0;
+		let listed = 0;
+
+		while (!overdue(deadline)) {
+			const page = await session.call((accessToken) =>
+				this.gmail.listMessages(accessToken, {
+					after: new Date(cursor.after),
+					before: new Date(cursor.before),
+					pageToken: cursor.pageToken ?? undefined,
+					maxResults: GMAIL_BACKFILL.pageSize,
+				}),
+			);
+
+			if (page.outcome !== "ok") {
+				return this.handleFailure(row, page);
+			}
+
+			const ids = (page.data.messages ?? [])
+				.map((message) => message.id)
+				.filter((id): id is string => Boolean(id));
+			listed += ids.length;
+
+			const batch = await this.ingest(
+				row,
+				session,
+				mailbox,
+				ids,
+				deadline,
+				new Set(cursor.skip),
+				true,
+			);
+			written += batch.written;
+
+			if (batch.unauthorized) {
+				return this.handleFailure(row, {
+					outcome: "unauthorized",
+					reason: batch.unauthorized,
+				});
+			}
+
+			const pageComplete = ids.every((id) => batch.finished.has(id));
+			const nextPageToken = page.data.nextPageToken ?? null;
+
+			if (!pageComplete || batch.remaining > 0) {
+				cursor = { ...cursor, skip: [...batch.finished] };
+				await this.state.saveReconcileCursor(
+					row.id,
+					encodeReconcileCursor(cursor),
+				);
+				await this.state.release(row.id);
+				this.logger.log({
+					message: "Gmail reconciliation in progress",
+					userId: row.userId,
+					listed,
+					messagesWritten: written,
+				});
+				return {
+					source: "gmail",
+					userId: row.userId,
+					status: "synced",
+					messagesWritten: written,
+					reason: "Reconciliation in progress.",
+				};
+			}
+
+			if (!nextPageToken) {
+				await this.state.markReconciled(row.id);
+				this.logger.log({
+					message: "Gmail reconciliation",
+					userId: row.userId,
+					listed,
+					messagesWritten: written,
+				});
+				return {
+					source: "gmail",
+					userId: row.userId,
+					status: "synced",
+					messagesWritten: written,
+				};
+			}
+
+			cursor = { ...cursor, pageToken: nextPageToken, skip: [] };
+			await this.state.saveReconcileCursor(
+				row.id,
+				encodeReconcileCursor(cursor),
+			);
+		}
+
+		await this.state.saveReconcileCursor(row.id, encodeReconcileCursor(cursor));
+		await this.state.release(row.id);
+
+		this.logger.log({
+			message: "Gmail reconciliation in progress",
+			userId: row.userId,
+			listed,
+			messagesWritten: written,
+		});
+
+		return {
+			source: "gmail",
+			userId: row.userId,
+			status: "synced",
+			messagesWritten: written,
+			reason: "Reconciliation in progress.",
+		};
 	}
 
 	private async start(
@@ -376,6 +583,8 @@ export class GmailSyncService {
 		mailbox: string,
 		ids: readonly string[],
 		deadline: Deadline,
+		skip: ReadonlySet<string> = new Set(),
+		repairUnlinked = false,
 	): Promise<{
 		written: number;
 		remaining: number;
@@ -387,13 +596,23 @@ export class GmailSyncService {
 
 		const alreadyHave = await this.db.emailMessage.findMany({
 			where: { gmailMessageId: { in: [...ids] } },
-			select: { gmailMessageId: true },
+			select: {
+				gmailMessageId: true,
+				thread: { select: { companyId: true, contactId: true } },
+			},
 		});
 		const seen = new Set(
 			alreadyHave
+				.filter(
+					(existing) =>
+						!repairUnlinked ||
+						existing.thread.companyId !== null ||
+						existing.thread.contactId !== null,
+				)
 				.map((existing) => existing.gmailMessageId)
 				.filter((id): id is string => id !== null),
 		);
+		for (const id of skip) seen.add(id);
 		const finished = new Set(seen);
 
 		const pending = ids.filter((id) => !seen.has(id));
