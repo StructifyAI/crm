@@ -271,7 +271,9 @@ export class GmailSyncService {
 		const resumed = decodeReconcileCursor(row.reconcileCursor);
 		const now = new Date();
 		let cursor: ReconcileCursor = resumed ?? {
-			after: new Date(now.getTime() - MAILBOX_RECONCILE.windowMs).toISOString(),
+			after: new Date(
+				now.getTime() - MAILBOX_RECONCILE.gmailWindowMs,
+			).toISOString(),
 			before: now.toISOString(),
 			pageToken: null,
 			skip: [],
@@ -313,6 +315,7 @@ export class GmailSyncService {
 				ids,
 				deadline,
 				new Set(cursor.skip),
+				true,
 			);
 			written += batch.written;
 
@@ -581,6 +584,7 @@ export class GmailSyncService {
 		ids: readonly string[],
 		deadline: Deadline,
 		skip: ReadonlySet<string> = new Set(),
+		repairUnlinked = false,
 	): Promise<{
 		written: number;
 		remaining: number;
@@ -592,10 +596,19 @@ export class GmailSyncService {
 
 		const alreadyHave = await this.db.emailMessage.findMany({
 			where: { gmailMessageId: { in: [...ids] } },
-			select: { gmailMessageId: true },
+			select: {
+				gmailMessageId: true,
+				thread: { select: { companyId: true, contactId: true } },
+			},
 		});
 		const seen = new Set(
 			alreadyHave
+				.filter(
+					(existing) =>
+						!repairUnlinked ||
+						existing.thread.companyId !== null ||
+						existing.thread.contactId !== null,
+				)
 				.map((existing) => existing.gmailMessageId)
 				.filter((id): id is string => id !== null),
 		);

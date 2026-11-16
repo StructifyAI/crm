@@ -19,6 +19,8 @@ import { withDiscardedCrmEvents } from "./agent-trigger.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "thread-writer-spec";
 const domain = `threads-${suffix}.test`;
+const otherDomain = `other-threads-${suffix}.test`;
+const otherPerson = `other-${suffix}@example.test`;
 const userId = `user-${suffix}`;
 const mailbox = `rep-${suffix}@example.test`;
 const person = `buyer@${domain}`;
@@ -70,6 +72,8 @@ const threads = new ThreadWriterService(
 );
 
 let row: MailboxSync;
+let otherCompanyId: string;
+let otherContactId: string;
 
 function message(
 	id: string,
@@ -108,12 +112,15 @@ async function clean() {
 			},
 		},
 	});
-	await db.contact.deleteMany({ where: { email: person } });
-	await db.contact.deleteMany({ where: { email: suppressedAddress } });
+	await db.contact.deleteMany({
+		where: { email: { in: [person, otherPerson, suppressedAddress] } },
+	});
 	await db.suppressedContact.deleteMany({
 		where: { email: suppressedAddress },
 	});
-	await db.company.deleteMany({ where: { domain } });
+	await db.company.deleteMany({
+		where: { domain: { in: [domain, otherDomain] } },
+	});
 	await db.instantlyMailbox.deleteMany({
 		where: { emailAccount: instantlyMailbox },
 	});
@@ -146,6 +153,21 @@ beforeAll(async () => {
 			companyId: company.id,
 		},
 	});
+	const otherCompany = await db.company.create({
+		data: { name: "Other Co", domain: otherDomain },
+		select: { id: true },
+	});
+	const otherContact = await db.contact.create({
+		data: {
+			firstName: "Other",
+			lastName: "Buyer",
+			email: otherPerson,
+			companyId: otherCompany.id,
+		},
+		select: { id: true },
+	});
+	otherCompanyId = otherCompany.id;
+	otherContactId = otherContact.id;
 });
 
 afterAll(clean);
@@ -231,6 +253,86 @@ describe("storing a synced email", () => {
 
 		expect(repaired?.messageCount).toBe(1);
 		expect(repaired?.activity).not.toBeNull();
+	});
+
+	it("fills a thread and activity that lost their company and contact", async () => {
+		const thread = await db.emailThread.findUnique({
+			where: { rootMessageId: rootId },
+			select: { id: true, activity: { select: { id: true } } },
+		});
+		if (!thread?.activity) throw new Error("the thread has no activity");
+
+		await db.emailThread.update({
+			where: { id: thread.id },
+			data: { companyId: null, contactId: null },
+		});
+		await db.activity.update({
+			where: { id: thread.activity.id },
+			data: { companyId: null, contactId: null },
+		});
+
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(`<one-${suffix}@mail.test>`, new Date("2026-01-01T10:00:00Z")),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		expect(stored).toBe(false);
+
+		const repaired = await db.emailThread.findUnique({
+			where: { id: thread.id },
+			select: {
+				companyId: true,
+				contactId: true,
+				activity: { select: { companyId: true, contactId: true } },
+			},
+		});
+
+		expect(repaired?.companyId).not.toBeNull();
+		expect(repaired?.contactId).not.toBeNull();
+		expect(repaired?.activity?.companyId).toBe(repaired?.companyId);
+		expect(repaired?.activity?.contactId).toBe(repaired?.contactId);
+	});
+
+	it("keeps activity links that are already set", async () => {
+		const thread = await db.emailThread.findUnique({
+			where: { rootMessageId: rootId },
+			select: { id: true, activity: { select: { id: true } } },
+		});
+		if (!thread?.activity) throw new Error("the thread has no activity");
+
+		await db.emailThread.update({
+			where: { id: thread.id },
+			data: { companyId: null, contactId: null },
+		});
+		await db.activity.update({
+			where: { id: thread.activity.id },
+			data: { companyId: otherCompanyId, contactId: otherContactId },
+		});
+
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(`<one-${suffix}@mail.test>`, new Date("2026-01-01T10:00:00Z")),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		expect(stored).toBe(false);
+
+		const repaired = await db.emailThread.findUnique({
+			where: { id: thread.id },
+			select: {
+				companyId: true,
+				contactId: true,
+				activity: { select: { companyId: true, contactId: true } },
+			},
+		});
+
+		expect(repaired?.companyId).not.toBeNull();
+		expect(repaired?.contactId).not.toBeNull();
+		expect(repaired?.activity?.companyId).toBe(otherCompanyId);
+		expect(repaired?.activity?.contactId).toBe(otherContactId);
 	});
 
 	it("lets one of two concurrent syncs win without failing the other", async () => {
