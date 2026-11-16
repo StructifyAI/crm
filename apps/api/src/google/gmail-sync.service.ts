@@ -592,10 +592,18 @@ export class GmailSyncService {
 
 		const alreadyHave = await this.db.emailMessage.findMany({
 			where: { gmailMessageId: { in: [...ids] } },
-			select: { gmailMessageId: true },
+			select: {
+				gmailMessageId: true,
+				thread: { select: { companyId: true, contactId: true } },
+			},
 		});
 		const seen = new Set(
 			alreadyHave
+				.filter(
+					(existing) =>
+						existing.thread.companyId !== null ||
+						existing.thread.contactId !== null,
+				)
 				.map((existing) => existing.gmailMessageId)
 				.filter((id): id is string => id !== null),
 		);
