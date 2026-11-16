@@ -684,21 +684,14 @@ export class CalendarSyncService {
 			location: string | null;
 		},
 	): Promise<void> {
-		const locationBody = summary.location
-			? `Location: ${summary.location}`
-			: null;
+		const body = summary.location ? `Location: ${summary.location}` : null;
 		const existing = await this.db.activity.findUnique({
 			where: { calendarEventId },
 			select: {
-				body: true,
 				dealId: true,
 				deal: { select: { companyId: true } },
 			},
 		});
-		const body =
-			existing?.body && !existing.body.startsWith("Location: ")
-				? existing.body
-				: locationBody;
 		const dealId =
 			existing?.dealId && existing.deal?.companyId === summary.companyId
 				? existing.dealId
@@ -720,7 +713,6 @@ export class CalendarSyncService {
 			},
 			update: {
 				subject: summary.title,
-				body,
 				occurredAt: summary.startsAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
