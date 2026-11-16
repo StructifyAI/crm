@@ -36,6 +36,7 @@ describe("calendar meeting deal link", () => {
 				upsert: async () => ({ id: "calendar-event-1" }),
 			},
 			activity: {
+				findUnique: async () => null,
 				upsert: async (query: Prisma.ActivityUpsertArgs) => {
 					activityQueries.push(query);
 					return {

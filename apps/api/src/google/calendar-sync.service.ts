@@ -684,7 +684,25 @@ export class CalendarSyncService {
 			location: string | null;
 		},
 	): Promise<void> {
-		const body = summary.location ? `Location: ${summary.location}` : null;
+		const locationBody = summary.location
+			? `Location: ${summary.location}`
+			: null;
+		const existing = await this.db.activity.findUnique({
+			where: { calendarEventId },
+			select: {
+				body: true,
+				dealId: true,
+				deal: { select: { companyId: true } },
+			},
+		});
+		const body =
+			existing?.body && !existing.body.startsWith("Location: ")
+				? existing.body
+				: locationBody;
+		const dealId =
+			existing?.dealId && existing.deal?.companyId === summary.companyId
+				? existing.dealId
+				: summary.dealId;
 
 		const activity = await this.db.activity.upsert({
 			where: { calendarEventId },
@@ -695,17 +713,18 @@ export class CalendarSyncService {
 				occurredAt: summary.startsAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
-				dealId: summary.dealId,
+				dealId,
 				createdById: userId,
 				calendarEventId,
 				meta: { synced: true, source: "calendar" },
 			},
 			update: {
 				subject: summary.title,
+				body,
 				occurredAt: summary.startsAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
-				dealId: summary.dealId ?? undefined,
+				dealId,
 			},
 			select: { id: true, createdAt: true, occurredAt: true },
 		});
@@ -714,7 +733,7 @@ export class CalendarSyncService {
 			{
 				companyId: summary.companyId,
 				contactId: summary.contactId,
-				dealId: summary.dealId,
+				dealId,
 			},
 			activityTime(activity),
 		);
