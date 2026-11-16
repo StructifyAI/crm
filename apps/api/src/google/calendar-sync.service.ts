@@ -11,6 +11,7 @@ import {
 	parseCalendarSyncResume,
 } from "@crm/validation/calendar-sync-resume";
 import { Injectable, Logger } from "@nestjs/common";
+import { z } from "zod";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { ContactEventsService } from "../contact-events/contact-events.service";
 import {
@@ -20,6 +21,7 @@ import {
 import { singleOpenDealId } from "../crm/single-open-deal";
 import { InjectDatabase } from "../database/database.constants";
 import { type Deadline, overdue } from "../mailbox/deadline";
+import { MAILBOX_RECONCILE } from "../mailbox/mailbox-config";
 import {
 	MailboxMatchService,
 	type MatchContext,
@@ -44,6 +46,37 @@ export type SyncOutcome = {
 	eventsRemoved?: number;
 	reason?: string;
 };
+
+const calendarReconcileCursorSchema = z.object({
+	timeMin: z.string().datetime(),
+	timeMax: z.string().datetime(),
+	pageToken: z.string().min(1).nullable(),
+	skip: z.array(z.string()).default([]),
+});
+
+type CalendarReconcileCursor = z.infer<typeof calendarReconcileCursorSchema>;
+
+function encodeCalendarReconcileCursor(
+	cursor: CalendarReconcileCursor,
+): string {
+	return JSON.stringify(cursor);
+}
+
+function decodeCalendarReconcileCursor(
+	value: string | null,
+): CalendarReconcileCursor | null {
+	if (!value) return null;
+
+	try {
+		return calendarReconcileCursorSchema.parse(JSON.parse(value));
+	} catch {
+		return null;
+	}
+}
+
+function reconcileEventKey(event: GoogleEvent): string | null {
+	return event.id ?? event.iCalUID ?? null;
+}
 
 @Injectable()
 export class CalendarSyncService {
@@ -91,18 +124,7 @@ export class CalendarSyncService {
 			token.accessToken,
 		);
 		const resume = parseCalendarSyncResume(row.resume);
-		const [internal, suppressedDomains, suppressedEmails] = await Promise.all([
-			this.match.internalIdentity(),
-			this.match.suppressedDomains(),
-			this.match.suppressedEmails(),
-		]);
-
-		const context = {
-			ourAddresses: internal.addresses,
-			ourDomains: internal.domains,
-			suppressedDomains,
-			suppressedEmails,
-		};
+		const context = await this.matchContext();
 
 		let pageToken = resume?.pageToken;
 		let syncToken = row.cursor ?? undefined;
@@ -221,6 +243,218 @@ export class CalendarSyncService {
 			progress,
 			"Page budget reached; continuing next tick.",
 		);
+	}
+
+	async reconcile(row: MailboxSync, deadline: Deadline): Promise<SyncOutcome> {
+		const token = await this.tokens.accessTokenFor(row.userId, "calendar");
+
+		if (token.outcome === "not-connected") {
+			return {
+				source: "calendar",
+				userId: row.userId,
+				status: "skipped",
+				reason: token.reason,
+			};
+		}
+
+		if (token.outcome === "needs-reconnect") {
+			await this.state.markNeedsReconnect(row.id, token.reason);
+			return {
+				source: "calendar",
+				userId: row.userId,
+				status: "reconnect",
+				reason: token.reason,
+			};
+		}
+
+		const session = new TokenSession(
+			this.tokens,
+			row.userId,
+			"calendar",
+			token.accessToken,
+		);
+		const context = await this.matchContext();
+		const resumed = decodeCalendarReconcileCursor(row.reconcileCursor);
+		const now = new Date();
+		let cursor: CalendarReconcileCursor = resumed ?? {
+			timeMin: new Date(
+				now.getTime() - MAILBOX_RECONCILE.windowMs,
+			).toISOString(),
+			timeMax: new Date(now.getTime() + CALENDAR_SYNC.horizonMs).toISOString(),
+			pageToken: null,
+			skip: [],
+		};
+
+		if (!resumed) {
+			await this.state.saveReconcileCursor(
+				row.id,
+				encodeCalendarReconcileCursor(cursor),
+			);
+		}
+
+		let skip = new Set(cursor.skip);
+		let written = 0;
+		let removed = 0;
+		let listed = 0;
+
+		while (!overdue(deadline)) {
+			const result = await session.call((accessToken) =>
+				this.calendar.listEvents(accessToken, {
+					pageToken: cursor.pageToken ?? undefined,
+					maxResults: CALENDAR_SYNC.pageSize,
+					timeMin: cursor.timeMin,
+					timeMax: cursor.timeMax,
+				}),
+			);
+
+			if (result.outcome === "cursor-invalid") {
+				await this.state.saveReconcileCursor(row.id, null);
+				await this.state.release(row.id);
+				return {
+					source: "calendar",
+					userId: row.userId,
+					status: "synced",
+					reason: "Reconcile cursor reset; the next run starts a new window.",
+				};
+			}
+
+			if (result.outcome === "unauthorized") {
+				await this.state.markNeedsReconnect(row.id, result.reason);
+				return {
+					source: "calendar",
+					userId: row.userId,
+					status: "reconnect",
+					reason: result.reason,
+				};
+			}
+
+			if (result.outcome === "rate-limited") {
+				await this.state.markRateLimited(row.id, result.retryAfterMs);
+				return {
+					source: "calendar",
+					userId: row.userId,
+					status: "rate-limited",
+					reason: result.reason,
+				};
+			}
+
+			if (result.outcome === "failed") {
+				await this.state.markFailed(row.id, result.reason);
+				return {
+					source: "calendar",
+					userId: row.userId,
+					status: "failed",
+					reason: result.reason,
+				};
+			}
+
+			const items = result.data.items ?? [];
+			listed += items.length;
+			let pageComplete = true;
+
+			for (const event of items) {
+				const key = reconcileEventKey(event);
+				if (key && skip.has(key)) continue;
+
+				if (overdue(deadline)) {
+					pageComplete = false;
+					break;
+				}
+
+				const applied = await this.apply(event, row, context);
+				if (applied === "written") written += 1;
+				if (applied === "removed") removed += 1;
+				if (key) skip.add(key);
+			}
+
+			if (!pageComplete) {
+				cursor = { ...cursor, skip: [...skip] };
+				await this.state.saveReconcileCursor(
+					row.id,
+					encodeCalendarReconcileCursor(cursor),
+				);
+				await this.state.release(row.id);
+				this.logger.log({
+					message: "Calendar reconciliation in progress",
+					userId: row.userId,
+					listed,
+					eventsWritten: written,
+					eventsRemoved: removed,
+				});
+				return {
+					source: "calendar",
+					userId: row.userId,
+					status: "synced",
+					eventsWritten: written,
+					eventsRemoved: removed,
+					reason: "Reconciliation in progress.",
+				};
+			}
+
+			const nextPageToken = result.data.nextPageToken ?? null;
+			if (!nextPageToken) {
+				await this.state.markReconciled(row.id);
+				this.logger.log({
+					message: "Calendar reconciliation",
+					userId: row.userId,
+					listed,
+					eventsWritten: written,
+					eventsRemoved: removed,
+				});
+				return {
+					source: "calendar",
+					userId: row.userId,
+					status: "synced",
+					eventsWritten: written,
+					eventsRemoved: removed,
+				};
+			}
+
+			cursor = { ...cursor, pageToken: nextPageToken, skip: [] };
+			skip = new Set();
+			await this.state.saveReconcileCursor(
+				row.id,
+				encodeCalendarReconcileCursor(cursor),
+			);
+		}
+
+		cursor = { ...cursor, skip: [...skip] };
+		await this.state.saveReconcileCursor(
+			row.id,
+			encodeCalendarReconcileCursor(cursor),
+		);
+		await this.state.release(row.id);
+		this.logger.log({
+			message: "Calendar reconciliation in progress",
+			userId: row.userId,
+			listed,
+			eventsWritten: written,
+			eventsRemoved: removed,
+		});
+
+		return {
+			source: "calendar",
+			userId: row.userId,
+			status: "synced",
+			eventsWritten: written,
+			eventsRemoved: removed,
+			reason: "Reconciliation in progress.",
+		};
+	}
+
+	private async matchContext(): Promise<MatchContext> {
+		const [internal, suppressedDomains, suppressedEmails] = await Promise.all([
+			this.match.internalIdentity(),
+			this.match.suppressedDomains(),
+			this.match.suppressedEmails(),
+		]);
+
+		return {
+			ourAddresses: internal.addresses,
+			ourDomains: internal.domains,
+			suppressedDomains,
+			suppressedEmails,
+		};
 	}
 
 	private async pause(

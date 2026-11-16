@@ -28,7 +28,10 @@ export class GoogleSyncService {
 	}
 
 	async reconcile(row: MailboxSync, deadline: Deadline) {
-		return row.source === "gmail" ? this.gmail.reconcile(row, deadline) : null;
+		if (row.source === "gmail") return this.gmail.reconcile(row, deadline);
+		if (row.source === "calendar")
+			return this.calendar.reconcile(row, deadline);
+		return null;
 	}
 
 	async runForUser(userId: string): Promise<void> {
