@@ -313,6 +313,7 @@ export class GmailSyncService {
 				ids,
 				deadline,
 				new Set(cursor.skip),
+				true,
 			);
 			written += batch.written;
 
@@ -581,6 +582,7 @@ export class GmailSyncService {
 		ids: readonly string[],
 		deadline: Deadline,
 		skip: ReadonlySet<string> = new Set(),
+		repairUnlinked = false,
 	): Promise<{
 		written: number;
 		remaining: number;
@@ -601,6 +603,7 @@ export class GmailSyncService {
 			alreadyHave
 				.filter(
 					(existing) =>
+						!repairUnlinked ||
 						existing.thread.companyId !== null ||
 						existing.thread.contactId !== null,
 				)

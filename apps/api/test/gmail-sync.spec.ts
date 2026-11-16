@@ -100,6 +100,9 @@ function harness(options: {
 		async clearCursor(_id: string, reason: string) {
 			cleared.push(reason);
 		},
+		async saveReconcileCursor() {},
+		async markReconciled() {},
+		async release() {},
 		async markNeedsReconnect() {},
 		async markRateLimited() {},
 		async markFailed(_id: string, reason: string) {
@@ -278,7 +281,7 @@ describe("GmailSyncService first sync", () => {
 		expect(kit.settled.at(-1)?.cursor).toBe("h-100");
 	});
 
-	it("refetches stored mail whose thread has no company or contact", async () => {
+	it("keeps stored unlinked mail out of backfill", async () => {
 		const kit = harness({
 			pages: [["a", "b"]],
 			existing: ["a"],
@@ -286,6 +289,19 @@ describe("GmailSyncService first sync", () => {
 		});
 
 		await kit.service.sync(row(null), deadline());
+
+		expect(kit.fetched).toEqual([]);
+		expect(kit.settled.at(-1)?.cursor).toBe("h-100");
+	});
+
+	it("refetches stored unlinked mail during reconciliation", async () => {
+		const kit = harness({
+			pages: [["a", "b"]],
+			existing: ["a"],
+			unlinked: ["b"],
+		});
+
+		await kit.service.reconcile(row("h-100"), deadline());
 
 		expect(kit.fetched).toEqual(["b"]);
 	});
