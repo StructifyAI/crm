@@ -233,6 +233,46 @@ describe("storing a synced email", () => {
 		expect(repaired?.activity).not.toBeNull();
 	});
 
+	it("fills a thread and activity that lost their company and contact", async () => {
+		const thread = await db.emailThread.findUnique({
+			where: { rootMessageId: rootId },
+			select: { id: true, activity: { select: { id: true } } },
+		});
+		if (!thread?.activity) throw new Error("the thread has no activity");
+
+		await db.emailThread.update({
+			where: { id: thread.id },
+			data: { companyId: null, contactId: null },
+		});
+		await db.activity.update({
+			where: { id: thread.activity.id },
+			data: { companyId: null, contactId: null },
+		});
+
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			message(`<one-${suffix}@mail.test>`, new Date("2026-01-01T10:00:00Z")),
+			await threads.context(deadlineIn(60_000)),
+		);
+
+		expect(stored).toBe(false);
+
+		const repaired = await db.emailThread.findUnique({
+			where: { id: thread.id },
+			select: {
+				companyId: true,
+				contactId: true,
+				activity: { select: { companyId: true, contactId: true } },
+			},
+		});
+
+		expect(repaired?.companyId).not.toBeNull();
+		expect(repaired?.contactId).not.toBeNull();
+		expect(repaired?.activity?.companyId).toBe(repaired?.companyId);
+		expect(repaired?.activity?.contactId).toBe(repaired?.contactId);
+	});
+
 	it("lets one of two concurrent syncs win without failing the other", async () => {
 		const parsed = message(
 			`<race-${suffix}@mail.test>`,
