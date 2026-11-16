@@ -46,9 +46,10 @@ type ContactEventRecordOptions = {
 	refreshClocks?: boolean;
 };
 
-function missingSourceActivity(error: unknown): boolean {
+function missingSourceActivity(
+	error: Prisma.PrismaClientKnownRequestError,
+): boolean {
 	return (
-		error instanceof Prisma.PrismaClientKnownRequestError &&
 		error.code === "P2003" &&
 		error.message.includes("contactEvent_sourceActivityId_fkey")
 	);
@@ -685,7 +686,12 @@ export class ContactEventsService {
 				update: { ...data, supersededAt: null },
 			});
 		} catch (error) {
-			if (missingSourceActivity(error)) return 0;
+			if (
+				error instanceof Prisma.PrismaClientKnownRequestError &&
+				missingSourceActivity(error)
+			) {
+				return 0;
+			}
 			throw error;
 		}
 		if (options.refreshClocks !== false) {
