@@ -702,11 +702,10 @@ export class CalendarSyncService {
 			},
 			update: {
 				subject: summary.title,
-				body,
 				occurredAt: summary.startsAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
-				dealId: summary.dealId,
+				dealId: summary.dealId ?? undefined,
 			},
 			select: { id: true, createdAt: true, occurredAt: true },
 		});
