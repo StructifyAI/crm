@@ -149,7 +149,7 @@ export class SyncStateService {
 		});
 	}
 
-	async saveReconcileCursor(id: string, cursor: string): Promise<void> {
+	async saveReconcileCursor(id: string, cursor: string | null): Promise<void> {
 		await this.db.mailboxSync.update({
 			where: { id },
 			data: { reconcileCursor: cursor },

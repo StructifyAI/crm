@@ -86,7 +86,7 @@ export class MailboxSyncService {
 
 		await Promise.all(
 			due
-				.filter((row) => row.source === "gmail")
+				.filter((row) => isGoogleSyncSource(row.source))
 				.map((row) => this.runReconcileClaimed(row, deadline, summary)),
 		);
 
