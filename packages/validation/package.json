@@ -31,6 +31,7 @@
 		"./saved-view": "./src/saved-view.ts",
 		"./instantly-webhook": "./src/instantly-webhook.ts",
 		"./instantly-api": "./src/instantly-api.ts",
+		"./linkedin-ads-api": "./src/linkedin-ads-api.ts",
 		"./instantly-sync-resume": "./src/instantly-sync-resume.ts",
 		"./extrovert-api": "./src/extrovert-api.ts",
 		"./extrovert-list-sync-resume": "./src/extrovert-list-sync-resume.ts",

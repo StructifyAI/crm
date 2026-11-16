@@ -3,6 +3,7 @@ import { ContactEventsModule } from "../contact-events/contact-events.module";
 import { ExtrovertModule } from "../extrovert/extrovert.module";
 import { GoogleModule } from "../google/google.module";
 import { InstantlyModule } from "../instantly/instantly.module";
+import { LinkedinAdsModule } from "../linkedin-ads/linkedin-ads.module";
 import { MailboxModule } from "../mailbox/mailbox.module";
 import { MicrosoftModule } from "../microsoft/microsoft.module";
 import { UnipileModule } from "../unipile/unipile.module";
@@ -18,6 +19,7 @@ import { SyncController } from "./sync.controller";
 		MicrosoftModule,
 		InstantlyModule,
 		ExtrovertModule,
+		LinkedinAdsModule,
 		UnipileModule,
 	],
 	controllers: [SyncController],

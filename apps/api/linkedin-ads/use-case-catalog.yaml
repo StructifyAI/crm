@@ -1,0 +1,50 @@
+campaignGroup:
+  name: Use case catalog - US manufacturing leaders
+campaign:
+  name: Use case catalog - US mfg Owner/CXO/President 11-500
+  objective: WEBSITE_VISIT
+  dailyBudgetUsd: 25
+  locations:
+    - urn:li:geo:103644278
+  industries:
+    - urn:li:industry:25
+    - urn:li:industry:1
+    - urn:li:industry:3
+    - urn:li:industry:7
+    - urn:li:industry:17
+    - urn:li:industry:23
+    - urn:li:industry:24
+    - urn:li:industry:52
+    - urn:li:industry:53
+    - urn:li:industry:54
+    - urn:li:industry:55
+    - urn:li:industry:62
+    - urn:li:industry:112
+    - urn:li:industry:117
+    - urn:li:industry:135
+    - urn:li:industry:145
+    - urn:li:industry:146
+    - urn:li:industry:147
+    - urn:li:industry:743
+    - urn:li:industry:1029
+    - urn:li:industry:1042
+    - urn:li:industry:2468
+    - urn:li:industry:3247
+  staffCountRanges:
+    - urn:li:staffCountRange:(11,50)
+    - urn:li:staffCountRange:(51,200)
+    - urn:li:staffCountRange:(201,500)
+  seniorities:
+    - urn:li:seniority:8
+    - urn:li:seniority:10
+  titles:
+    - urn:li:title:6
+creative:
+  name: Use case catalog - single image
+  organization: urn:li:organization:98727642
+  imagePath: use-case-catalog.png
+  imageAltText: Cover of the Structify AI use case catalog for industrial manufacturers
+  headline: The AI use case catalog for manufacturers
+  introText: See where manufacturers already use AI, from the plant floor to the front office. Free PDF, no form.
+  landingPageUrl: https://www.structify.ai/use-case-catalog.pdf
+  callToAction: DOWNLOAD

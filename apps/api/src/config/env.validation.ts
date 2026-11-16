@@ -83,6 +83,18 @@ export class EnvironmentVariables {
 
 	@IsOptional()
 	@IsString()
+	LINKEDIN_CLIENT_ID?: string;
+
+	@IsOptional()
+	@IsString()
+	LINKEDIN_CLIENT_SECRET?: string;
+
+	@IsOptional()
+	@IsString()
+	LINKEDIN_ACCESS_TOKEN?: string;
+
+	@IsOptional()
+	@IsString()
 	UNIPILE_DSN?: string;
 
 	@IsOptional()
