@@ -7,7 +7,7 @@ import {
 	type Db,
 	EmailClassification,
 	EmailDirection,
-	type Prisma,
+	Prisma,
 } from "@crm/db";
 import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import {
@@ -45,6 +45,15 @@ type EventValues = {
 type ContactEventRecordOptions = {
 	refreshClocks?: boolean;
 };
+
+function missingSourceActivity(
+	error: Prisma.PrismaClientKnownRequestError,
+): boolean {
+	return (
+		error.code === "P2003" &&
+		error.message.includes("contactEvent_sourceActivityId_fkey")
+	);
+}
 
 @Injectable()
 export class ContactEventsService {
@@ -670,11 +679,21 @@ export class ContactEventsService {
 			select: { dealId: true, contactId: true, companyId: true },
 		});
 		const { sourceKey, ...data } = values;
-		await this.db.contactEvent.upsert({
-			where: { sourceKey },
-			create: { sourceKey, ...data },
-			update: { ...data, supersededAt: null },
-		});
+		try {
+			await this.db.contactEvent.upsert({
+				where: { sourceKey },
+				create: { sourceKey, ...data },
+				update: { ...data, supersededAt: null },
+			});
+		} catch (error) {
+			if (
+				error instanceof Prisma.PrismaClientKnownRequestError &&
+				missingSourceActivity(error)
+			) {
+				return 0;
+			}
+			throw error;
+		}
 		if (options.refreshClocks !== false) {
 			await this.clocks.refreshAffectedMany(
 				previous
