@@ -68,7 +68,7 @@ export async function lookupCompanySize({
 	website: string | null;
 }): Promise<CompanySizeLookupResult> {
 	const site = domain ? `https://${domain}` : websiteOrigin(website);
-	if (!site) return { ok: false, reason: "No website." };
+	if (!site) return { ok: true, size: null };
 
 	try {
 		const result = await ask(
