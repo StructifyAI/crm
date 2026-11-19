@@ -13,6 +13,8 @@ describe("normalizeEmployeeRange", () => {
 		expect(normalizeEmployeeRange("11 to 50")).toBe("11 to 50");
 		expect(normalizeEmployeeRange("10,001+")).toBe("10001+");
 		expect(normalizeEmployeeRange("10001+")).toBe("10001+");
+		expect(normalizeEmployeeRange("51-200 employees")).toBe("51 to 200");
+		expect(normalizeEmployeeRange("10,001+ employees")).toBe("10001+");
 	});
 
 	it("rejects unsupported and reversed ranges", () => {
@@ -21,6 +23,7 @@ describe("normalizeEmployeeRange", () => {
 			undefined,
 			"",
 			"about 50",
+			"200 employees",
 			"1 to 10,001+",
 			"51 to 10",
 		]) {

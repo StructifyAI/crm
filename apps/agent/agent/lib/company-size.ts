@@ -79,22 +79,26 @@ export async function lookupCompanySize({
 		),
 	];
 
+	const question = domainSite
+		? `How many employees does the company ${name} have? Use only the company's own website at ${site} (about, team, careers, or contact page) or its LinkedIn company page. For a LinkedIn company page, copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If neither page states a count or band, return null for both.`
+		: `How many employees does the company ${name} have? Use only its LinkedIn company page. Copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, company websites, or pages for a different entity. Set sourceUrl to the exact LinkedIn company page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If the LinkedIn company page states no count or band, return null for both.`;
+
 	try {
-		const result = await ask(
-			`How many employees does the company ${name} have? Use only the company's own website at ${site} (about, team, careers, or contact page) or its LinkedIn company page. For a LinkedIn company page, copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If neither page states a count or band, return null for both.`,
-			{
-				model: "sonar",
-				system,
-				schema: { name: "company_size", schema: companySizeAnswerSchema },
-			},
-		);
+		const result = await ask(question, {
+			model: "sonar",
+			system,
+			schema: { name: "company_size", schema: companySizeAnswerSchema },
+		});
 
 		if (!result.ok) return result;
 		const size = sizeFromAnswer(result.data);
 		if (!size?.sourceUrl) return { ok: true, size: null };
+		const sourceAllowed = domainSite
+			? companySizeSourceAllowed(size.sourceUrl, sites)
+			: linkedinCompanyUrl(size.sourceUrl);
 		return {
 			ok: true,
-			size: companySizeSourceAllowed(size.sourceUrl, sites) ? size : null,
+			size: sourceAllowed ? size : null,
 		};
 	} catch (error) {
 		return {
@@ -275,17 +279,25 @@ function personalLinkedInUrl(value: string): boolean {
 	}
 }
 
+function linkedinCompanyUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		const host = url.hostname.toLowerCase().replace(/^www\./, "");
+		return (
+			(host === "linkedin.com" || host.endsWith(".linkedin.com")) &&
+			url.pathname.toLowerCase().startsWith("/company/")
+		);
+	} catch {
+		return false;
+	}
+}
+
 function companySizeSourceAllowed(sourceUrl: string, sites: string[]): boolean {
 	try {
-		const source = new URL(sourceUrl);
-		const sourceHost = source.hostname.toLowerCase().replace(/^www\./, "");
-		const sourcePath = source.pathname.toLowerCase();
-		if (
-			(sourceHost === "linkedin.com" || sourceHost.endsWith(".linkedin.com")) &&
-			sourcePath.startsWith("/company/")
-		) {
-			return true;
-		}
+		if (linkedinCompanyUrl(sourceUrl)) return true;
+		const sourceHost = new URL(sourceUrl).hostname
+			.toLowerCase()
+			.replace(/^www\./, "");
 		const siteHosts = sites.map((site) =>
 			new URL(site).hostname.toLowerCase().replace(/^www\./, ""),
 		);
