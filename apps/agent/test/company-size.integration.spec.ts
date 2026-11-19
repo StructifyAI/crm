@@ -89,6 +89,7 @@ async function createCompany(
 	input: {
 		status?: EnrichmentStatus;
 		domain?: string | null;
+		website?: string | null;
 		naics?: boolean;
 		countryCode?: string | null;
 	} = {},
@@ -97,10 +98,12 @@ async function createCompany(
 		input.domain === undefined
 			? `${randomUUID().replaceAll("-", "")}.company-size.test`
 			: input.domain;
+	const website = input.website ?? null;
 	const company = await db.company.create({
 		data: {
 			name: `Company size ${randomUUID()}`,
 			domain,
+			website,
 			countryCode: input.countryCode ?? null,
 			enrichmentStatus: input.status ?? EnrichmentStatus.COMPLETE,
 		},
@@ -116,7 +119,7 @@ async function createCompany(
 			},
 		});
 	}
-	return { id: company.id, domain };
+	return { id: company.id, domain, website };
 }
 
 describe("sizeFromAnswer", () => {
@@ -285,25 +288,57 @@ describe("sweepCompanySize", () => {
 		expect(saved?.employeeCheckedAt).toEqual(expect.any(Date));
 	});
 
-	it("skips pending enrichment and companies without a domain", async () => {
+	it("skips pending enrichment and companies without a domain or website", async () => {
 		const pending = await createCompany({ status: EnrichmentStatus.PENDING });
 		const noDomain = await createCompany({
 			status: EnrichmentStatus.COMPLETE,
 			domain: null,
 		});
+		const neither = await createCompany({
+			status: EnrichmentStatus.COMPLETE,
+			domain: null,
+			website: null,
+		});
+		const websiteOnly = await createCompany({
+			status: EnrichmentStatus.COMPLETE,
+			domain: null,
+			website: "https://example.com",
+		});
 		const eligible = await createCompany();
-		const lookedUp: string[] = [];
+		const lookedUp: { domain: string | null; website: string | null }[] = [];
 
 		const summary = await sweepCompanySize({
-			lookup: async ({ domain }) => {
-				lookedUp.push(domain);
+			lookup: async (company) => {
+				lookedUp.push(company);
 				return { ok: true, size: null };
 			},
 		});
 
-		expect(summary.scanned).toBe(1);
-		expect(lookedUp).toEqual([eligible.domain]);
-		expect(lookedUp).not.toContain(pending.domain);
-		expect(lookedUp).not.toContain(noDomain.domain);
+		expect(summary.scanned).toBe(2);
+		expect(lookedUp).toHaveLength(2);
+		expect(lookedUp).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ domain: eligible.domain, website: null }),
+				expect.objectContaining({
+					domain: null,
+					website: websiteOnly.website,
+				}),
+			]),
+		);
+		expect(lookedUp).not.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ domain: pending.domain, website: null }),
+			]),
+		);
+		expect(lookedUp).not.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ domain: noDomain.domain, website: null }),
+			]),
+		);
+		expect(lookedUp).not.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ domain: neither.domain, website: null }),
+			]),
+		);
 	});
 });

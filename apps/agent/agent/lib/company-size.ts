@@ -1,5 +1,5 @@
 import { db, EnrichmentStatus } from "@crm/db";
-import { recomputeCompanyIcp } from "@crm/db/company-icp";
+import { parseEmployeeRange, recomputeCompanyIcp } from "@crm/db/company-icp";
 import { normalizeEmployeeRange } from "@crm/validation/company-size";
 import { z } from "zod";
 import { DISPATCH } from "./dispatch-config";
@@ -18,7 +18,8 @@ export type CompanySizeLookupResult =
 
 export type CompanySizeLookup = (company: {
 	name: string;
-	domain: string;
+	domain: string | null;
+	website: string | null;
 }) => Promise<CompanySizeLookupResult>;
 
 const companySizeAnswerSchema = {
@@ -39,27 +40,66 @@ const parsedCompanySizeSchema = z.object({
 });
 
 const system =
-	"You find how many people a company employs. Answer only from sources you found. Use null for anything no source states. Never guess.";
+	"You find how many people a company employs. Use only a page for that exact company from its website or LinkedIn company page that states the employee count or size band. Copy the size band exactly as the source states it. Do not use press releases, blog posts, or dated articles. Answer only from sources you found. Use null for anything no source states. Never guess.";
+
+function websiteOrigin(website: string | null): string | null {
+	if (!website) return null;
+
+	const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(website)
+		? website
+		: `https://${website}`;
+
+	try {
+		const url = new URL(withProtocol);
+		if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+		return `${url.protocol}//${url.host}`;
+	} catch {
+		return null;
+	}
+}
 
 export async function lookupCompanySize({
 	name,
 	domain,
+	website,
 }: {
 	name: string;
-	domain: string;
+	domain: string | null;
+	website: string | null;
 }): Promise<CompanySizeLookupResult> {
+	const websiteSite = websiteOrigin(website);
+	const domainSite = domain ? `https://${domain}` : null;
+	const site = domainSite ?? websiteSite;
+	if (!site) return { ok: true, size: null };
+	const sites = [
+		...new Set(
+			[domainSite, websiteSite].filter(
+				(value): value is string => value !== null,
+			),
+		),
+	];
+
+	const question = domainSite
+		? `How many employees does the company ${name} have? Use only the company's own website at ${site} (about, team, careers, or contact page) or its LinkedIn company page. For a LinkedIn company page, copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If neither page states a count or band, return null for both.`
+		: `How many employees does the company ${name} have? Use only its LinkedIn company page. Copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, company websites, or pages for a different entity. Set sourceUrl to the exact LinkedIn company page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If the LinkedIn company page states no count or band, return null for both.`;
+
 	try {
-		const result = await ask(
-			`How many employees does the company ${name} with the website ${domain} have? Prefer its LinkedIn company page, then its own website, then business directories. Make sure the source is about the company at ${domain}. Give the exact employee count if a source states one, and the size band if a source states one, for example "11-50".`,
-			{
-				model: "sonar",
-				system,
-				schema: { name: "company_size", schema: companySizeAnswerSchema },
-			},
-		);
+		const result = await ask(question, {
+			model: "sonar",
+			system,
+			schema: { name: "company_size", schema: companySizeAnswerSchema },
+		});
 
 		if (!result.ok) return result;
-		return { ok: true, size: sizeFromAnswer(result.data) };
+		const size = sizeFromAnswer(result.data);
+		if (!size?.sourceUrl) return { ok: true, size: null };
+		const sourceAllowed = domainSite
+			? companySizeSourceAllowed(size.sourceUrl, sites)
+			: linkedinCompanyUrl(size.sourceUrl);
+		return {
+			ok: true,
+			size: sourceAllowed ? size : null,
+		};
 	} catch (error) {
 		return {
 			ok: false,
@@ -69,9 +109,6 @@ export async function lookupCompanySize({
 }
 
 export function sizeFromAnswer(answer: Answer): CompanySize | null {
-	const citationUrl = answer.citations.find((value) => httpUrl(value) !== null);
-	if (!citationUrl) return null;
-
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(answer.text);
@@ -82,6 +119,9 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 	const result = parsedCompanySizeSchema.safeParse(parsed);
 	if (!result.success) return null;
 
+	const citationUrl = answer.citations.find((value) => httpUrl(value) !== null);
+	if (!citationUrl) return null;
+
 	const employeeCount =
 		result.data.employeeCount !== null &&
 		Number.isInteger(result.data.employeeCount) &&
@@ -90,14 +130,21 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 			? result.data.employeeCount
 			: null;
 	const employeeRange = normalizeEmployeeRange(result.data.employeeRange);
-
 	if (employeeCount === null && employeeRange === null) return null;
 
-	return {
-		employeeCount,
-		employeeRange,
-		sourceUrl: httpUrl(result.data.sourceUrl) ?? httpUrl(citationUrl),
-	};
+	const sourceUrl = httpUrl(result.data.sourceUrl);
+	if (!sourceUrl || personalLinkedInUrl(sourceUrl) || pdfUrl(sourceUrl)) {
+		return null;
+	}
+
+	if (employeeCount !== null && employeeRange !== null) {
+		const range = parseEmployeeRange(employeeRange);
+		if (range && (employeeCount < range.lo || employeeCount > range.hi)) {
+			return null;
+		}
+	}
+
+	return { employeeCount, employeeRange, sourceUrl };
 }
 
 export async function sweepCompanySize(
@@ -113,7 +160,7 @@ export async function sweepCompanySize(
 			employeeCount: null,
 			employeeRange: null,
 			employeeCheckedAt: null,
-			domain: { not: null },
+			OR: [{ domain: { not: null } }, { website: { not: null } }],
 			enrichmentStatus: {
 				in: [
 					EnrichmentStatus.COMPLETE,
@@ -124,7 +171,7 @@ export async function sweepCompanySize(
 		},
 		orderBy: { createdAt: "desc" },
 		take: DISPATCH.companySize.batch,
-		select: { id: true, name: true, domain: true },
+		select: { id: true, name: true, domain: true, website: true },
 	});
 
 	const summary = {
@@ -140,7 +187,7 @@ export async function sweepCompanySize(
 		DISPATCH.companySize.concurrency,
 		candidates,
 		async (company) => {
-			if (!company.domain) return;
+			if (!company.domain && !company.website) return;
 
 			const checkedAt = new Date();
 			const claim = await db.company.updateMany({
@@ -151,7 +198,11 @@ export async function sweepCompanySize(
 
 			let result: CompanySizeLookupResult;
 			try {
-				result = await lookup({ name: company.name, domain: company.domain });
+				result = await lookup({
+					name: company.name,
+					domain: company.domain,
+					website: company.website,
+				});
 			} catch (error) {
 				result = {
 					ok: false,
@@ -205,6 +256,58 @@ export async function sweepCompanySize(
 		`[company-size] scanned=${summary.scanned} filled=${summary.filled} empty=${summary.empty} failed=${summary.failed}${reasons ? ` reasons=${reasons}` : ""}`,
 	);
 	return summary;
+}
+
+function pdfUrl(value: string): boolean {
+	try {
+		return new URL(value).pathname.toLowerCase().endsWith(".pdf");
+	} catch {
+		return false;
+	}
+}
+
+function personalLinkedInUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		const host = url.hostname.toLowerCase().replace(/^www\./, "");
+		return (
+			(host === "linkedin.com" || host.endsWith(".linkedin.com")) &&
+			url.pathname.toLowerCase().startsWith("/in/")
+		);
+	} catch {
+		return false;
+	}
+}
+
+function linkedinCompanyUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		const host = url.hostname.toLowerCase().replace(/^www\./, "");
+		return (
+			(host === "linkedin.com" || host.endsWith(".linkedin.com")) &&
+			url.pathname.toLowerCase().startsWith("/company/")
+		);
+	} catch {
+		return false;
+	}
+}
+
+function companySizeSourceAllowed(sourceUrl: string, sites: string[]): boolean {
+	try {
+		if (linkedinCompanyUrl(sourceUrl)) return true;
+		const sourceHost = new URL(sourceUrl).hostname
+			.toLowerCase()
+			.replace(/^www\./, "");
+		const siteHosts = sites.map((site) =>
+			new URL(site).hostname.toLowerCase().replace(/^www\./, ""),
+		);
+		return siteHosts.some(
+			(siteHost) =>
+				sourceHost === siteHost || sourceHost.endsWith(`.${siteHost}`),
+		);
+	} catch {
+		return false;
+	}
 }
 
 function httpUrl(value: string | null): string | null {

@@ -11,7 +11,11 @@ export type RevenueEstimate = {
 export function normalizeEmployeeRange(
 	text: string | null | undefined,
 ): string | null {
-	const range = parseEmployeeRange(text);
+	const cleaned = text
+		?.trim()
+		.replace(/\s+employees?$/i, "")
+		.trim();
+	const range = parseEmployeeRange(cleaned);
 	if (!range) return null;
 	return range.hi === Infinity ? `${range.lo}+` : `${range.lo} to ${range.hi}`;
 }

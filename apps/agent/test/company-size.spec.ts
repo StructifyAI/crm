@@ -4,7 +4,7 @@ import type { Answer } from "../agent/lib/perplexity";
 
 function answer(
 	data: CompanySize,
-	citations: string[] = ["https://www.linkedin.com/company/example"],
+	citations: string[] = ["https://example.com/about"],
 ): Answer {
 	return {
 		text: JSON.stringify(data),
@@ -29,19 +29,35 @@ describe("sizeFromAnswer", () => {
 		});
 	});
 
-	it("normalizes a cited employee band", () => {
+	it("normalizes an employee band from an HTTP source URL", () => {
 		expect(
 			sizeFromAnswer(
 				answer({
 					employeeCount: null,
 					employeeRange: "2-10",
-					sourceUrl: "ftp://example.com",
+					sourceUrl: "https://example.com/team",
 				}),
 			),
 		).toEqual({
 			employeeCount: null,
 			employeeRange: "2 to 10",
-			sourceUrl: "https://www.linkedin.com/company/example",
+			sourceUrl: "https://example.com/team",
+		});
+	});
+
+	it("accepts a consistent count and band", () => {
+		expect(
+			sizeFromAnswer(
+				answer({
+					employeeCount: 84,
+					employeeRange: "51-200",
+					sourceUrl: "https://example.com/team",
+				}),
+			),
+		).toEqual({
+			employeeCount: 84,
+			employeeRange: "51 to 200",
+			sourceUrl: "https://example.com/team",
 		});
 	});
 
@@ -50,6 +66,18 @@ describe("sizeFromAnswer", () => {
 			sizeFromAnswer(
 				answer({
 					employeeCount: null,
+					employeeRange: null,
+					sourceUrl: null,
+				}),
+			),
+		).toBeNull();
+	});
+
+	it("requires a source URL", () => {
+		expect(
+			sizeFromAnswer(
+				answer({
+					employeeCount: 84,
 					employeeRange: null,
 					sourceUrl: null,
 				}),
@@ -72,17 +100,38 @@ describe("sizeFromAnswer", () => {
 		).toBeNull();
 	});
 
-	it("requires an HTTP citation", () => {
+	it("rejects a personal LinkedIn source URL", () => {
 		expect(
 			sizeFromAnswer(
-				answer(
-					{
-						employeeCount: 84,
-						employeeRange: null,
-						sourceUrl: "https://example.com/about",
-					},
-					["ftp://example.com/company"],
-				),
+				answer({
+					employeeCount: 84,
+					employeeRange: null,
+					sourceUrl: "https://www.linkedin.com/in/example",
+				}),
+			),
+		).toBeNull();
+	});
+
+	it("rejects a PDF source URL", () => {
+		expect(
+			sizeFromAnswer(
+				answer({
+					employeeCount: 84,
+					employeeRange: null,
+					sourceUrl: "https://example.com/about.pdf",
+				}),
+			),
+		).toBeNull();
+	});
+
+	it("rejects an inconsistent count and band", () => {
+		expect(
+			sizeFromAnswer(
+				answer({
+					employeeCount: 300,
+					employeeRange: "501-1000",
+					sourceUrl: "https://example.com/about",
+				}),
 			),
 		).toBeNull();
 	});
@@ -91,7 +140,7 @@ describe("sizeFromAnswer", () => {
 		expect(
 			sizeFromAnswer({
 				text: "not json",
-				citations: ["https://www.linkedin.com/company/example"],
+				citations: [],
 			}),
 		).toBeNull();
 	});
@@ -102,7 +151,7 @@ describe("sizeFromAnswer", () => {
 				answer({
 					employeeCount: 0,
 					employeeRange: null,
-					sourceUrl: null,
+					sourceUrl: "https://example.com/about",
 				}),
 			),
 		).toBeNull();
