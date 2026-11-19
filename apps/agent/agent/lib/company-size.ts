@@ -67,8 +67,17 @@ export async function lookupCompanySize({
 	domain: string | null;
 	website: string | null;
 }): Promise<CompanySizeLookupResult> {
-	const site = domain ? `https://${domain}` : websiteOrigin(website);
+	const websiteSite = websiteOrigin(website);
+	const domainSite = domain ? `https://${domain}` : null;
+	const site = domainSite ?? websiteSite;
 	if (!site) return { ok: true, size: null };
+	const sites = [
+		...new Set(
+			[domainSite, websiteSite].filter(
+				(value): value is string => value !== null,
+			),
+		),
+	];
 
 	try {
 		const result = await ask(
@@ -85,7 +94,7 @@ export async function lookupCompanySize({
 		if (!size?.sourceUrl) return { ok: true, size: null };
 		return {
 			ok: true,
-			size: companySizeSourceAllowed(size.sourceUrl, site) ? size : null,
+			size: companySizeSourceAllowed(size.sourceUrl, sites) ? size : null,
 		};
 	} catch (error) {
 		return {
@@ -256,27 +265,34 @@ function pdfUrl(value: string): boolean {
 function personalLinkedInUrl(value: string): boolean {
 	try {
 		const url = new URL(value);
+		const host = url.hostname.toLowerCase().replace(/^www\./, "");
 		return (
-			url.hostname.replace(/^www\./, "") === "linkedin.com" &&
-			url.pathname.startsWith("/in/")
+			(host === "linkedin.com" || host.endsWith(".linkedin.com")) &&
+			url.pathname.toLowerCase().startsWith("/in/")
 		);
 	} catch {
 		return false;
 	}
 }
 
-function companySizeSourceAllowed(sourceUrl: string, site: string): boolean {
+function companySizeSourceAllowed(sourceUrl: string, sites: string[]): boolean {
 	try {
 		const source = new URL(sourceUrl);
 		const sourceHost = source.hostname.toLowerCase().replace(/^www\./, "");
-		const siteHost = new URL(site).hostname.toLowerCase().replace(/^www\./, "");
+		const sourcePath = source.pathname.toLowerCase();
 		if (
-			sourceHost === "linkedin.com" &&
-			source.pathname.startsWith("/company/")
+			(sourceHost === "linkedin.com" || sourceHost.endsWith(".linkedin.com")) &&
+			sourcePath.startsWith("/company/")
 		) {
 			return true;
 		}
-		return sourceHost === siteHost || sourceHost.endsWith(`.${siteHost}`);
+		const siteHosts = sites.map((site) =>
+			new URL(site).hostname.toLowerCase().replace(/^www\./, ""),
+		);
+		return siteHosts.some(
+			(siteHost) =>
+				sourceHost === siteHost || sourceHost.endsWith(`.${siteHost}`),
+		);
 	} catch {
 		return false;
 	}
