@@ -69,8 +69,7 @@ export async function lookupCompanySize({
 }): Promise<CompanySizeLookupResult> {
 	const websiteSite = websiteOrigin(website);
 	const domainSite = domain ? `https://${domain}` : null;
-	const site = domainSite ?? websiteSite;
-	if (!site) return { ok: true, size: null };
+	if (!domainSite) return { ok: true, size: null };
 	const sites = [
 		...new Set(
 			[domainSite, websiteSite].filter(
@@ -79,9 +78,7 @@ export async function lookupCompanySize({
 		),
 	];
 
-	const question = domainSite
-		? `How many employees does the company ${name} have? Use only the company's own website at ${site} (about, team, careers, or contact page) or its LinkedIn company page. For a LinkedIn company page, copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If neither page states a count or band, return null for both.`
-		: `How many employees does the company ${name} have? Use only its LinkedIn company page. Copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, company websites, or pages for a different entity. Set sourceUrl to the exact LinkedIn company page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If the LinkedIn company page states no count or band, return null for both.`;
+	const question = `How many employees does the company ${name} have? Use only the company's own website at ${domainSite} (about, team, careers, or contact page) or its LinkedIn company page. For a LinkedIn company page, copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If neither page states a count or band, return null for both.`;
 
 	try {
 		const result = await ask(question, {
@@ -93,9 +90,7 @@ export async function lookupCompanySize({
 		if (!result.ok) return result;
 		const size = sizeFromAnswer(result.data);
 		if (!size?.sourceUrl) return { ok: true, size: null };
-		const sourceAllowed = domainSite
-			? companySizeSourceAllowed(size.sourceUrl, sites)
-			: linkedinCompanyUrl(size.sourceUrl);
+		const sourceAllowed = companySizeSourceAllowed(size.sourceUrl, sites);
 		return {
 			ok: true,
 			size: sourceAllowed ? size : null,
@@ -160,7 +155,7 @@ export async function sweepCompanySize(
 			employeeCount: null,
 			employeeRange: null,
 			employeeCheckedAt: null,
-			OR: [{ domain: { not: null } }, { website: { not: null } }],
+			domain: { not: null },
 			enrichmentStatus: {
 				in: [
 					EnrichmentStatus.COMPLETE,

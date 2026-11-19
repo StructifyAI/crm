@@ -288,17 +288,8 @@ describe("sweepCompanySize", () => {
 		expect(saved?.employeeCheckedAt).toEqual(expect.any(Date));
 	});
 
-	it("skips pending enrichment and companies without a domain or website", async () => {
-		const pending = await createCompany({ status: EnrichmentStatus.PENDING });
-		const noDomain = await createCompany({
-			status: EnrichmentStatus.COMPLETE,
-			domain: null,
-		});
-		const neither = await createCompany({
-			status: EnrichmentStatus.COMPLETE,
-			domain: null,
-			website: null,
-		});
+	it("skips pending enrichment and companies without a domain", async () => {
+		await createCompany({ status: EnrichmentStatus.PENDING });
 		const websiteOnly = await createCompany({
 			status: EnrichmentStatus.COMPLETE,
 			domain: null,
@@ -313,32 +304,15 @@ describe("sweepCompanySize", () => {
 				return { ok: true, size: null };
 			},
 		});
+		const websiteOnlySaved = await db.company.findUnique({
+			where: { id: websiteOnly.id },
+			select: { employeeCheckedAt: true },
+		});
 
-		expect(summary.scanned).toBe(2);
-		expect(lookedUp).toHaveLength(2);
-		expect(lookedUp).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ domain: eligible.domain, website: null }),
-				expect.objectContaining({
-					domain: null,
-					website: websiteOnly.website,
-				}),
-			]),
-		);
-		expect(lookedUp).not.toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ domain: pending.domain, website: null }),
-			]),
-		);
-		expect(lookedUp).not.toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ domain: noDomain.domain, website: null }),
-			]),
-		);
-		expect(lookedUp).not.toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ domain: neither.domain, website: null }),
-			]),
-		);
+		expect(summary.scanned).toBe(1);
+		expect(lookedUp).toEqual([
+			expect.objectContaining({ domain: eligible.domain, website: null }),
+		]);
+		expect(websiteOnlySaved?.employeeCheckedAt).toBeNull();
 	});
 });
