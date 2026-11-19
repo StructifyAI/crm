@@ -14,6 +14,7 @@ describe("companyDomainBackfillRow", () => {
 		});
 
 		expect(parsed.domain).toBe("example.com");
+		expect(parsed.mode).toBe("fill");
 	});
 
 	it("requires the previous domain", () => {
@@ -32,9 +33,33 @@ describe("companyDomainBackfillRow", () => {
 			domain: "example.com",
 			website: "https://www.example.com",
 			previousDomain: "old-example.com",
+			mode: "correct",
 		});
 
 		expect(parsed.previousDomain).toBe("old-example.com");
+	});
+
+	it("rejects a fill with a previous domain", () => {
+		const parsed = companyDomainBackfillRow.safeParse({
+			companyId: "company-1",
+			domain: "example.com",
+			website: "https://www.example.com",
+			previousDomain: "old-example.com",
+		});
+
+		expect(parsed.success).toBe(false);
+	});
+
+	it("requires a previous domain for corrections", () => {
+		const parsed = companyDomainBackfillRow.safeParse({
+			companyId: "company-1",
+			domain: "example.com",
+			website: "https://www.example.com",
+			previousDomain: null,
+			mode: "correct",
+		});
+
+		expect(parsed.success).toBe(false);
 	});
 });
 

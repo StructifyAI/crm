@@ -47,6 +47,15 @@ export class CompanyDomainBackfillService {
 			const currentWebsiteDomain = normalizeDomain(company.website);
 
 			if (
+				(row.mode === "fill" && row.previousDomain !== null) ||
+				(row.mode === "correct" &&
+					(previousDomain === null || domain === previousDomain))
+			) {
+				skipped += 1;
+				continue;
+			}
+
+			if (
 				!domain ||
 				(row.previousDomain !== null && previousDomain === null) ||
 				company.domain !== previousDomain ||

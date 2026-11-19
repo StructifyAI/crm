@@ -34,6 +34,7 @@ describe("CompanyDomainBackfillService", () => {
 				domain: "example.com",
 				website: "https://example.com",
 				previousDomain: null,
+				mode: "fill",
 			},
 		]);
 
@@ -51,6 +52,7 @@ describe("CompanyDomainBackfillService", () => {
 				domain: "other-example.com",
 				website: "https://other-example.com",
 				previousDomain: null,
+				mode: "fill",
 			},
 		]);
 
@@ -72,6 +74,7 @@ describe("CompanyDomainBackfillService", () => {
 				domain: "current.com",
 				website: "https://current.com",
 				previousDomain: null,
+				mode: "fill",
 			},
 		]);
 
@@ -91,6 +94,7 @@ describe("CompanyDomainBackfillService", () => {
 				domain: "example.com",
 				website: "https://example.com",
 				previousDomain: null,
+				mode: "fill",
 			},
 		]);
 
@@ -109,6 +113,69 @@ describe("CompanyDomainBackfillService", () => {
 				domain: "example.com",
 				website: "https://example.com",
 				previousDomain: null,
+				mode: "fill",
+			},
+		]);
+
+		expect(result).toEqual({ updated: 0, skipped: 1 });
+	});
+
+	it("corrects a domain when the website host matches", async () => {
+		const service = serviceWith([
+			{
+				id: "company-1",
+				domain: "old-example.com",
+				website: "https://www.example.com/products",
+			},
+		]);
+
+		const result = await service.backfill([
+			{
+				companyId: "company-1",
+				domain: "example.com",
+				website: "https://www.example.com/products",
+				previousDomain: "old-example.com",
+				mode: "correct",
+			},
+		]);
+
+		expect(result).toEqual({ updated: 1, skipped: 0 });
+	});
+
+	it("skips a correction to the same domain", async () => {
+		const service = serviceWith([
+			{
+				id: "company-1",
+				domain: "example.com",
+				website: "https://www.example.com",
+			},
+		]);
+
+		const result = await service.backfill([
+			{
+				companyId: "company-1",
+				domain: "example.com",
+				website: "https://www.example.com",
+				previousDomain: "example.com",
+				mode: "correct",
+			},
+		]);
+
+		expect(result).toEqual({ updated: 0, skipped: 1 });
+	});
+
+	it("skips a fill with a previous domain", async () => {
+		const service = serviceWith([
+			{ id: "company-1", domain: null, website: "https://example.com" },
+		]);
+
+		const result = await service.backfill([
+			{
+				companyId: "company-1",
+				domain: "example.com",
+				website: "https://example.com",
+				previousDomain: "old-example.com",
+				mode: "fill",
 			},
 		]);
 
