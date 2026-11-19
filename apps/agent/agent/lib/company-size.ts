@@ -18,7 +18,8 @@ export type CompanySizeLookupResult =
 
 export type CompanySizeLookup = (company: {
 	name: string;
-	domain: string;
+	domain: string | null;
+	website: string | null;
 }) => Promise<CompanySizeLookupResult>;
 
 const companySizeAnswerSchema = {
@@ -44,13 +45,18 @@ const system =
 export async function lookupCompanySize({
 	name,
 	domain,
+	website,
 }: {
 	name: string;
-	domain: string;
+	domain: string | null;
+	website: string | null;
 }): Promise<CompanySizeLookupResult> {
+	const site = domain ? `https://${domain}` : website;
+	if (!site) return { ok: false, reason: "No website." };
+
 	try {
 		const result = await ask(
-			`How many employees does the company ${name} with the website ${domain} have? Prefer its LinkedIn company page, then its own website, then business directories. Make sure the source is about the company at ${domain}. Give the exact employee count if a source states one, and the size band if a source states one, for example "11-50".`,
+			`How many employees does the company ${name} have? Prefer its LinkedIn company page, then its own website at ${site}, then business directories. Make sure the source is about the company at ${site}. Give the exact employee count if a source states one, and the size band if a source states one, for example "11-50".`,
 			{
 				model: "sonar",
 				system,
@@ -113,7 +119,7 @@ export async function sweepCompanySize(
 			employeeCount: null,
 			employeeRange: null,
 			employeeCheckedAt: null,
-			domain: { not: null },
+			OR: [{ domain: { not: null } }, { website: { not: null } }],
 			enrichmentStatus: {
 				in: [
 					EnrichmentStatus.COMPLETE,
@@ -124,7 +130,7 @@ export async function sweepCompanySize(
 		},
 		orderBy: { createdAt: "desc" },
 		take: DISPATCH.companySize.batch,
-		select: { id: true, name: true, domain: true },
+		select: { id: true, name: true, domain: true, website: true },
 	});
 
 	const summary = {
@@ -140,7 +146,7 @@ export async function sweepCompanySize(
 		DISPATCH.companySize.concurrency,
 		candidates,
 		async (company) => {
-			if (!company.domain) return;
+			if (!company.domain && !company.website) return;
 
 			const checkedAt = new Date();
 			const claim = await db.company.updateMany({
@@ -151,7 +157,11 @@ export async function sweepCompanySize(
 
 			let result: CompanySizeLookupResult;
 			try {
-				result = await lookup({ name: company.name, domain: company.domain });
+				result = await lookup({
+					name: company.name,
+					domain: company.domain,
+					website: company.website,
+				});
 			} catch (error) {
 				result = {
 					ok: false,
