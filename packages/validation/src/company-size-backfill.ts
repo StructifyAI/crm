@@ -25,10 +25,13 @@ export const companySizeBackfillRow = z
 		message: "employeeCount or employeeRange is required",
 		path: ["employeeRange"],
 	})
-	.refine((row) => row.mode !== "correct" || row.previousSourceUrl != null, {
-		message: "previousSourceUrl is required for corrections",
-		path: ["previousSourceUrl"],
-	})
+	.refine(
+		(row) => row.mode !== "correct" || row.previousSourceUrl !== undefined,
+		{
+			message: "previousSourceUrl is required for corrections",
+			path: ["previousSourceUrl"],
+		},
+	)
 	.refine(
 		(row) =>
 			row.mode !== "correct" ||

@@ -50,6 +50,20 @@ describe("companySizeBackfillRow", () => {
 		expect(parsed.mode).toBe("correct");
 	});
 
+	it("accepts a correction with a null previous source", () => {
+		const parsed = companySizeBackfillRow.parse({
+			companyId: "company-1",
+			employeeRange: "2-10",
+			sourceUrl: "https://www.linkedin.com/company/acme",
+			mode: "correct",
+			previousSourceUrl: null,
+			previousEmployeeCount: 25,
+			previousEmployeeRange: "11 to 50",
+		});
+
+		expect(parsed.mode).toBe("correct");
+	});
+
 	it("requires the previous employee fields for corrections", () => {
 		const parsed = companySizeBackfillRow.safeParse({
 			companyId: "company-1",
