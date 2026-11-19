@@ -1,8 +1,10 @@
 import { EnrichmentStatus } from "@crm/db";
 import { DIRECT_KINDS } from "@crm/db/agent-tasks";
+import { companySizeBackfillRow } from "@crm/validation/company-size-backfill";
 import { fieldBackfillPayload } from "@crm/validation/field-backfill";
 import { APP_AUTH, type AppAuth } from "./app-auth";
 import { brandOutcome, runBrand } from "./brand";
+import { applyCompanySizeBackfill } from "./company-size";
 import { queueEventAgentRuns } from "./custom-agent-dispatch";
 import { settledWithin } from "./deadline";
 import { DISPATCH } from "./dispatch-config";
@@ -122,6 +124,17 @@ async function handleDirect(task: LeasedTask): Promise<void> {
 				? "Queued 1 matching agent run."
 				: `Queued ${queued} matching agent runs.`,
 		);
+		return;
+	}
+
+	if (task.kind === "linkedin-company-size" && task.companyId) {
+		const parsed = companySizeBackfillRow.safeParse(task.payload);
+		if (!parsed.success || parsed.data.companyId !== task.companyId) {
+			await completeTask(task.id, "The company size row was not readable.");
+			return;
+		}
+
+		await completeTask(task.id, await applyCompanySizeBackfill(parsed.data));
 		return;
 	}
 

@@ -8,6 +8,7 @@ export const TASK_KINDS = [
 	"company-profile",
 	"workspace-profile",
 	"field-backfill",
+	"linkedin-company-size",
 	"slack-people-match",
 	"slack-channel-join",
 	"agent-event",
@@ -23,6 +24,7 @@ export const DIRECT_KINDS = [
 	"slack-channel-join",
 	"agent-event",
 	"mcp-tool-discovery",
+	"linkedin-company-size",
 ] as const;
 
 export type DirectKind = (typeof DIRECT_KINDS)[number];
@@ -56,6 +58,7 @@ export const PRIORITY = {
 	identify: 100,
 	sweep: 50,
 	companyProfile: 40,
+	companySize: 30,
 	fieldBackfill: 20,
 	recheck: 0,
 	slackPeople: 150,

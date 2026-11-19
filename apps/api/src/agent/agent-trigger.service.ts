@@ -3,6 +3,7 @@ import { PRIORITY } from "@crm/db/agent-tasks";
 import { CRM_EVENT_CATALOG, type CrmEventType } from "@crm/db/crm-events";
 import { RECORD_ID_COLUMNS } from "@crm/db/fields";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
+import type { CompanySizeBackfillRow } from "@crm/validation/company-size-backfill";
 import { fieldBackfillPayload } from "@crm/validation/field-backfill";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -102,6 +103,46 @@ export class AgentTriggerService {
 		);
 
 		return brand || profile;
+	}
+
+	async companySizeBackfill(
+		rows: CompanySizeBackfillRow[],
+	): Promise<{ queued: number; alreadyQueued: number }> {
+		const byCompany = new Map(rows.map((row) => [row.companyId, row]));
+		const ids = [...byCompany.keys()];
+		if (ids.length === 0) return { queued: 0, alreadyQueued: 0 };
+
+		const outstanding = await this.db.agentTask.findMany({
+			where: {
+				kind: "linkedin-company-size",
+				finishedAt: null,
+				companyId: { in: ids },
+			},
+			select: { companyId: true },
+		});
+		const taken = new Set(outstanding.map((row) => row.companyId));
+		const fresh = ids.filter((id) => !taken.has(id));
+
+		if (fresh.length > 0) {
+			await this.db.agentTask.createMany({
+				data: fresh.map((id) => {
+					const row = byCompany.get(id);
+					if (!row) throw new Error(`Missing company size row ${id}.`);
+					return {
+						companyId: id,
+						kind: "linkedin-company-size",
+						reason: "LinkedIn company size",
+						priority: PRIORITY.companySize,
+						budget: 1,
+						dueAt: new Date(),
+						payload: row as Prisma.InputJsonValue,
+					};
+				}),
+			});
+			this.poke();
+		}
+
+		return { queued: fresh.length, alreadyQueued: ids.length - fresh.length };
 	}
 
 	async workspaceChanged(website: string, reason: string): Promise<void> {

@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AgentModule } from "../agent/agent.module";
 import { ContactEventsModule } from "../contact-events/contact-events.module";
 import { ExtrovertModule } from "../extrovert/extrovert.module";
 import { GoogleModule } from "../google/google.module";
@@ -13,6 +14,7 @@ import { SyncController } from "./sync.controller";
 
 @Module({
 	imports: [
+		AgentModule,
 		MailboxModule,
 		ContactEventsModule,
 		GoogleModule,

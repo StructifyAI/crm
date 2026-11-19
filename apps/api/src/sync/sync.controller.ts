@@ -1,5 +1,7 @@
+import { companySizeBackfillRequest } from "@crm/validation/company-size-backfill";
 import {
 	BadRequestException,
+	Body,
 	Controller,
 	ForbiddenException,
 	Get,
@@ -21,6 +23,7 @@ import {
 	ApiTags,
 } from "@nestjs/swagger";
 import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+import { AgentTriggerService } from "../agent/agent-trigger.service";
 import type { EnvironmentVariables } from "../config/env.validation";
 import { ContactClockService } from "../contact-events/contact-clock.service";
 import { ContactEventsSyncService } from "../contact-events/contact-events-sync.service";
@@ -66,6 +69,7 @@ export class SyncController {
 		private readonly contactEvents: ContactEventsSyncService,
 		private readonly contactClocks: ContactClockService,
 		private readonly activityStamps: ActivityStampService,
+		private readonly agentTrigger: AgentTriggerService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -442,6 +446,21 @@ export class SyncController {
 		@Query("cursor") cursor?: string,
 	) {
 		return this.runContactClocks(authorization, cursor);
+	}
+
+	@Post("company-size-backfill")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async companySizeBackfillViaPost(
+		@Headers("authorization") authorization?: string,
+		@Body() body?: unknown,
+	) {
+		this.assertSecret(authorization);
+		const parsed = companySizeBackfillRequest.safeParse(body);
+		if (!parsed.success) {
+			throw new BadRequestException("company size rows were not readable.");
+		}
+		return this.agentTrigger.companySizeBackfill(parsed.data.rows);
 	}
 
 	private async run(authorization?: string) {

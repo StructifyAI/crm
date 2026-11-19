@@ -110,6 +110,7 @@ function controller(secret: string | undefined): SyncController {
 		contactEvents,
 		unused,
 		activityStamps,
+		unused,
 		config,
 	);
 }

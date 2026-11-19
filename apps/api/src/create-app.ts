@@ -1,7 +1,10 @@
+import { timingSafeEqual } from "node:crypto";
+import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
 import { API_KEY_HEADER } from "@crm/auth/api-keys";
 import { SESSION_COOKIE_NAME } from "@crm/auth/cookies";
 import { apiUrl } from "@crm/auth/env";
 import { ValidationPipe } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import {
 	ExpressAdapter,
@@ -16,6 +19,7 @@ import {
 	generateOpenApiDocument,
 } from "trpc-to-openapi";
 import { AppModule } from "./app.module";
+import type { EnvironmentVariables } from "./config/env.validation";
 import { EXTROVERT } from "./extrovert/extrovert-config";
 import { INSTANTLY } from "./instantly/instantly-config";
 import { ContextLogger } from "./logging/context-logger";
@@ -26,6 +30,7 @@ const WEBHOOK_MAX_BODY_BYTES = Math.max(
 	EXTROVERT.webhook.maxBodyBytes,
 	INSTANTLY.webhook.maxBodyBytes,
 );
+const COMPANY_SIZE_BACKFILL_MAX_BODY_BYTES = 1024 * 1024;
 
 export async function createApp(): Promise<NestExpressApplication> {
 	const app = await NestFactory.create<NestExpressApplication>(
@@ -34,8 +39,18 @@ export async function createApp(): Promise<NestExpressApplication> {
 		{ bodyParser: false, logger: new ContextLogger() },
 	);
 
+	const config = app.get(ConfigService) as ConfigService<
+		EnvironmentVariables,
+		true
+	>;
+	const cronSecret = config.get("CRON_SECRET", { infer: true });
+
 	app.use(helmet());
 	app.use(["/api/extrovert/events", "/api/instantly/events"], readWebhookBody);
+	app.use(
+		"/internal/sync/company-size-backfill",
+		readCompanySizeBackfillBody(cronSecret),
+	);
 	app.useGlobalPipes(
 		new ValidationPipe({
 			whitelist: true,
@@ -148,4 +163,73 @@ function readWebhookBody(
 		next();
 	});
 	request.on("error", next);
+}
+
+function readCompanySizeBackfillBody(secret: string | undefined) {
+	return function companySizeBackfillBody(
+		request: Request & { body?: unknown },
+		response: Response,
+		next: NextFunction,
+	): void {
+		const contentType = request.headers["content-type"] ?? "";
+		if (
+			request.method !== "POST" ||
+			!/^application\/json(?:\s*;|$)/i.test(contentType)
+		) {
+			next();
+			return;
+		}
+		const expected = secret ? Buffer.from(`Bearer ${secret}`) : Buffer.alloc(0);
+		const authorization = Buffer.from(request.headers.authorization ?? "");
+		if (
+			!secret ||
+			authorization.length !== expected.length ||
+			!timingSafeEqual(authorization, expected)
+		) {
+			next();
+			return;
+		}
+		const chunks: Buffer[] = [];
+		let size = 0;
+		request.on("data", (chunk: Buffer) => {
+			size += chunk.length;
+			if (size <= COMPANY_SIZE_BACKFILL_MAX_BODY_BYTES) chunks.push(chunk);
+		});
+		request.on("end", () => {
+			if (size > COMPANY_SIZE_BACKFILL_MAX_BODY_BYTES) {
+				response.status(413).json({
+					message: "Company size backfill body is too large.",
+				});
+				return;
+			}
+			let body = Buffer.concat(chunks);
+			const encoding = request.headers["content-encoding"]
+				?.trim()
+				.toLowerCase();
+			try {
+				if (encoding === "gzip") body = gunzipSync(body);
+				else if (encoding === "deflate") body = inflateSync(body);
+				else if (encoding === "br") body = brotliDecompressSync(body);
+				else if (encoding && encoding !== "identity") {
+					response.status(415).json({
+						message: "Company size backfill content encoding is not supported.",
+					});
+					return;
+				}
+				if (body.length > COMPANY_SIZE_BACKFILL_MAX_BODY_BYTES) {
+					response.status(413).json({
+						message: "Company size backfill body is too large.",
+					});
+					return;
+				}
+				request.body = JSON.parse(body.toString("utf8"));
+				next();
+			} catch {
+				response.status(400).json({
+					message: "Company size backfill body is not valid JSON.",
+				});
+			}
+		});
+		request.on("error", next);
+	};
 }
