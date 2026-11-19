@@ -177,7 +177,10 @@ export async function applyCompanySizeBackfill(
 			const result = await tx.company.updateMany({
 				where: {
 					id: input.companyId,
-					employeeSourceUrl: input.previousSourceUrl ?? undefined,
+					employeeSourceUrl:
+						input.previousSourceUrl === undefined
+							? undefined
+							: input.previousSourceUrl,
 					employeeCount:
 						input.previousEmployeeCount === undefined
 							? undefined
