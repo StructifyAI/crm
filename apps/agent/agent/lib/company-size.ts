@@ -40,7 +40,7 @@ const parsedCompanySizeSchema = z.object({
 });
 
 const system =
-	"You find how many people a company employs. Use only a page for that exact company from its website or LinkedIn company page that states the employee count or size band. Answer only from sources you found. Use null for anything no source states. Never guess.";
+	"You find how many people a company employs. Use only a page for that exact company from its website or LinkedIn company page that states the employee count or size band. Copy the size band exactly as the source states it. Do not use press releases, blog posts, or dated articles. Answer only from sources you found. Use null for anything no source states. Never guess.";
 
 function websiteOrigin(website: string | null): string | null {
 	if (!website) return null;
@@ -81,7 +81,7 @@ export async function lookupCompanySize({
 
 	try {
 		const result = await ask(
-			`How many employees does the company ${name} have? Use only the company's own website at ${site} (about, team, careers, or contact page) or its LinkedIn company page. Do not use business directories, PDFs, news articles, review sites, personal LinkedIn profiles, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, for example "11-50". If neither page states a count or band, return null for both.`,
+			`How many employees does the company ${name} have? Use only the company's own website at ${site} (about, team, careers, or contact page) or its LinkedIn company page. For a LinkedIn company page, copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If neither page states a count or band, return null for both.`,
 			{
 				model: "sonar",
 				system,
