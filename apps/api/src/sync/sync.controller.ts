@@ -1,4 +1,11 @@
-import { companySizeBackfillRequest } from "@crm/validation/company-size-backfill";
+import {
+	type CompanyDomainBackfillRequest,
+	companyDomainBackfillRequest,
+} from "@crm/validation/company-domain-backfill";
+import {
+	type CompanySizeBackfillRequest,
+	companySizeBackfillRequest,
+} from "@crm/validation/company-size-backfill";
 import {
 	BadRequestException,
 	Body,
@@ -38,6 +45,7 @@ import { CorrespondenceBackfillService } from "../mailbox/correspondence-backfil
 import { DealLinkService } from "../mailbox/deal-link.service";
 import { UnipileDmSyncService } from "../unipile/unipile-dm-sync.service";
 import { ActivityDirectionBackfillService } from "./activity-direction-backfill.service";
+import { CompanyDomainBackfillService } from "./company-domain-backfill.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
 import { backfillCursor } from "./sync.contracts";
 
@@ -70,6 +78,7 @@ export class SyncController {
 		private readonly contactClocks: ContactClockService,
 		private readonly activityStamps: ActivityStampService,
 		private readonly agentTrigger: AgentTriggerService,
+		private readonly companyDomains: CompanyDomainBackfillService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -453,7 +462,7 @@ export class SyncController {
 	@ApiExcludeEndpoint()
 	async companySizeBackfillViaPost(
 		@Headers("authorization") authorization?: string,
-		@Body() body?: unknown,
+		@Body() body?: CompanySizeBackfillRequest,
 	) {
 		this.assertSecret(authorization);
 		const parsed = companySizeBackfillRequest.safeParse(body);
@@ -461,6 +470,21 @@ export class SyncController {
 			throw new BadRequestException("company size rows were not readable.");
 		}
 		return this.agentTrigger.companySizeBackfill(parsed.data.rows);
+	}
+
+	@Post("company-domain-backfill")
+	@AllowAnonymous()
+	@ApiExcludeEndpoint()
+	async companyDomainBackfillViaPost(
+		@Headers("authorization") authorization?: string,
+		@Body() body?: CompanyDomainBackfillRequest,
+	) {
+		this.assertSecret(authorization);
+		const parsed = companyDomainBackfillRequest.safeParse(body);
+		if (!parsed.success) {
+			throw new BadRequestException("company domain rows were not readable.");
+		}
+		return this.companyDomains.backfill(parsed.data.rows);
 	}
 
 	private async run(authorization?: string) {

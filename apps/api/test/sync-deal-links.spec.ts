@@ -23,6 +23,7 @@ import type {
 	DealLinkService,
 } from "../src/mailbox/deal-link.service";
 import type { ActivityDirectionBackfillService } from "../src/sync/activity-direction-backfill.service";
+import type { CompanyDomainBackfillService } from "../src/sync/company-domain-backfill.service";
 import type { MailboxSyncService } from "../src/sync/mailbox-sync.service";
 import { SyncController } from "../src/sync/sync.controller";
 import type { UnipileDmSyncService } from "../src/unipile/unipile-dm-sync.service";
@@ -86,6 +87,7 @@ const unused = {} as unknown as MailboxSyncService &
 	ExtrovertEngagementSyncService &
 	UnipileDmSyncService &
 	ActivityDirectionBackfillService &
+	CompanyDomainBackfillService &
 	ContactEventsSyncService &
 	ContactClockService &
 	LinkedinAdsReportingService;
@@ -110,6 +112,7 @@ function controller(secret: string | undefined): SyncController {
 		contactEvents,
 		unused,
 		activityStamps,
+		unused,
 		unused,
 		config,
 	);
