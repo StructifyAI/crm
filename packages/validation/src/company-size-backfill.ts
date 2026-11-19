@@ -28,7 +28,17 @@ export const companySizeBackfillRow = z
 	.refine((row) => row.mode !== "correct" || row.previousSourceUrl != null, {
 		message: "previousSourceUrl is required for corrections",
 		path: ["previousSourceUrl"],
-	});
+	})
+	.refine(
+		(row) =>
+			row.mode !== "correct" ||
+			(row.previousEmployeeCount !== undefined &&
+				row.previousEmployeeRange !== undefined),
+		{
+			message: "previous employee fields are required for corrections",
+			path: ["previousEmployeeRange"],
+		},
+	);
 
 export const companySizeBackfillRequest = z.object({
 	rows: z.array(companySizeBackfillRow).min(1).max(500),

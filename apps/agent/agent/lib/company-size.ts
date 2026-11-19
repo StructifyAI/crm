@@ -1,4 +1,4 @@
-import { db, EmployeeSource, EnrichmentStatus, type Prisma } from "@crm/db";
+import { db, EmployeeSource, EnrichmentStatus } from "@crm/db";
 import { parseEmployeeRange, recomputeCompanyIcp } from "@crm/db/company-icp";
 import { normalizeEmployeeRange } from "@crm/validation/company-size";
 import type { CompanySizeBackfillRow } from "@crm/validation/company-size-backfill";
@@ -173,29 +173,42 @@ export async function applyCompanySizeBackfill(
 	};
 
 	if (input.mode === "correct") {
-		const where: Prisma.CompanyWhereInput = {
-			id: input.companyId,
-			employeeSourceUrl: input.previousSourceUrl ?? undefined,
-		};
-		if (input.previousEmployeeCount != null) {
-			where.employeeCount = input.previousEmployeeCount;
-		}
-		if (input.previousEmployeeRange != null) {
-			where.employeeRange = input.previousEmployeeRange;
-		}
-
-		const updated = await db.company.updateMany({ where, data });
+		const updated = await db.$transaction(async (tx) => {
+			const result = await tx.company.updateMany({
+				where: {
+					id: input.companyId,
+					employeeSourceUrl: input.previousSourceUrl ?? undefined,
+					employeeCount:
+						input.previousEmployeeCount === undefined
+							? undefined
+							: input.previousEmployeeCount,
+					employeeRange:
+						input.previousEmployeeRange === undefined
+							? undefined
+							: input.previousEmployeeRange,
+				},
+				data,
+			});
+			if (result.count > 0) {
+				await recomputeCompanyIcp(tx, { id: input.companyId });
+			}
+			return result;
+		});
 		if (updated.count === 0) return "Company changed before correction.";
-		await recomputeCompanyIcp(db, { id: input.companyId });
 		return "Corrected company size.";
 	}
 
-	const updated = await db.company.updateMany({
-		where: { id: input.companyId, employeeCount: null, employeeRange: null },
-		data,
+	const updated = await db.$transaction(async (tx) => {
+		const result = await tx.company.updateMany({
+			where: { id: input.companyId, employeeCount: null, employeeRange: null },
+			data,
+		});
+		if (result.count > 0) {
+			await recomputeCompanyIcp(tx, { id: input.companyId });
+		}
+		return result;
 	});
 	if (updated.count === 0) return "Company already has employee size.";
-	await recomputeCompanyIcp(db, { id: input.companyId });
 	return "Filled company size.";
 }
 

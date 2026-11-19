@@ -36,8 +36,22 @@ describe("companySizeBackfillRow", () => {
 		expect(parsed.success).toBe(false);
 	});
 
-	it("accepts a correction with the previous source", () => {
+	it("accepts a correction with the previous size", () => {
 		const parsed = companySizeBackfillRow.parse({
+			companyId: "company-1",
+			employeeRange: "2-10",
+			sourceUrl: "https://www.linkedin.com/company/acme",
+			mode: "correct",
+			previousSourceUrl: "https://www.linkedin.com/company/bad",
+			previousEmployeeCount: null,
+			previousEmployeeRange: "1 to 10",
+		});
+
+		expect(parsed.mode).toBe("correct");
+	});
+
+	it("requires the previous employee fields for corrections", () => {
+		const parsed = companySizeBackfillRow.safeParse({
 			companyId: "company-1",
 			employeeRange: "2-10",
 			sourceUrl: "https://www.linkedin.com/company/acme",
@@ -46,7 +60,7 @@ describe("companySizeBackfillRow", () => {
 			previousEmployeeRange: "1 to 10",
 		});
 
-		expect(parsed.mode).toBe("correct");
+		expect(parsed.success).toBe(false);
 	});
 });
 
