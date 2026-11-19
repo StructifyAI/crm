@@ -22,8 +22,12 @@ export class CompanyDomainBackfillService {
 		});
 		const byId = new Map(companies.map((company) => [company.id, company]));
 
-		let updated = 0;
 		let skipped = 0;
+		const writes: {
+			id: string;
+			domain: string;
+			previousDomain: string | null;
+		}[] = [];
 
 		for (const id of ids) {
 			const row = byCompany.get(id);
@@ -53,9 +57,36 @@ export class CompanyDomainBackfillService {
 				continue;
 			}
 
+			writes.push({ id, domain, previousDomain });
+		}
+
+		if (writes.length === 0) return { updated: 0, skipped };
+
+		const domains = [...new Set(writes.map((write) => write.domain))];
+		const taken = await this.db.company.findMany({
+			where: { archivedAt: null, domain: { in: domains } },
+			select: { id: true, domain: true },
+		});
+		const ownerByDomain = new Map(
+			taken.flatMap((company) =>
+				company.domain ? [[company.domain, company.id] as const] : [],
+			),
+		);
+
+		let updated = 0;
+		const seenDomains = new Set<string>();
+
+		for (const write of writes) {
+			const owner = ownerByDomain.get(write.domain);
+			if ((owner && owner !== write.id) || seenDomains.has(write.domain)) {
+				skipped += 1;
+				continue;
+			}
+			seenDomains.add(write.domain);
+
 			const result = await this.db.company.updateMany({
-				where: { id, domain: previousDomain, archivedAt: null },
-				data: { domain },
+				where: { id: write.id, domain: write.previousDomain, archivedAt: null },
+				data: { domain: write.domain },
 			});
 
 			if (result.count === 1) updated += 1;
