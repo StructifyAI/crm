@@ -112,6 +112,18 @@ describe("sizeFromAnswer", () => {
 		).toBeNull();
 	});
 
+	it("rejects a PDF source URL", () => {
+		expect(
+			sizeFromAnswer(
+				answer({
+					employeeCount: 84,
+					employeeRange: null,
+					sourceUrl: "https://example.com/about.pdf",
+				}),
+			),
+		).toBeNull();
+	});
+
 	it("rejects an inconsistent count and band", () => {
 		expect(
 			sizeFromAnswer(
