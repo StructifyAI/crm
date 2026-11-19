@@ -1,6 +1,7 @@
-import { db, EnrichmentStatus } from "@crm/db";
+import { db, EmployeeSource, EnrichmentStatus, type Prisma } from "@crm/db";
 import { parseEmployeeRange, recomputeCompanyIcp } from "@crm/db/company-icp";
 import { normalizeEmployeeRange } from "@crm/validation/company-size";
+import type { CompanySizeBackfillRow } from "@crm/validation/company-size-backfill";
 import { z } from "zod";
 import { DISPATCH } from "./dispatch-config";
 import { type Answer, ask, perplexityEnabled } from "./perplexity";
@@ -140,6 +141,62 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 	}
 
 	return { employeeCount, employeeRange, sourceUrl };
+}
+
+export async function applyCompanySizeBackfill(
+	input: CompanySizeBackfillRow,
+): Promise<string> {
+	const employeeRange = normalizeEmployeeRange(input.employeeRange);
+	const employeeCount = input.employeeCount ?? null;
+	if (employeeCount === null && employeeRange === null) {
+		return "No usable employee size.";
+	}
+
+	if (employeeCount !== null && employeeRange !== null) {
+		const range = parseEmployeeRange(employeeRange);
+		if (range && (employeeCount < range.lo || employeeCount > range.hi)) {
+			return "Employee count and range disagree.";
+		}
+	}
+
+	const sourceUrl = httpUrl(input.sourceUrl);
+	if (!sourceUrl || !linkedinCompanyUrl(sourceUrl)) {
+		return "Source is not a LinkedIn company page.";
+	}
+
+	const data = {
+		employeeCount,
+		employeeRange,
+		employeeSource: EmployeeSource.WEB_SEARCH,
+		employeeSourceUrl: sourceUrl,
+		employeeCheckedAt: new Date(),
+	};
+
+	if (input.mode === "correct") {
+		const where: Prisma.CompanyWhereInput = {
+			id: input.companyId,
+			employeeSourceUrl: input.previousSourceUrl ?? undefined,
+		};
+		if (input.previousEmployeeCount != null) {
+			where.employeeCount = input.previousEmployeeCount;
+		}
+		if (input.previousEmployeeRange != null) {
+			where.employeeRange = input.previousEmployeeRange;
+		}
+
+		const updated = await db.company.updateMany({ where, data });
+		if (updated.count === 0) return "Company changed before correction.";
+		await recomputeCompanyIcp(db, { id: input.companyId });
+		return "Corrected company size.";
+	}
+
+	const updated = await db.company.updateMany({
+		where: { id: input.companyId, employeeCount: null, employeeRange: null },
+		data,
+	});
+	if (updated.count === 0) return "Company already has employee size.";
+	await recomputeCompanyIcp(db, { id: input.companyId });
+	return "Filled company size.";
 }
 
 export async function sweepCompanySize(

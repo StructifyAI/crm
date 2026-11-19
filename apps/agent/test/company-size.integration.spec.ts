@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { db, EmployeeSource, EnrichmentStatus } from "@crm/db";
 import {
+	applyCompanySizeBackfill,
 	type CompanySizeLookupResult,
 	sizeFromAnswer,
 	sweepCompanySize,
@@ -138,6 +139,98 @@ describe("sizeFromAnswer", () => {
 			employeeRange: null,
 			sourceUrl: "https://www.linkedin.com/company/acme",
 		});
+	});
+});
+
+describe("applyCompanySizeBackfill", () => {
+	it("fills a blank company from a LinkedIn band", async () => {
+		const company = await createCompany({ naics: true, countryCode: "US" });
+
+		const outcome = await applyCompanySizeBackfill({
+			companyId: company.id,
+			employeeRange: "2-10",
+			sourceUrl: "https://www.linkedin.com/company/acme",
+			mode: "fill",
+		});
+		const saved = await db.company.findUnique({
+			where: { id: company.id },
+			select: {
+				employeeCount: true,
+				employeeRange: true,
+				employeeSource: true,
+				employeeSourceUrl: true,
+				icp: true,
+			},
+		});
+
+		expect(outcome).toBe("Filled company size.");
+		expect(saved).toEqual({
+			employeeCount: null,
+			employeeRange: "2 to 10",
+			employeeSource: EmployeeSource.WEB_SEARCH,
+			employeeSourceUrl: "https://www.linkedin.com/company/acme",
+			icp: "Not ICP",
+		});
+	});
+
+	it("corrects a bad fill only while the previous source matches", async () => {
+		const company = await createCompany();
+		await db.company.update({
+			where: { id: company.id },
+			data: {
+				employeeCount: 1,
+				employeeRange: "1 to 10",
+				employeeSource: EmployeeSource.WEB_SEARCH,
+				employeeSourceUrl: "https://www.linkedin.com/company/bad",
+			},
+		});
+		const row = {
+			companyId: company.id,
+			employeeRange: "2-10",
+			sourceUrl: "https://www.linkedin.com/company/good",
+			mode: "correct" as const,
+			previousSourceUrl: "https://www.linkedin.com/company/bad",
+			previousEmployeeCount: 1,
+			previousEmployeeRange: "1 to 10",
+		};
+
+		const outcome = await applyCompanySizeBackfill(row);
+		const saved = await db.company.findUnique({
+			where: { id: company.id },
+			select: {
+				employeeCount: true,
+				employeeRange: true,
+				employeeSourceUrl: true,
+			},
+		});
+
+		expect(outcome).toBe("Corrected company size.");
+		expect(saved).toEqual({
+			employeeCount: null,
+			employeeRange: "2 to 10",
+			employeeSourceUrl: "https://www.linkedin.com/company/good",
+		});
+
+		const again = await applyCompanySizeBackfill(row);
+		expect(again).toBe("Company changed before correction.");
+	});
+
+	it("rejects a source that is not a LinkedIn company page", async () => {
+		const company = await createCompany();
+
+		const outcome = await applyCompanySizeBackfill({
+			companyId: company.id,
+			employeeRange: "2-10",
+			sourceUrl: "https://example.com/about",
+			mode: "fill",
+		});
+		const saved = await db.company.findUnique({
+			where: { id: company.id },
+			select: { employeeRange: true, employeeSourceUrl: true },
+		});
+
+		expect(outcome).toBe("Source is not a LinkedIn company page.");
+		expect(saved).toEqual({ employeeRange: null, employeeSourceUrl: null });
 	});
 });
 
