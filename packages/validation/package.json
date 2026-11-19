@@ -13,6 +13,7 @@
 		"./calendar-sync-resume": "./src/calendar-sync-resume.ts",
 		"./company-size": "./src/company-size.ts",
 		"./company-size-backfill": "./src/company-size-backfill.ts",
+		"./company-domain-backfill": "./src/company-domain-backfill.ts",
 		"./contact-events": "./src/contact-events.ts",
 		"./deal-link": "./src/deal-link.ts",
 		"./headline-judge": "./src/headline-judge.ts",

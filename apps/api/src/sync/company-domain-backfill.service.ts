@@ -1,0 +1,67 @@
+import { type Db } from "@crm/db";
+import type { CompanyDomainBackfillRow } from "@crm/validation/company-domain-backfill";
+import { Injectable } from "@nestjs/common";
+import { normalizeDomain } from "../companies/domain";
+import { InjectDatabase } from "../database/database.constants";
+
+@Injectable()
+export class CompanyDomainBackfillService {
+	constructor(@InjectDatabase() private readonly db: Db) {}
+
+	async backfill(rows: CompanyDomainBackfillRow[]): Promise<{
+		updated: number;
+		skipped: number;
+	}> {
+		const byCompany = new Map(rows.map((row) => [row.companyId, row]));
+		const ids = [...byCompany.keys()];
+		if (ids.length === 0) return { updated: 0, skipped: 0 };
+
+		const companies = await this.db.company.findMany({
+			where: { id: { in: ids }, archivedAt: null },
+			select: { id: true, domain: true, website: true },
+		});
+		const byId = new Map(companies.map((company) => [company.id, company]));
+
+		let updated = 0;
+		let skipped = 0;
+
+		for (const id of ids) {
+			const row = byCompany.get(id);
+			const company = byId.get(id);
+			if (!row || !company) {
+				skipped += 1;
+				continue;
+			}
+
+			const domain = normalizeDomain(row.domain);
+			const previousDomain =
+				row.previousDomain === null
+					? null
+					: normalizeDomain(row.previousDomain);
+			const websiteDomain = normalizeDomain(row.website);
+			const currentWebsiteDomain = normalizeDomain(company.website);
+
+			if (
+				!domain ||
+				(row.previousDomain !== null && previousDomain === null) ||
+				company.domain !== previousDomain ||
+				websiteDomain !== domain ||
+				!company.website ||
+				currentWebsiteDomain !== domain
+			) {
+				skipped += 1;
+				continue;
+			}
+
+			const result = await this.db.company.updateMany({
+				where: { id, domain: previousDomain, archivedAt: null },
+				data: { domain },
+			});
+
+			if (result.count === 1) updated += 1;
+			else skipped += 1;
+		}
+
+		return { updated, skipped };
+	}
+}
