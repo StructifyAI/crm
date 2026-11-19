@@ -40,7 +40,13 @@ const instantly = new InstantlyFilingService(
 	noContactEvents,
 	{} as DealsService,
 );
-const extrovert = new ExtrovertFilingService(db, agent, stamp, companies);
+const extrovert = new ExtrovertFilingService(
+	db,
+	agent,
+	stamp,
+	{} as DealsService,
+	companies,
+);
 const fields = {
 	queueBackfillForNewRecord: async () => undefined,
 } as unknown as FieldsService;
