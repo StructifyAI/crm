@@ -4,7 +4,7 @@ import type { Answer } from "../agent/lib/perplexity";
 
 function answer(
 	data: CompanySize,
-	citations: string[] = ["https://example.com/about"],
+	citations: string[] = data.sourceUrl ? [data.sourceUrl] : [],
 ): Answer {
 	return {
 		text: JSON.stringify(data),
@@ -155,5 +155,39 @@ describe("sizeFromAnswer", () => {
 				}),
 			),
 		).toBeNull();
+	});
+
+	it("rejects a source URL missing from the citations", () => {
+		expect(
+			sizeFromAnswer(
+				answer(
+					{
+						employeeCount: 84,
+						employeeRange: null,
+						sourceUrl: "https://example.com/about",
+					},
+					["https://example.com/other"],
+				),
+			),
+		).toBeNull();
+	});
+
+	it("accepts a citation with a different LinkedIn host and query", () => {
+		expect(
+			sizeFromAnswer(
+				answer(
+					{
+						employeeCount: null,
+						employeeRange: "51-200",
+						sourceUrl: "https://www.linkedin.com/company/example/",
+					},
+					["https://fr.linkedin.com/company/example?utm_source=share"],
+				),
+			),
+		).toEqual({
+			employeeCount: null,
+			employeeRange: "51 to 200",
+			sourceUrl: "https://www.linkedin.com/company/example/",
+		});
 	});
 });

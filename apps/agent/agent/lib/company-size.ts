@@ -119,9 +119,6 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 	const result = parsedCompanySizeSchema.safeParse(parsed);
 	if (!result.success) return null;
 
-	const citationUrl = answer.citations.find((value) => httpUrl(value) !== null);
-	if (!citationUrl) return null;
-
 	const employeeCount =
 		result.data.employeeCount !== null &&
 		Number.isInteger(result.data.employeeCount) &&
@@ -134,6 +131,9 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 
 	const sourceUrl = httpUrl(result.data.sourceUrl);
 	if (!sourceUrl || personalLinkedInUrl(sourceUrl) || pdfUrl(sourceUrl)) {
+		return null;
+	}
+	if (!sourceUrlInCitations(sourceUrl, answer.citations)) {
 		return null;
 	}
 
@@ -308,6 +308,32 @@ function companySizeSourceAllowed(sourceUrl: string, sites: string[]): boolean {
 	} catch {
 		return false;
 	}
+}
+
+function normalizedCitationUrl(value: string): string | null {
+	const url = httpUrl(value);
+	if (!url) return null;
+
+	try {
+		const parsed = new URL(url);
+		const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+		const canonicalHost =
+			host === "linkedin.com" || host.endsWith(".linkedin.com")
+				? "linkedin.com"
+				: host;
+		const path = parsed.pathname.replace(/\/+$/, "").toLowerCase() || "/";
+		return `${canonicalHost}${path}`;
+	} catch {
+		return null;
+	}
+}
+
+function sourceUrlInCitations(sourceUrl: string, citations: string[]): boolean {
+	const source = normalizedCitationUrl(sourceUrl);
+	if (!source) return false;
+	return citations.some(
+		(citation) => normalizedCitationUrl(citation) === source,
+	);
 }
 
 function httpUrl(value: string | null): string | null {
