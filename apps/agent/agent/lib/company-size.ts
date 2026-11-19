@@ -276,11 +276,7 @@ function companySizeSourceAllowed(sourceUrl: string, site: string): boolean {
 		) {
 			return true;
 		}
-		return (
-			sourceHost === siteHost ||
-			sourceHost.endsWith(`.${siteHost}`) ||
-			siteHost.endsWith(`.${sourceHost}`)
-		);
+		return sourceHost === siteHost || sourceHost.endsWith(`.${siteHost}`);
 	} catch {
 		return false;
 	}
