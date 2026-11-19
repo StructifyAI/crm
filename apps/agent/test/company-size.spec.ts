@@ -2,10 +2,13 @@ import { describe, expect, it } from "bun:test";
 import { type CompanySize, sizeFromAnswer } from "../agent/lib/company-size";
 import type { Answer } from "../agent/lib/perplexity";
 
-function answer(data: CompanySize): Answer {
+function answer(
+	data: CompanySize,
+	citations: string[] = ["https://example.com/about"],
+): Answer {
 	return {
 		text: JSON.stringify(data),
-		citations: [],
+		citations,
 	};
 }
 
@@ -78,6 +81,21 @@ describe("sizeFromAnswer", () => {
 					employeeRange: null,
 					sourceUrl: null,
 				}),
+			),
+		).toBeNull();
+	});
+
+	it("requires a citation", () => {
+		expect(
+			sizeFromAnswer(
+				answer(
+					{
+						employeeCount: 84,
+						employeeRange: null,
+						sourceUrl: "https://example.com/about",
+					},
+					[],
+				),
 			),
 		).toBeNull();
 	});

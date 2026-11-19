@@ -101,6 +101,9 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 	const result = parsedCompanySizeSchema.safeParse(parsed);
 	if (!result.success) return null;
 
+	const citationUrl = answer.citations.find((value) => httpUrl(value) !== null);
+	if (!citationUrl) return null;
+
 	const employeeCount =
 		result.data.employeeCount !== null &&
 		Number.isInteger(result.data.employeeCount) &&
