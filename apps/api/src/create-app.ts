@@ -26,6 +26,7 @@ const WEBHOOK_MAX_BODY_BYTES = Math.max(
 	EXTROVERT.webhook.maxBodyBytes,
 	INSTANTLY.webhook.maxBodyBytes,
 );
+const COMPANY_SIZE_BACKFILL_MAX_BODY_BYTES = 1024 * 1024;
 
 export async function createApp(): Promise<NestExpressApplication> {
 	const app = await NestFactory.create<NestExpressApplication>(
@@ -36,6 +37,7 @@ export async function createApp(): Promise<NestExpressApplication> {
 
 	app.use(helmet());
 	app.use(["/api/extrovert/events", "/api/instantly/events"], readWebhookBody);
+	app.use("/internal/sync/company-size-backfill", readCompanySizeBackfillBody);
 	app.useGlobalPipes(
 		new ValidationPipe({
 			whitelist: true,
@@ -146,6 +148,43 @@ function readWebhookBody(
 	request.on("end", () => {
 		request.rawBody = Buffer.concat(chunks);
 		next();
+	});
+	request.on("error", next);
+}
+
+function readCompanySizeBackfillBody(
+	request: Request & { body?: unknown },
+	response: Response,
+	next: NextFunction,
+): void {
+	if (
+		request.method !== "POST" ||
+		!request.headers["content-type"]?.startsWith("application/json")
+	) {
+		next();
+		return;
+	}
+	const chunks: Buffer[] = [];
+	let size = 0;
+	request.on("data", (chunk: Buffer) => {
+		size += chunk.length;
+		if (size <= COMPANY_SIZE_BACKFILL_MAX_BODY_BYTES) chunks.push(chunk);
+	});
+	request.on("end", () => {
+		if (size > COMPANY_SIZE_BACKFILL_MAX_BODY_BYTES) {
+			response.status(413).json({
+				message: "Company size backfill body is too large.",
+			});
+			return;
+		}
+		try {
+			request.body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+			next();
+		} catch {
+			response.status(400).json({
+				message: "Company size backfill body is not valid JSON.",
+			});
+		}
 	});
 	request.on("error", next);
 }
