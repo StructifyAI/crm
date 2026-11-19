@@ -316,13 +316,13 @@ function normalizedCitationUrl(value: string): string | null {
 
 	try {
 		const parsed = new URL(url);
-		const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-		const canonicalHost =
-			host === "linkedin.com" || host.endsWith(".linkedin.com")
-				? "linkedin.com"
-				: host;
-		const path = parsed.pathname.replace(/\/+$/, "").toLowerCase() || "/";
-		return `${canonicalHost}${path}`;
+		const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+		const port = parsed.port ? `:${parsed.port}` : "";
+		const isLinkedIn =
+			hostname === "linkedin.com" || hostname.endsWith(".linkedin.com");
+		const host = isLinkedIn ? "linkedin.com" : `${hostname}${port}`;
+		const path = parsed.pathname.replace(/\/+$/, "") || "/";
+		return `${host}${path}${parsed.search}`;
 	} catch {
 		return null;
 	}

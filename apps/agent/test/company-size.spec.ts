@@ -172,7 +172,7 @@ describe("sizeFromAnswer", () => {
 		).toBeNull();
 	});
 
-	it("accepts a citation with a different LinkedIn host and query", () => {
+	it("accepts a citation with a different LinkedIn host", () => {
 		expect(
 			sizeFromAnswer(
 				answer(
@@ -181,7 +181,7 @@ describe("sizeFromAnswer", () => {
 						employeeRange: "51-200",
 						sourceUrl: "https://www.linkedin.com/company/example/",
 					},
-					["https://fr.linkedin.com/company/example?utm_source=share"],
+					["https://fr.linkedin.com/company/example"],
 				),
 			),
 		).toEqual({
@@ -189,5 +189,20 @@ describe("sizeFromAnswer", () => {
 			employeeRange: "51 to 200",
 			sourceUrl: "https://www.linkedin.com/company/example/",
 		});
+	});
+
+	it("rejects when only the query differs", () => {
+		expect(
+			sizeFromAnswer(
+				answer(
+					{
+						employeeCount: 84,
+						employeeRange: null,
+						sourceUrl: "https://example.com/team?lang=en",
+					},
+					["https://example.com/team?lang=fr"],
+				),
+			),
+		).toBeNull();
 	});
 });
