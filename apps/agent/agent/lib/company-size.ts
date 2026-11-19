@@ -1,5 +1,5 @@
 import { db, EnrichmentStatus } from "@crm/db";
-import { recomputeCompanyIcp } from "@crm/db/company-icp";
+import { parseEmployeeRange, recomputeCompanyIcp } from "@crm/db/company-icp";
 import { normalizeEmployeeRange } from "@crm/validation/company-size";
 import { z } from "zod";
 import { DISPATCH } from "./dispatch-config";
@@ -40,7 +40,7 @@ const parsedCompanySizeSchema = z.object({
 });
 
 const system =
-	"You find how many people a company employs. Answer only from sources you found. Use null for anything no source states. Never guess.";
+	"You find how many people a company employs. Use only a page for that exact company that states the employee count or size band. Answer only from sources you found. Use null for anything no source states. Never guess.";
 
 function websiteOrigin(website: string | null): string | null {
 	if (!website) return null;
@@ -72,7 +72,7 @@ export async function lookupCompanySize({
 
 	try {
 		const result = await ask(
-			`How many employees does the company ${name} have? Prefer its LinkedIn company page, then its own website at ${site}, then business directories. Make sure the source is about the company at ${site}. Give the exact employee count if a source states one, and the size band if a source states one, for example "11-50".`,
+			`How many employees does the company ${name} have? Use only a page for this exact company: its own website at ${site} (about, team, careers, or contact page), its LinkedIn company page, or a business directory profile for the same company. Do not use personal LinkedIn profiles, news articles, review sites, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, for example "11-50". If no such page states a count or band, return null for both.`,
 			{
 				model: "sonar",
 				system,
@@ -91,9 +91,6 @@ export async function lookupCompanySize({
 }
 
 export function sizeFromAnswer(answer: Answer): CompanySize | null {
-	const citationUrl = answer.citations.find((value) => httpUrl(value) !== null);
-	if (!citationUrl) return null;
-
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(answer.text);
@@ -112,14 +109,19 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 			? result.data.employeeCount
 			: null;
 	const employeeRange = normalizeEmployeeRange(result.data.employeeRange);
-
 	if (employeeCount === null && employeeRange === null) return null;
 
-	return {
-		employeeCount,
-		employeeRange,
-		sourceUrl: httpUrl(result.data.sourceUrl) ?? httpUrl(citationUrl),
-	};
+	const sourceUrl = httpUrl(result.data.sourceUrl);
+	if (!sourceUrl || personalLinkedInUrl(sourceUrl)) return null;
+
+	if (employeeCount !== null && employeeRange !== null) {
+		const range = parseEmployeeRange(employeeRange);
+		if (range && (employeeCount < range.lo || employeeCount > range.hi)) {
+			return null;
+		}
+	}
+
+	return { employeeCount, employeeRange, sourceUrl };
 }
 
 export async function sweepCompanySize(
@@ -231,6 +233,18 @@ export async function sweepCompanySize(
 		`[company-size] scanned=${summary.scanned} filled=${summary.filled} empty=${summary.empty} failed=${summary.failed}${reasons ? ` reasons=${reasons}` : ""}`,
 	);
 	return summary;
+}
+
+function personalLinkedInUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return (
+			url.hostname.replace(/^www\./, "") === "linkedin.com" &&
+			url.pathname.startsWith("/in/")
+		);
+	} catch {
+		return false;
+	}
 }
 
 function httpUrl(value: string | null): string | null {
