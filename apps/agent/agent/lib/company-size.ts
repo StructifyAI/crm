@@ -42,6 +42,22 @@ const parsedCompanySizeSchema = z.object({
 const system =
 	"You find how many people a company employs. Answer only from sources you found. Use null for anything no source states. Never guess.";
 
+function websiteOrigin(website: string | null): string | null {
+	if (!website) return null;
+
+	const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(website)
+		? website
+		: `https://${website}`;
+
+	try {
+		const url = new URL(withProtocol);
+		if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+		return `${url.protocol}//${url.host}`;
+	} catch {
+		return null;
+	}
+}
+
 export async function lookupCompanySize({
 	name,
 	domain,
@@ -51,7 +67,7 @@ export async function lookupCompanySize({
 	domain: string | null;
 	website: string | null;
 }): Promise<CompanySizeLookupResult> {
-	const site = domain ? `https://${domain}` : website;
+	const site = domain ? `https://${domain}` : websiteOrigin(website);
 	if (!site) return { ok: false, reason: "No website." };
 
 	try {
