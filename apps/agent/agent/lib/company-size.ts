@@ -69,8 +69,7 @@ export async function lookupCompanySize({
 }): Promise<CompanySizeLookupResult> {
 	const websiteSite = websiteOrigin(website);
 	const domainSite = domain ? `https://${domain}` : null;
-	const site = domainSite ?? websiteSite;
-	if (!site) return { ok: true, size: null };
+	if (!domainSite) return { ok: true, size: null };
 	const sites = [
 		...new Set(
 			[domainSite, websiteSite].filter(
@@ -79,9 +78,7 @@ export async function lookupCompanySize({
 		),
 	];
 
-	const question = domainSite
-		? `How many employees does the company ${name} have? Use only the company's own website at ${site} (about, team, careers, or contact page) or its LinkedIn company page. For a LinkedIn company page, copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If neither page states a count or band, return null for both.`
-		: `How many employees does the company ${name} have? Use only its LinkedIn company page. Copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, company websites, or pages for a different entity. Set sourceUrl to the exact LinkedIn company page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If the LinkedIn company page states no count or band, return null for both.`;
+	const question = `How many employees does the company ${name} have? Use only the company's own website at ${domainSite} (about, team, careers, or contact page) or its LinkedIn company page. For a LinkedIn company page, copy the "Company size" band exactly. Do not use business directories, PDFs, news articles, press releases, blog posts, review sites, personal LinkedIn profiles, or pages for a different entity. Set sourceUrl to the exact page URL that states the employee count or size band. Give the exact employee count if that page states one, and the size band if it states one, copied exactly, for example "11-50". If neither page states a count or band, return null for both.`;
 
 	try {
 		const result = await ask(question, {
@@ -93,9 +90,7 @@ export async function lookupCompanySize({
 		if (!result.ok) return result;
 		const size = sizeFromAnswer(result.data);
 		if (!size?.sourceUrl) return { ok: true, size: null };
-		const sourceAllowed = domainSite
-			? companySizeSourceAllowed(size.sourceUrl, sites)
-			: linkedinCompanyUrl(size.sourceUrl);
+		const sourceAllowed = companySizeSourceAllowed(size.sourceUrl, sites);
 		return {
 			ok: true,
 			size: sourceAllowed ? size : null,
@@ -119,9 +114,6 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 	const result = parsedCompanySizeSchema.safeParse(parsed);
 	if (!result.success) return null;
 
-	const citationUrl = answer.citations.find((value) => httpUrl(value) !== null);
-	if (!citationUrl) return null;
-
 	const employeeCount =
 		result.data.employeeCount !== null &&
 		Number.isInteger(result.data.employeeCount) &&
@@ -134,6 +126,9 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 
 	const sourceUrl = httpUrl(result.data.sourceUrl);
 	if (!sourceUrl || personalLinkedInUrl(sourceUrl) || pdfUrl(sourceUrl)) {
+		return null;
+	}
+	if (!sourceUrlInCitations(sourceUrl, answer.citations)) {
 		return null;
 	}
 
@@ -160,7 +155,7 @@ export async function sweepCompanySize(
 			employeeCount: null,
 			employeeRange: null,
 			employeeCheckedAt: null,
-			OR: [{ domain: { not: null } }, { website: { not: null } }],
+			domain: { not: null },
 			enrichmentStatus: {
 				in: [
 					EnrichmentStatus.COMPLETE,
@@ -308,6 +303,32 @@ function companySizeSourceAllowed(sourceUrl: string, sites: string[]): boolean {
 	} catch {
 		return false;
 	}
+}
+
+function normalizedCitationUrl(value: string): string | null {
+	const url = httpUrl(value);
+	if (!url) return null;
+
+	try {
+		const parsed = new URL(url);
+		const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+		const port = parsed.port ? `:${parsed.port}` : "";
+		const isLinkedIn =
+			hostname === "linkedin.com" || hostname.endsWith(".linkedin.com");
+		const host = isLinkedIn ? "linkedin.com" : `${hostname}${port}`;
+		const path = parsed.pathname.replace(/\/+$/, "") || "/";
+		return `${host}${path}${parsed.search}`;
+	} catch {
+		return null;
+	}
+}
+
+function sourceUrlInCitations(sourceUrl: string, citations: string[]): boolean {
+	const source = normalizedCitationUrl(sourceUrl);
+	if (!source) return false;
+	return citations.some(
+		(citation) => normalizedCitationUrl(citation) === source,
+	);
 }
 
 function httpUrl(value: string | null): string | null {
