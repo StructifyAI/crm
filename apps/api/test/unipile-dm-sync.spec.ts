@@ -8,16 +8,31 @@ import type {
 } from "@crm/validation/unipile-api";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
+import { ConversionService } from "../src/currency/conversion.service";
+import { DealsService } from "../src/deals/deals.service";
 import { ExtrovertFilingService } from "../src/extrovert/extrovert-filing.service";
+import { FieldsService } from "../src/fields/fields.service";
 import { UnipileClient } from "../src/unipile/unipile.client";
 import { UnipileDmSyncService } from "../src/unipile/unipile-dm-sync.service";
+import { withDiscardedCrmEvents } from "./agent-trigger.stub";
 import { noContactEvents } from "./contact-events.stub";
 
 const suffix = process.env.TEST_RUN_ID ?? "unipile-spec";
 const ownerId = `unipile-owner-${suffix}`;
 const seatName = `Alex Seat ${suffix}`;
+const agent = {
+	withCrmEvents: withDiscardedCrmEvents,
+} as unknown as AgentTriggerService;
 const stamp = new ActivityStampService(db);
-const filing = new ExtrovertFilingService(db, {} as AgentTriggerService, stamp);
+const deals = new DealsService(
+	db,
+	agent,
+	stamp,
+	new ConversionService(db),
+	new FieldsService(db, agent),
+	noContactEvents,
+);
+const filing = new ExtrovertFilingService(db, agent, stamp, deals);
 const account: UnipileAccount = {
 	id: `account-${suffix}`,
 	name: seatName,
@@ -72,6 +87,12 @@ async function contact(slug: string) {
 async function clean() {
 	await db.activity.deleteMany({
 		where: { contact: { lastName: { startsWith: `unipile-${suffix}` } } },
+	});
+	await db.deal.deleteMany({
+		where: { company: { name: { startsWith: `UnipileCo ${suffix}` } } },
+	});
+	await db.company.deleteMany({
+		where: { name: { startsWith: `UnipileCo ${suffix}` } },
 	});
 	await db.contact.deleteMany({
 		where: { lastName: { startsWith: `unipile-${suffix}` } },
@@ -261,6 +282,129 @@ describe("Unipile DM sync", () => {
 			1,
 		);
 		expect(profileLookups).toEqual(["p-x", "p-y"]);
+	});
+
+	it("opens one ENGAGED deal on an inbound reply and none on outbound-only threads", async () => {
+		await db.appSetting.update({
+			where: { id: SETTINGS_ID },
+			data: { unipileDmState: Prisma.JsonNull },
+		});
+		const replyCompany = await db.company.create({
+			data: { name: `UnipileCo ${suffix}-reply` },
+			select: { id: true },
+		});
+		const outboundCompany = await db.company.create({
+			data: { name: `UnipileCo ${suffix}-outbound` },
+			select: { id: true },
+		});
+		const replyContact = await db.contact.create({
+			data: {
+				firstName: "Reply",
+				lastName: `unipile-${suffix}-reply`,
+				linkedinUrl: `https://www.linkedin.com/in/unipile-${suffix}-reply`,
+				companyId: replyCompany.id,
+				ownerId,
+			},
+			select: { id: true },
+		});
+		const outboundContact = await db.contact.create({
+			data: {
+				firstName: "Outbound",
+				lastName: `unipile-${suffix}-outbound`,
+				linkedinUrl: `https://www.linkedin.com/in/unipile-${suffix}-outbound`,
+				companyId: outboundCompany.id,
+				ownerId,
+			},
+			select: { id: true },
+		});
+		const chats: UnipileChat[] = [
+			{
+				id: "chat-reply",
+				type: 0,
+				timestamp: minutesAgo(5),
+				attendee_provider_id: "p-reply",
+			},
+			{
+				id: "chat-outbound",
+				type: 0,
+				timestamp: minutesAgo(4),
+				attendee_provider_id: "p-outbound",
+			},
+		];
+		const messages = {
+			"chat-reply": [
+				{
+					text: "Alex these are developed internally",
+					timestamp: minutesAgo(6),
+					is_sender: 0,
+				},
+			],
+			"chat-outbound": [
+				{ text: "Following up", timestamp: minutesAgo(5), is_sender: 1 },
+			],
+		};
+		const { client } = fakeUnipile({
+			chats,
+			messages,
+			relations: {
+				"p-reply": `unipile-${suffix}-reply`,
+				"p-outbound": `unipile-${suffix}-outbound`,
+			},
+			profiles: {},
+		});
+		const sync = new UnipileDmSyncService(
+			db,
+			client,
+			filing,
+			stamp,
+			noContactEvents,
+		);
+
+		await expect(sync.run()).resolves.toMatchObject({ filed: 2 });
+
+		const opened = await db.deal.findMany({
+			where: { companyId: { in: [replyCompany.id, outboundCompany.id] } },
+			select: { id: true, companyId: true, stage: true, name: true },
+		});
+		expect(opened).toEqual([
+			{
+				id: expect.any(String),
+				companyId: replyCompany.id,
+				stage: "ENGAGED",
+				name: `UnipileCo ${suffix}-reply`,
+			},
+		]);
+		const dealId = opened[0]?.id;
+		if (!dealId) throw new Error("expected the reply to open a deal");
+		expect(
+			await db.dealContact.findFirst({
+				where: { dealId, contactId: replyContact.id },
+			}),
+		).not.toBeNull();
+		expect(
+			await db.activity.findFirstOrThrow({
+				where: { contactId: replyContact.id },
+				select: { dealId: true },
+			}),
+		).toEqual({ dealId });
+		expect(
+			await db.activity.findFirstOrThrow({
+				where: { contactId: outboundContact.id },
+				select: { dealId: true },
+			}),
+		).toEqual({ dealId: null });
+
+		const newer = minutesAgo(1);
+		chats[0] = { ...chats[0], id: "chat-reply", type: 0, timestamp: newer };
+		messages["chat-reply"]?.push({
+			text: "Tell me more",
+			timestamp: newer,
+			is_sender: 0,
+		});
+		await expect(sync.run()).resolves.toMatchObject({ filed: 1 });
+		expect(await db.deal.count({ where: { companyId: replyCompany.id } })).toBe(
+			1,
+		);
 	});
 
 	it("resolves a new chat before the deferred backlog", async () => {

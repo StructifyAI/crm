@@ -17,6 +17,7 @@ import { BadRequestException } from "@nestjs/common";
 import { AgentAccessService } from "../src/agent/agent-access.service";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
+import type { DealsService } from "../src/deals/deals.service";
 import { ExtrovertClient } from "../src/extrovert/extrovert.client";
 import { ExtrovertController } from "../src/extrovert/extrovert.controller";
 import { ExtrovertService } from "../src/extrovert/extrovert.service";
@@ -50,7 +51,7 @@ const agent = {
 } as unknown as AgentTriggerService;
 
 const stamp = new ActivityStampService(db);
-const filing = new ExtrovertFilingService(db, agent, stamp);
+const filing = new ExtrovertFilingService(db, agent, stamp, {} as DealsService);
 const ingest = new ExtrovertIngestService(db, filing);
 const fieldsService = new FieldsService(db, agent);
 

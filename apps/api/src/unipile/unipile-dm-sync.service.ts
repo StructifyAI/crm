@@ -304,6 +304,7 @@ export class UnipileDmSyncService {
 		const linked = await this.filing.linkDeal({
 			activityId: activity.id,
 			contactId,
+			reply: !last.is_sender,
 		});
 		await this.stamp.touch(
 			{ contactId, companyId: linked.companyId, dealId: linked.dealId },
