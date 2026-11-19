@@ -1,4 +1,4 @@
-import { type Db } from "@crm/db";
+import { type Db, Prisma as PrismaNamespace } from "@crm/db";
 import type { CompanyDomainBackfillRow } from "@crm/validation/company-domain-backfill";
 import { Injectable } from "@nestjs/common";
 import { normalizeDomain } from "../companies/domain";
@@ -27,6 +27,7 @@ export class CompanyDomainBackfillService {
 			id: string;
 			domain: string;
 			previousDomain: string | null;
+			website: string;
 		}[] = [];
 
 		for (const id of ids) {
@@ -57,7 +58,12 @@ export class CompanyDomainBackfillService {
 				continue;
 			}
 
-			writes.push({ id, domain, previousDomain });
+			writes.push({
+				id,
+				domain,
+				previousDomain,
+				website: company.website,
+			});
 		}
 
 		if (writes.length === 0) return { updated: 0, skipped };
@@ -84,10 +90,27 @@ export class CompanyDomainBackfillService {
 			}
 			seenDomains.add(write.domain);
 
-			const result = await this.db.company.updateMany({
-				where: { id: write.id, domain: write.previousDomain, archivedAt: null },
-				data: { domain: write.domain },
-			});
+			let result: { count: number };
+			try {
+				result = await this.db.company.updateMany({
+					where: {
+						id: write.id,
+						domain: write.previousDomain,
+						website: write.website,
+						archivedAt: null,
+					},
+					data: { domain: write.domain },
+				});
+			} catch (cause) {
+				if (
+					cause instanceof PrismaNamespace.PrismaClientKnownRequestError &&
+					cause.code === "P2002"
+				) {
+					skipped += 1;
+					continue;
+				}
+				throw cause;
+			}
 
 			if (result.count === 1) updated += 1;
 			else skipped += 1;
