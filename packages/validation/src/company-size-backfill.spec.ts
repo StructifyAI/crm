@@ -76,6 +76,31 @@ describe("companySizeBackfillRow", () => {
 
 		expect(parsed.success).toBe(false);
 	});
+
+	it("accepts a clear with the previous size and no new size", () => {
+		const parsed = companySizeBackfillRow.parse({
+			companyId: "company-1",
+			sourceUrl: "https://www.linkedin.com/company/bad",
+			mode: "clear",
+			previousSourceUrl: "https://www.linkedin.com/company/bad",
+			previousEmployeeCount: null,
+			previousEmployeeRange: "1001 to 5000",
+		});
+
+		expect(parsed.mode).toBe("clear");
+	});
+
+	it("requires the previous size for clears", () => {
+		const parsed = companySizeBackfillRow.safeParse({
+			companyId: "company-1",
+			sourceUrl: "https://www.linkedin.com/company/bad",
+			mode: "clear",
+			previousSourceUrl: "https://www.linkedin.com/company/bad",
+			previousEmployeeRange: "1001 to 5000",
+		});
+
+		expect(parsed.success).toBe(false);
+	});
 });
 
 describe("companySizeBackfillRequest", () => {

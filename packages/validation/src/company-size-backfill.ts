@@ -16,17 +16,25 @@ export const companySizeBackfillRow = z
 		employeeCount,
 		employeeRange,
 		sourceUrl,
-		mode: z.enum(["fill", "correct"]).default("fill"),
+		mode: z.enum(["fill", "correct", "clear"]).default("fill"),
 		previousSourceUrl: sourceUrl.nullable().optional(),
 		previousEmployeeCount: employeeCount,
 		previousEmployeeRange: employeeRange,
 	})
-	.refine((row) => row.employeeCount != null || row.employeeRange != null, {
-		message: "employeeCount or employeeRange is required",
-		path: ["employeeRange"],
-	})
 	.refine(
-		(row) => row.mode !== "correct" || row.previousSourceUrl !== undefined,
+		(row) =>
+			row.mode === "clear" ||
+			row.employeeCount != null ||
+			row.employeeRange != null,
+		{
+			message: "employeeCount or employeeRange is required",
+			path: ["employeeRange"],
+		},
+	)
+	.refine(
+		(row) =>
+			(row.mode !== "correct" && row.mode !== "clear") ||
+			row.previousSourceUrl !== undefined,
 		{
 			message: "previousSourceUrl is required for corrections",
 			path: ["previousSourceUrl"],
@@ -34,7 +42,7 @@ export const companySizeBackfillRow = z
 	)
 	.refine(
 		(row) =>
-			row.mode !== "correct" ||
+			(row.mode !== "correct" && row.mode !== "clear") ||
 			(row.previousEmployeeCount !== undefined &&
 				row.previousEmployeeRange !== undefined),
 		{

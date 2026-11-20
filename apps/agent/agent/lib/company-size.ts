@@ -146,6 +146,41 @@ export function sizeFromAnswer(answer: Answer): CompanySize | null {
 export async function applyCompanySizeBackfill(
 	input: CompanySizeBackfillRow,
 ): Promise<string> {
+	if (input.mode === "clear") {
+		const updated = await db.$transaction(async (tx) => {
+			const result = await tx.company.updateMany({
+				where: {
+					id: input.companyId,
+					employeeSourceUrl:
+						input.previousSourceUrl === undefined
+							? undefined
+							: input.previousSourceUrl,
+					employeeCount:
+						input.previousEmployeeCount === undefined
+							? undefined
+							: input.previousEmployeeCount,
+					employeeRange:
+						input.previousEmployeeRange === undefined
+							? undefined
+							: input.previousEmployeeRange,
+				},
+				data: {
+					employeeCount: null,
+					employeeRange: null,
+					employeeSource: null,
+					employeeSourceUrl: null,
+					employeeCheckedAt: new Date(),
+				},
+			});
+			if (result.count > 0) {
+				await recomputeCompanyIcp(tx, { id: input.companyId });
+			}
+			return result;
+		});
+		if (updated.count === 0) return "Company changed before clearing size.";
+		return "Cleared company size.";
+	}
+
 	const employeeRange = normalizeEmployeeRange(input.employeeRange);
 	const employeeCount = input.employeeCount ?? null;
 	if (employeeCount === null && employeeRange === null) {
