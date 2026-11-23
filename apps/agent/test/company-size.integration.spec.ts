@@ -173,6 +173,152 @@ describe("applyCompanySizeBackfill", () => {
 		});
 	});
 
+	it("fills an exact count from Context.dev onto a company that has a range", async () => {
+		const company = await createCompany({ naics: true, countryCode: "US" });
+		await db.company.update({
+			where: { id: company.id },
+			data: {
+				employeeRange: "1001 to 5000",
+				employeeSource: EmployeeSource.WEB_SEARCH,
+				employeeSourceUrl: "https://www.linkedin.com/company/acme",
+			},
+		});
+
+		const outcome = await applyCompanySizeBackfill({
+			companyId: company.id,
+			employeeCount: 1539,
+			employeeRange: "1001 to 5000",
+			sourceUrl: "https://api.context.dev/v1/brand/retrieve?domain=acme.com",
+			mode: "fill",
+		});
+		const saved = await db.company.findUnique({
+			where: { id: company.id },
+			select: {
+				employeeCount: true,
+				employeeRange: true,
+				employeeSource: true,
+				employeeSourceUrl: true,
+				icp: true,
+			},
+		});
+
+		expect(outcome).toBe("Filled company size.");
+		expect(saved).toEqual({
+			employeeCount: 1539,
+			employeeRange: "1001 to 5000",
+			employeeSource: EmployeeSource.CONTEXT_DEV,
+			employeeSourceUrl:
+				"https://api.context.dev/v1/brand/retrieve?domain=acme.com",
+			icp: "ICP",
+		});
+	});
+
+	it("does not fill a Context.dev count that omits the range onto a ranged company", async () => {
+		const company = await createCompany();
+		await db.company.update({
+			where: { id: company.id },
+			data: { employeeRange: "51 to 200" },
+		});
+
+		const outcome = await applyCompanySizeBackfill({
+			companyId: company.id,
+			employeeCount: 120,
+			sourceUrl: "https://api.context.dev/v1/brand/retrieve?domain=acme.com",
+			mode: "fill",
+		});
+		const saved = await db.company.findUnique({
+			where: { id: company.id },
+			select: { employeeCount: true, employeeRange: true },
+		});
+
+		expect(outcome).toBe("Company already has employee size.");
+		expect(saved).toEqual({
+			employeeCount: null,
+			employeeRange: "51 to 200",
+		});
+	});
+
+	it("does not fill a Context.dev count over an existing count", async () => {
+		const company = await createCompany();
+		await db.company.update({
+			where: { id: company.id },
+			data: { employeeCount: 42, employeeRange: "11 to 50" },
+		});
+
+		const outcome = await applyCompanySizeBackfill({
+			companyId: company.id,
+			employeeCount: 120,
+			sourceUrl: "https://api.context.dev/v1/brand/retrieve?domain=acme.com",
+			mode: "fill",
+		});
+		const saved = await db.company.findUnique({
+			where: { id: company.id },
+			select: { employeeCount: true },
+		});
+
+		expect(outcome).toBe("Company already has employee size.");
+		expect(saved).toEqual({ employeeCount: 42 });
+	});
+
+	it("rejects a Context.dev count that disagrees with the stored range", async () => {
+		const company = await createCompany();
+		await db.company.update({
+			where: { id: company.id },
+			data: { employeeRange: "51 to 200" },
+		});
+
+		const outcome = await applyCompanySizeBackfill({
+			companyId: company.id,
+			employeeCount: 5000,
+			sourceUrl: "https://api.context.dev/v1/brand/retrieve?domain=acme.com",
+			mode: "fill",
+		});
+		const saved = await db.company.findUnique({
+			where: { id: company.id },
+			select: { employeeCount: true, employeeRange: true },
+		});
+
+		expect(outcome).toBe("Employee count and range disagree.");
+		expect(saved).toEqual({
+			employeeCount: null,
+			employeeRange: "51 to 200",
+		});
+	});
+
+	it("does not overwrite a stored range with a range-only Context.dev row", async () => {
+		const company = await createCompany();
+		await db.company.update({
+			where: { id: company.id },
+			data: {
+				employeeRange: "51 to 200",
+				employeeSource: EmployeeSource.WEB_SEARCH,
+				employeeSourceUrl: "https://www.linkedin.com/company/acme",
+			},
+		});
+
+		const outcome = await applyCompanySizeBackfill({
+			companyId: company.id,
+			employeeRange: "201 to 500",
+			sourceUrl: "https://api.context.dev/v1/brand/retrieve?domain=acme.com",
+			mode: "fill",
+		});
+		const saved = await db.company.findUnique({
+			where: { id: company.id },
+			select: {
+				employeeCount: true,
+				employeeRange: true,
+				employeeSource: true,
+			},
+		});
+
+		expect(outcome).toBe("Company already has employee size.");
+		expect(saved).toEqual({
+			employeeCount: null,
+			employeeRange: "51 to 200",
+			employeeSource: EmployeeSource.WEB_SEARCH,
+		});
+	});
+
 	it("corrects a bad fill only while the previous source matches", async () => {
 		const company = await createCompany();
 		await db.company.update({
