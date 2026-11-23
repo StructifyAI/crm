@@ -213,7 +213,7 @@ describe("applyCompanySizeBackfill", () => {
 		});
 	});
 
-	it("keeps the existing range when a Context.dev row has no range", async () => {
+	it("does not fill a Context.dev count that omits the range onto a ranged company", async () => {
 		const company = await createCompany();
 		await db.company.update({
 			where: { id: company.id },
@@ -228,18 +228,13 @@ describe("applyCompanySizeBackfill", () => {
 		});
 		const saved = await db.company.findUnique({
 			where: { id: company.id },
-			select: {
-				employeeCount: true,
-				employeeRange: true,
-				employeeSource: true,
-			},
+			select: { employeeCount: true, employeeRange: true },
 		});
 
-		expect(outcome).toBe("Filled company size.");
+		expect(outcome).toBe("Company already has employee size.");
 		expect(saved).toEqual({
-			employeeCount: 120,
+			employeeCount: null,
 			employeeRange: "51 to 200",
-			employeeSource: EmployeeSource.CONTEXT_DEV,
 		});
 	});
 

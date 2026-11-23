@@ -258,7 +258,7 @@ export async function applyCompanySizeBackfill(
 	const updated = await db.$transaction(async (tx) => {
 		const result = await tx.company.updateMany({
 			where:
-				contextDev && employeeCount !== null
+				contextDev && employeeCount !== null && employeeRange !== null
 					? { id: input.companyId, employeeCount: null }
 					: {
 							id: input.companyId,
