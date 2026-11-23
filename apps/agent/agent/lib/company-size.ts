@@ -200,6 +200,22 @@ export async function applyCompanySizeBackfill(
 		return "Source is not a LinkedIn company page.";
 	}
 
+	if (contextDev && employeeRange === null && employeeCount !== null) {
+		const current = await db.company.findUnique({
+			where: { id: input.companyId },
+			select: { employeeCount: true, employeeRange: true },
+		});
+		const willWrite = input.mode !== "fill" || current?.employeeCount === null;
+		const stored = parseEmployeeRange(current?.employeeRange);
+		if (
+			willWrite &&
+			stored &&
+			(employeeCount < stored.lo || employeeCount > stored.hi)
+		) {
+			return "Employee count and range disagree.";
+		}
+	}
+
 	const data = {
 		employeeCount,
 		...(contextDev && employeeRange === null ? {} : { employeeRange }),
@@ -241,13 +257,14 @@ export async function applyCompanySizeBackfill(
 
 	const updated = await db.$transaction(async (tx) => {
 		const result = await tx.company.updateMany({
-			where: contextDev
-				? { id: input.companyId, employeeCount: null }
-				: {
-						id: input.companyId,
-						employeeCount: null,
-						employeeRange: null,
-					},
+			where:
+				contextDev && employeeCount !== null
+					? { id: input.companyId, employeeCount: null }
+					: {
+							id: input.companyId,
+							employeeCount: null,
+							employeeRange: null,
+						},
 			data,
 		});
 		if (result.count > 0) {
@@ -393,7 +410,11 @@ function personalLinkedInUrl(value: string): boolean {
 
 function contextDevBrandUrl(value: string): boolean {
 	try {
-		return new URL(value).hostname.toLowerCase() === "api.context.dev";
+		const url = new URL(value);
+		return (
+			url.hostname.toLowerCase() === "api.context.dev" &&
+			url.searchParams.get("domain") !== null
+		);
 	} catch {
 		return false;
 	}
