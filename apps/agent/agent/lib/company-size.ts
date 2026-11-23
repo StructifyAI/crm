@@ -195,14 +195,17 @@ export async function applyCompanySizeBackfill(
 	}
 
 	const sourceUrl = httpUrl(input.sourceUrl);
-	if (!sourceUrl || !linkedinCompanyUrl(sourceUrl)) {
+	const contextDev = sourceUrl !== null && contextDevBrandUrl(sourceUrl);
+	if (!sourceUrl || (!contextDev && !linkedinCompanyUrl(sourceUrl))) {
 		return "Source is not a LinkedIn company page.";
 	}
 
 	const data = {
 		employeeCount,
-		employeeRange,
-		employeeSource: EmployeeSource.WEB_SEARCH,
+		...(contextDev && employeeRange === null ? {} : { employeeRange }),
+		employeeSource: contextDev
+			? EmployeeSource.CONTEXT_DEV
+			: EmployeeSource.WEB_SEARCH,
 		employeeSourceUrl: sourceUrl,
 		employeeCheckedAt: new Date(),
 	};
@@ -238,7 +241,13 @@ export async function applyCompanySizeBackfill(
 
 	const updated = await db.$transaction(async (tx) => {
 		const result = await tx.company.updateMany({
-			where: { id: input.companyId, employeeCount: null, employeeRange: null },
+			where: contextDev
+				? { id: input.companyId, employeeCount: null }
+				: {
+						id: input.companyId,
+						employeeCount: null,
+						employeeRange: null,
+					},
 			data,
 		});
 		if (result.count > 0) {
@@ -377,6 +386,14 @@ function personalLinkedInUrl(value: string): boolean {
 			(host === "linkedin.com" || host.endsWith(".linkedin.com")) &&
 			url.pathname.toLowerCase().startsWith("/in/")
 		);
+	} catch {
+		return false;
+	}
+}
+
+function contextDevBrandUrl(value: string): boolean {
+	try {
+		return new URL(value).hostname.toLowerCase() === "api.context.dev";
 	} catch {
 		return false;
 	}
