@@ -1,6 +1,7 @@
 import "@crm/env/load";
 
 import { PrismaPg } from "@prisma/adapter-pg";
+import { CLIENT } from "./client-config";
 import { type Prisma, PrismaClient } from "./generated/prisma/client";
 
 const connectionString =
@@ -100,7 +101,7 @@ const logDefinitions: Prisma.LogDefinition[] = [
 
 const createPrismaClient = () => {
 	const client = new PrismaClient({
-		adapter: new PrismaPg({ connectionString }),
+		adapter: new PrismaPg({ connectionString, ...CLIENT.pool }),
 		log: logDefinitions,
 	});
 
