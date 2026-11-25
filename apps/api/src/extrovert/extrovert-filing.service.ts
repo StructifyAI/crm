@@ -4,6 +4,7 @@ import {
 	profileKey,
 	sameLinkedinProfile,
 } from "@crm/db/contact-match";
+import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import type { ExtrovertWebhookEvent } from "@crm/validation/extrovert-webhook";
 import {
 	linkedinSlug,
@@ -19,6 +20,7 @@ import {
 import { intakeContact } from "../crm/contact-intake";
 import { singleOpenDealId } from "../crm/single-open-deal";
 import { InjectDatabase } from "../database/database.constants";
+import { DealsService } from "../deals/deals.service";
 
 type ResolveContactInput = {
 	linkedinUrl: string;
@@ -49,12 +51,14 @@ export class ExtrovertFilingService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly agent: AgentTriggerService,
 		private readonly stamp: ActivityStampService,
+		private readonly deals: DealsService,
 		@Optional() private readonly companies?: CompanyDirectoryService,
 	) {}
 
 	async linkDeal(input: {
 		activityId: string;
 		contactId: string;
+		reply?: boolean;
 	}): Promise<{ dealId: string | null; companyId: string | null }> {
 		const contact = await this.db.contact.findUnique({
 			where: { id: input.contactId },
@@ -70,7 +74,10 @@ export class ExtrovertFilingService {
 			return { dealId: null, companyId: null };
 		}
 
-		const dealId = await singleOpenDealId(this.db, contact.companyId);
+		let dealId = await singleOpenDealId(this.db, contact.companyId);
+		if (!dealId && input.reply) {
+			dealId = await this.openDealForReply(input.contactId, contact.companyId);
+		}
 		if (dealId) {
 			await this.db.activity.updateMany({
 				where: { id: input.activityId, dealId: null },
@@ -78,6 +85,38 @@ export class ExtrovertFilingService {
 			});
 		}
 		return { dealId, companyId: contact.companyId };
+	}
+
+	private async openDealForReply(
+		contactId: string,
+		companyId: string,
+	): Promise<string | null> {
+		const existing = await this.db.deal.findFirst({
+			where: {
+				archivedAt: null,
+				stage: { in: [...OPEN_DEAL_STAGES] },
+				OR: [{ companyId }, { contacts: { some: { contactId } } }],
+			},
+			orderBy: [{ lastActivityAt: "desc" }, { createdAt: "desc" }],
+			select: { id: true },
+		});
+		if (existing) return existing.id;
+
+		const author = await this.authorFor(contactId, null);
+		if (!author) return null;
+		const company = await this.db.company.findUnique({
+			where: { id: companyId },
+			select: { name: true },
+		});
+		if (!company) return null;
+		const deal = await this.deals.create({
+			name: company.name,
+			companyId,
+			ownerId: author,
+			stage: "ENGAGED",
+		});
+		await this.deals.attachContact({ dealId: deal.id, contactId });
+		return deal.id;
 	}
 
 	async resolveContact(
